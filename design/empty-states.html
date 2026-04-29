@@ -1,0 +1,963 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Echo · 空状态合集</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ayin-900: #27500A;
+    --ayin-700: #3B6D11;
+    --ayin-600: #639922;
+    --ayin-400: #8FBC57;
+    --ayin-300: #C0DD97;
+    --ayin-100: #EAF3DE;
+    --ayin-50:  #F5FAED;
+
+    --bg: #FFFFFF;
+    --bg-2: #F7F7F5;
+    --bg-3: #EDEDE8;
+    --text: #1A1A1A;
+    --text-2: #5C5C5A;
+    --text-3: #999996;
+    --border: rgba(0,0,0,0.08);
+
+    --warn: #B86B3E;
+    --danger: #C04A3A;
+
+    --sans: "Noto Sans SC", -apple-system, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", monospace;
+    --serif: "Noto Serif SC", Georgia, serif;
+    --paper: #FBFBF6;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    background: var(--bg-3);
+    font-family: var(--sans);
+    color: var(--text);
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    padding: 32px 0;
+  }
+
+  h1.page-title {
+    text-align: center;
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 24px;
+    color: var(--text);
+    margin-bottom: 8px;
+  }
+  .page-sub {
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-3);
+    letter-spacing: 2px;
+    margin-bottom: 36px;
+  }
+
+  /* 每个 case 的容器 */
+  .case {
+    max-width: 900px;
+    margin: 0 auto 56px;
+    padding: 0 24px;
+  }
+  .case-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding-left: 4px;
+  }
+  .case-num {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 1px;
+    color: var(--ayin-600);
+    font-weight: 500;
+  }
+  .case-title {
+    font-size: 16px;
+    font-weight: 500;
+  }
+  .case-desc {
+    font-size: 12.5px;
+    color: var(--text-2);
+    margin-bottom: 16px;
+    line-height: 1.6;
+    padding-left: 4px;
+    font-family: var(--serif);
+    font-style: italic;
+  }
+
+  /* 模拟 app 框 */
+  .app {
+    width: 440px;
+    height: 720px;
+    background: var(--bg);
+    border-radius: 14px;
+    box-shadow: 0 12px 32px rgba(0, 40, 0, 0.1);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    margin: 0 auto;
+  }
+
+  /* 顶栏 · 各页通用 */
+  .hdr {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    border-bottom: 0.5px solid var(--border);
+    background: var(--bg);
+  }
+  .avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--ayin-600);
+    color: var(--ayin-100);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 500;
+    font-size: 14px;
+    flex-shrink: 0;
+    position: relative;
+  }
+  .avatar.dim { background: var(--bg-3); color: var(--text-3); }
+  .avatar.dim::after { display: none; }
+  .avatar::after {
+    content: '';
+    position: absolute;
+    bottom: 0; right: 0;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--ayin-600);
+    border: 2.5px solid var(--bg);
+  }
+  .hdr-info { flex: 1; min-width: 0; }
+  .hdr-name { font-weight: 500; font-size: 14px; }
+  .hdr-status {
+    color: var(--text-2);
+    font-size: 11px;
+    margin-top: 2px;
+    font-family: var(--mono);
+    letter-spacing: 0.3px;
+  }
+  .back-btn {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-2);
+    padding: 6px 10px;
+    background: transparent;
+    border: 0;
+    letter-spacing: 1px;
+    border-radius: 4px;
+  }
+  .hdr-title {
+    flex: 1;
+    text-align: center;
+    font-family: var(--serif);
+    font-size: 15px;
+    font-weight: 500;
+  }
+  .hdr-title small {
+    display: block;
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-3);
+    letter-spacing: 2px;
+    margin-top: 2px;
+    font-weight: 400;
+  }
+  .hdr-spacer { width: 56px; }
+
+  /* === 通用空态卡片样式 === */
+  .empty-stage {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 32px;
+    background: var(--bg-2);
+  }
+  .empty-card {
+    text-align: center;
+    max-width: 320px;
+  }
+  .empty-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--ayin-100);
+    color: var(--ayin-700);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    margin-bottom: 18px;
+  }
+  .empty-quote {
+    font-family: var(--serif);
+    font-size: 16px;
+    line-height: 1.85;
+    color: var(--ayin-900);
+    margin-bottom: 18px;
+    letter-spacing: 0.3px;
+  }
+  .empty-sub {
+    font-size: 12.5px;
+    color: var(--text-2);
+    line-height: 1.7;
+    margin-bottom: 22px;
+    font-family: var(--serif);
+    font-style: italic;
+  }
+  .empty-cta {
+    display: inline-block;
+    background: var(--ayin-600);
+    color: white;
+    font-size: 12.5px;
+    font-family: var(--mono);
+    letter-spacing: 1.5px;
+    padding: 10px 20px;
+    border: 0;
+    border-radius: 20px;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .empty-cta.sec {
+    background: transparent;
+    color: var(--text-2);
+    border: 0.5px solid var(--border);
+    margin-left: 8px;
+  }
+  .empty-sign {
+    margin-top: 24px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-3);
+    letter-spacing: 1.5px;
+  }
+
+  /* 输入栏占位 · 禁用态 */
+  .input-disabled {
+    padding: 12px 16px;
+    border-top: 0.5px solid var(--border);
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .input-disabled .ph {
+    flex: 1;
+    padding: 10px 14px;
+    border: 0.5px solid var(--border);
+    border-radius: 20px;
+    color: var(--text-3);
+    font-size: 13px;
+    background: var(--bg-2);
+  }
+  .input-disabled .voice {
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    background: var(--bg-3);
+    border: 0;
+    flex-shrink: 0;
+  }
+
+  /* 错误 banner */
+  .err-banner {
+    background: #FBEAE7;
+    color: #993C1D;
+    padding: 8px 16px;
+    font-size: 12px;
+    text-align: center;
+    border-bottom: 0.5px solid rgba(216,90,48,0.3);
+    font-family: var(--serif);
+    font-style: italic;
+  }
+  .err-banner a {
+    color: #993C1D;
+    font-style: normal;
+    text-decoration: underline;
+    margin-left: 4px;
+  }
+
+  /* 引导态(在普通页上覆盖一段引导文字) */
+  .guide-bar {
+    background: var(--ayin-50);
+    color: var(--ayin-900);
+    padding: 14px 18px;
+    border-bottom: 0.5px solid rgba(99,153,34,0.2);
+    font-family: var(--serif);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .guide-bar b {
+    font-weight: 500;
+    color: var(--ayin-700);
+  }
+
+  /* yinyi 纸张样式(简化) */
+  .paper {
+    flex: 1;
+    background: var(--paper);
+    background-image: radial-gradient(circle at 1px 1px, rgba(99, 80, 40, 0.04) 0.5px, transparent 0);
+    background-size: 14px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px;
+  }
+
+  /* settings 引导段 */
+  .settings-mock {
+    flex: 1;
+    overflow-y: auto;
+    background: var(--bg);
+  }
+  .sm-section {
+    padding: 22px;
+    border-bottom: 0.5px solid var(--border);
+  }
+  .sm-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--ayin-700);
+    margin-bottom: 12px;
+  }
+  .sm-input {
+    width: 100%;
+    padding: 9px 12px;
+    border: 0.5px solid var(--border);
+    border-radius: 8px;
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--bg-2);
+    color: var(--text-3);
+    margin-bottom: 8px;
+  }
+  .sm-input.err { border-color: var(--danger); background: #FCEBEB; }
+  .sm-status-err {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--danger);
+    margin-top: 6px;
+  }
+  .sm-status-err .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--danger);
+  }
+
+  /* queue 收藏 tab · 简化骨架 */
+  .tabs-mock {
+    display: flex;
+    padding: 0 18px;
+    border-bottom: 0.5px solid var(--border);
+    background: var(--bg);
+    gap: 4px;
+  }
+  .tab-mock {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    padding: 12px 14px;
+    color: var(--text-3);
+  }
+  .tab-mock.active {
+    color: var(--ayin-700);
+    border-bottom: 1.5px solid var(--ayin-600);
+  }
+
+  /* portrait 骨架(空主页) */
+  .portrait-empty {
+    background: var(--ayin-50);
+    padding: 32px 26px;
+  }
+  .pe-avatar {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    background: var(--ayin-600);
+    color: var(--ayin-100);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 500;
+    font-size: 22px;
+    margin-bottom: 18px;
+  }
+  .pe-text {
+    font-family: var(--serif);
+    font-size: 15px;
+    line-height: 1.95;
+    color: var(--ayin-900);
+    letter-spacing: 0.3px;
+    margin-bottom: 16px;
+  }
+  .pe-cta {
+    background: var(--ayin-600);
+    color: white;
+    font-size: 12.5px;
+    font-family: var(--mono);
+    letter-spacing: 1.5px;
+    padding: 9px 18px;
+    border: 0;
+    border-radius: 20px;
+  }
+
+  /* portrait 加载中 */
+  .skeleton-line {
+    height: 14px;
+    background: linear-gradient(90deg, var(--bg-3) 0%, var(--bg-2) 50%, var(--bg-3) 100%);
+    background-size: 200% 100%;
+    border-radius: 4px;
+    margin-bottom: 10px;
+    animation: shimmer 1.6s ease-in-out infinite;
+  }
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+</style>
+</head>
+<body>
+
+<h1 class="page-title">Echo · 空状态合集</h1>
+<div class="page-sub">E M P T Y &nbsp; S T A T E S</div>
+
+<!-- ============================================ -->
+<!-- ① CHAT · 首启动 · 还没填 LLM -->
+<!-- ============================================ -->
+<div class="case">
+  <div class="case-head">
+    <span class="case-num">① P0</span>
+    <span class="case-title">Chat · 首启动 · 还没填 LLM</span>
+  </div>
+  <div class="case-desc">用户首次打开 app · LLM 配置为空 · Echo 没办法说话。引导用户去设置页填 baseUrl + apiKey。</div>
+
+  <div class="app">
+    <header class="hdr">
+      <div class="avatar dim">E</div>
+      <div class="hdr-info">
+        <div class="hdr-name">Echo</div>
+        <div class="hdr-status" style="color: var(--text-3);">还没醒来 · 配置中</div>
+      </div>
+    </header>
+
+    <div class="empty-stage">
+      <div class="empty-card">
+        <div class="empty-icon" style="background: var(--bg-3); color: var(--text-3);">…</div>
+        <p class="empty-quote">嗨。在我们说话之前,<br>你得先告诉我从哪儿连过来。</p>
+        <p class="empty-sub">DeepSeek、Kimi、智谱、OpenRouter…… 任何 OpenAI 兼容的服务都行。</p>
+        <button class="empty-cta">去 设 置 页</button>
+      </div>
+    </div>
+
+    <div class="input-disabled">
+      <span class="ph">先填好 LLM 才能说话…</span>
+      <button class="voice"></button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ -->
+<!-- ② CHAT · 填了 LLM 但还没导歌单 -->
+<!-- ============================================ -->
+<div class="case">
+  <div class="case-head">
+    <span class="case-num">② P1</span>
+    <span class="case-title">Chat · 填了 LLM 但还没导歌单</span>
+  </div>
+  <div class="case-desc">Echo 醒了,但还不认识你。引导用户导入歌单。</div>
+
+  <div class="app">
+    <header class="hdr">
+      <div class="avatar">E</div>
+      <div class="hdr-info">
+        <div class="hdr-name">Echo</div>
+        <div class="hdr-status">在线 · 但还不认识你</div>
+      </div>
+    </header>
+
+    <div class="empty-stage">
+      <div class="empty-card">
+        <div class="empty-icon">♪</div>
+        <p class="empty-quote">"嗨,我醒了——<br>但我还没听过你的歌。<br>给我看看?"</p>
+        <p class="empty-sub">从网易云导出的歌单 JSON · 或者直接和我聊几句也行</p>
+        <button class="empty-cta">导 入 歌 单</button>
+        <button class="empty-cta sec">先 聊 聊</button>
+        <div class="empty-sign">— Echo</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ -->
+<!-- ③ CHAT · 导了歌单 · 第一次见面 -->
+<!-- ============================================ -->
+<div class="case">
+  <div class="case-head">
+    <span class="case-num">③ P0 · 关键时刻</span>
+    <span class="case-title">Chat · 第一次见面</span>
+  </div>
+  <div class="case-desc">Echo 读完歌单,主动开口。这是产品最重要的"第一印象"瞬间——决定用户对 Echo 是否感兴趣。</div>
+
+  <div class="app">
+    <header class="hdr">
+      <div class="avatar">E</div>
+      <div class="hdr-info">
+        <div class="hdr-name">Echo</div>
+        <div class="hdr-status">在线 · 刚读完你的歌单</div>
+      </div>
+    </header>
+
+    <div style="flex: 1; overflow-y: auto; padding: 20px 18px; background: var(--bg-2); display: flex; flex-direction: column; gap: 14px;">
+      <div style="align-self: flex-start; max-width: 88%;">
+        <div style="background: var(--bg); padding: 12px 15px; border-radius: 14px; border-top-left-radius: 4px; line-height: 1.75; font-size: 13.5px;">
+          我粗看了你的歌单——你听得挺杂:林俊杰、海洋Bo、一点 Pink 和 Bieber,不偏冷门的那种。共同点是旋律性强、情感直白。
+          <br><br>
+          有几个艺人我还不熟(陈默之、银河快递),改天聊聊。你说喜欢 K-pop,具体是哪几个组合?
+        </div>
+        <div style="font-size: 10px; color: var(--text-3); margin: 4px 0 0 14px; font-family: var(--mono); letter-spacing: 0.5px;">刚刚</div>
+      </div>
+    </div>
+
+    <div class="input-disabled">
+      <span class="ph" style="color: var(--text-3);">和 Echo 说点什么...</span>
+      <button class="voice" style="background: var(--ayin-600);"></button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ -->
+<!-- ④ PROFILE · 还没导歌单 -->
+<!-- ============================================ -->
+<div class="case">
+  <div class="case-head">
+    <span class="case-num">④ P0</span>
+    <span class="case-title">Profile · 还没导歌单</span>
+  </div>
+  <div class="case-desc">用户点头像进主页,但 TasteProfile 是空的。Echo 用衬线说一句"我们还没聊过呢"。</div>
+
+  <div class="app">
+    <header class="hdr">
+      <button class="back-btn">◁ 返回</button>
+      <div class="hdr-title">
+        Echo
+        <small>P R O F I L E</small>
+      </div>
+      <button class="back-btn" style="font-size: 14px;">⚙</button>
+    </header>
+
+    <div class="portrait-empty" style="flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center;">
+      <div class="pe-avatar">E</div>
+      <p class="pe-text">
+        我还没听过你的歌呢。<br>
+        你给我导一份歌单,<br>
+        我读一下,然后我们再正经聊。
+      </p>
+      <button class="pe-cta">导 入 歌 单</button>
+      <div class="empty-sign" style="margin-top: 18px;">— Echo · 等你</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ -->
+<!-- ⑤ PROFILE · portrait 生成中 -->
+<!-- ============================================ -->
+<div class="case">
+  <div class="case-head">
+    <span class="case-num">⑤ P1</span>
+    <span class="case-title">Profile · portrait 生成中</span>
+  </div>
+  <div class="case-desc">导入完歌单后 LLM 还在写画像。一行 italic 文字 + 骨架,比纯空白好。</div>
+
+  <div class="app">
+    <header class="hdr">
+      <button class="back-btn">◁ 返回</button>
+      <div class="hdr-title">
+        Echo
+        <small>P R O F I L E</small>
+      </div>
+      <button class="back-btn" style="font-size: 14px;">⚙</button>
+    </header>
+
+    <div style="flex: 1; overflow-y: auto;">
+      <section class="portrait-empty">
+        <div class="pe-avatar">E</div>
+        <p class="pe-text" style="font-style: italic; color: var(--ayin-700); margin-bottom: 22px;">
+          我正在读你的歌单……第一遍读得慢一点,你别催。
+        </p>
+        <div class="skeleton-line" style="width: 100%;"></div>
+        <div class="skeleton-line" style="width: 88%;"></div>
+        <div class="skeleton-line" style="width: 70%;"></div>
+        <div style="margin-top: 14px; font-family: var(--mono); font-size: 10px; color: var(--text-3); letter-spacing: 1.5px; text-align: right;">— 大概再等 20 秒</div>
+      </section>
+
+      <section style="padding: 22px;">
+        <div style="font-family: var(--mono); font-size: 10px; letter-spacing: 2.5px; color: var(--text-3); margin-bottom: 14px;">S I G N A T U R E · 7</div>
+        <div class="skeleton-line" style="width: 60%; height: 18px;"></div>
+        <div class="skeleton-line" style="width: 80%;"></div>
+        <div class="skeleton-line" style="width: 70%;"></div>
+        <div class="skeleton-line" style="width: 75%;"></div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ -->
+<!-- ⑥ YINYI · 第一天用 · 一篇音忆都没 -->
+<!-- ============================================ -->
+<div class="case">
+  <div class="case-head">
+    <span class="case-num">⑥ P0</span>
+    <span class="case-title">Yinyi · 第一天 · 还没写过音忆</span>
+  </div>
+  <div class="case-desc">音忆页"出生"时的样子。告诉用户什么时候第一次见面。</div>
+
+  <div class="app">
+    <header class="hdr">
+      <button class="back-btn">◁ 返回</button>
+      <div class="hdr-title">
+        音 忆
+        <small>Y I N Y I</small>
+      </div>
+      <div style="display: flex; gap: 6px;">
+        <button class="back-btn" style="font-size: 12px;">◷</button>
+        <button class="back-btn" style="font-size: 12px;">⤴</button>
+      </div>
+    </header>
+
+    <div class="paper">
+      <div style="text-align: center; max-width: 280px;">
+        <p style="font-family: var(--serif); font-size: 17px; line-height: 1.95; color: var(--ayin-900); margin-bottom: 16px; letter-spacing: 0.3px;">
+          我还没给你写过音忆。<br>
+          每天 22 点我会坐下来记录关于你的一些小观察——<br>
+          <span style="color: var(--ayin-600);">今晚见面。</span>
+        </p>
+        <p style="font-size: 12px; color: var(--text-3); font-family: var(--serif); font-style: italic; margin-bottom: 18px;">
+          (在设置里可以改时间)
+        </p>
+        <div style="font-family: var(--mono); font-size: 10px; color: var(--text-3); letter-spacing: 1.5px;">— E C H O</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ -->
+<!-- ⑦ YINYI · absent · 没用 app 的那天 -->
+<!-- ============================================ -->
+<div class="case">
+  <div class="case-head">
+    <span class="case-num">⑦ P0</span>
+    <span class="case-title">Yinyi · 翻到一个"没见到面"的日子</span>
+  </div>
+  <div class="case-desc">absent 状态。用户翻到那天 Echo 没写音忆——因为用户那天没用 app。</div>
+
+  <div class="app">
+    <header class="hdr">
+      <button class="back-btn">◁ 返回</button>
+      <div class="hdr-title">
+        音 忆
+        <small>Y I N Y I</small>
+      </div>
+      <div style="display: flex; gap: 6px;">
+        <button class="back-btn" style="font-size: 12px;">◷</button>
+        <button class="back-btn" style="font-size: 12px;">⤴</button>
+      </div>
+    </header>
+
+    <div class="paper" style="flex-direction: column;">
+      <div style="font-family: var(--mono); font-size: 10px; color: var(--text-3); letter-spacing: 2.5px; margin-bottom: 28px;">2 0 2 6 . 0 4 . 1 8 &nbsp;·&nbsp; 周五</div>
+      <div style="text-align: center; max-width: 260px;">
+        <p style="font-family: var(--serif); font-size: 17px; line-height: 2; color: var(--ayin-900); letter-spacing: 0.3px;">
+          那天我们没见。<br>
+          我等了你一会儿。
+        </p>
+        <div style="font-family: var(--mono); font-size: 10px; color: var(--text-3); letter-spacing: 1.5px; margin-top: 28px;">— E C H O</div>
+      </div>
+    </div>
+
+    <div style="padding: 10px 18px; border-top: 0.5px solid var(--border); background: var(--bg); display: flex; align-items: center; justify-content: space-between; font-family: var(--mono); font-size: 10px; color: var(--text-3); letter-spacing: 1px;">
+      <span>‹ 前一天</span>
+      <span style="color: var(--ayin-700);">absent</span>
+      <span>后一天 ›</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ -->
+<!-- ⑧ YINYI · failed -->
+<!-- ============================================ -->
+<div class="case">
+  <div class="case-head">
+    <span class="case-num">⑧ P1</span>
+    <span class="case-title">Yinyi · 当天音忆生成失败</span>
+  </div>
+  <div class="case-desc">LLM 出错时,不留空音忆,留一个可重生成的占位。</div>
+
+  <div class="app">
+    <header class="hdr">
+      <button class="back-btn">◁ 返回</button>
+      <div class="hdr-title">
+        音 忆
+        <small>Y I N Y I</small>
+      </div>
+      <div style="display: flex; gap: 6px;">
+        <button class="back-btn" style="font-size: 12px;">◷</button>
+        <button class="back-btn" style="font-size: 12px;">⤴</button>
+      </div>
+    </header>
+
+    <div class="paper" style="flex-direction: column;">
+      <div style="font-family: var(--mono); font-size: 10px; color: var(--text-3); letter-spacing: 2.5px; margin-bottom: 28px;">2 0 2 6 . 0 4 . 2 4 &nbsp;·&nbsp; 周五</div>
+      <div style="text-align: center; max-width: 280px;">
+        <p style="font-family: var(--serif); font-size: 16px; line-height: 1.95; color: var(--ayin-900); letter-spacing: 0.3px;">
+          那天的音忆我没写好——<br>
+          可能是我那时候<span style="font-style: italic; color: var(--text-2);">走神了</span>。<br>
+          要不你让我重写一次?
+        </p>
+        <button class="empty-cta" style="margin-top: 22px;">重 新 生 成</button>
+        <div style="font-family: var(--mono); font-size: 10px; color: var(--text-3); letter-spacing: 1.5px; margin-top: 24px;">— E C H O</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ -->
+<!-- ⑩ QUEUE · 队列空 -->
+<!-- ============================================ -->
+<div class="case">
+  <div class="case-head">
+    <span class="case-num">⑩ P0</span>
+    <span class="case-title">Queue · 列表空</span>
+  </div>
+  <div class="case-desc">没在播也没排队。引导用户去和 Echo 聊天。</div>
+
+  <div class="app">
+    <header class="hdr">
+      <button class="back-btn">◁ 返回</button>
+      <div class="hdr-title">
+        列 表
+        <small>Q U E U E</small>
+      </div>
+      <button class="back-btn" style="color: var(--text-3);">清 空</button>
+    </header>
+
+    <nav class="tabs-mock">
+      <span class="tab-mock active">正 在 播 放</span>
+      <span class="tab-mock">E C H O 备 选</span>
+      <span class="tab-mock">收 藏</span>
+    </nav>
+
+    <div class="empty-stage">
+      <div class="empty-card">
+        <div class="empty-icon" style="background: var(--bg-3); color: var(--text-3);">♫</div>
+        <p class="empty-quote">列表空着——<br>和我说点想听的?</p>
+        <p class="empty-sub">"放点慢的"、"我想睡了"、"来点热闹"…… 都行。</p>
+        <button class="empty-cta">去 主 对 话</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ -->
+<!-- ⑪ QUEUE · 收藏 tab 空 -->
+<!-- ============================================ -->
+<div class="case">
+  <div class="case-head">
+    <span class="case-num">⑪ P1</span>
+    <span class="case-title">Queue · 收藏 tab · 还没收藏过</span>
+  </div>
+  <div class="case-desc">v0.2 才会有收藏功能。这个空态是用户切到收藏 tab 时见到的。</div>
+
+  <div class="app">
+    <header class="hdr">
+      <button class="back-btn">◁ 返回</button>
+      <div class="hdr-title">
+        列 表
+        <small>Q U E U E</small>
+      </div>
+      <button class="back-btn" style="color: var(--text-3);">清 空</button>
+    </header>
+
+    <nav class="tabs-mock">
+      <span class="tab-mock">正 在 播 放</span>
+      <span class="tab-mock">E C H O 备 选</span>
+      <span class="tab-mock active">收 藏</span>
+    </nav>
+
+    <div class="empty-stage">
+      <div class="empty-card">
+        <div class="empty-icon">♡</div>
+        <p class="empty-quote">还没收藏过歌呢。</p>
+        <p class="empty-sub">在主对话里听到喜欢的,点歌曲卡片右上的 ♡,我帮你留着。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ -->
+<!-- ⑫ SETTINGS · 首启动引导态 -->
+<!-- ============================================ -->
+<div class="case">
+  <div class="case-head">
+    <span class="case-num">⑫ P0</span>
+    <span class="case-title">Settings · 首启动引导态</span>
+  </div>
+  <div class="case-desc">首次进设置页,顶部一段引导文字。填好测试通过后引导消失。</div>
+
+  <div class="app">
+    <header class="hdr">
+      <button class="back-btn" style="visibility: hidden;">◁ 返回</button>
+      <div class="hdr-title">
+        设 置
+        <small>S E T T I N G S</small>
+      </div>
+      <div style="width: 56px;"></div>
+    </header>
+
+    <div class="settings-mock">
+      <div class="guide-bar">
+        <b>嗨,我是 Echo。</b>在我们开始之前,你需要给我一个 LLM 端点——这样我才能"说话"。<br>
+        DeepSeek 一个月几块钱,Kimi 也行,任何 OpenAI 兼容的服务都可以。
+      </div>
+
+      <div class="sm-section">
+        <div class="sm-label">A I &nbsp; 模 型</div>
+        <input class="sm-input" placeholder="API 端点 · https://api.deepseek.com/v1">
+        <input class="sm-input" placeholder="API Key · sk-...">
+        <input class="sm-input" placeholder="模型名 · 如 deepseek-chat">
+        <button class="empty-cta sec" style="margin-top: 8px; margin-left: 0;">测 试 连 接</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ -->
+<!-- ⑬ SETTINGS · 连接测试失败 -->
+<!-- ============================================ -->
+<div class="case">
+  <div class="case-head">
+    <span class="case-num">⑬ P1</span>
+    <span class="case-title">Settings · 连接测试失败</span>
+  </div>
+  <div class="case-desc">用户点测试连接 → 失败 → 显示具体原因。</div>
+
+  <div class="app">
+    <header class="hdr">
+      <button class="back-btn">◁ 返回</button>
+      <div class="hdr-title">
+        设 置
+        <small>S E T T I N G S</small>
+      </div>
+      <div style="width: 56px;"></div>
+    </header>
+
+    <div class="settings-mock">
+      <div class="sm-section">
+        <div class="sm-label">A I &nbsp; 模 型</div>
+        <input class="sm-input" value="https://api.deepseek.com/v1">
+        <input class="sm-input err" type="password" value="sk-•••••••••••••••••••••••••••••••••">
+        <input class="sm-input" value="deepseek-chat">
+
+        <button class="empty-cta sec" style="margin-top: 12px; margin-left: 0;">重 新 测 试</button>
+        <div class="sm-status-err">
+          <span class="dot"></span>
+          连接失败 · 401 Unauthorized
+        </div>
+        <p style="font-size: 11.5px; color: var(--text-2); font-family: var(--serif); font-style: italic; margin-top: 12px; line-height: 1.55;">
+          通常是 API Key 错了 / 过期了 / 余额不够。<br>
+          去你的 LLM 平台后台看一下 key,然后回来重填。
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ -->
+<!-- ⑭ 通用 · 网络断开 banner -->
+<!-- ============================================ -->
+<div class="case">
+  <div class="case-head">
+    <span class="case-num">⑭ P0</span>
+    <span class="case-title">通用 · 网络断开</span>
+  </div>
+  <div class="case-desc">顶部一条 banner,所有页面共用。Echo 用人话说,不报技术错误。</div>
+
+  <div class="app">
+    <div class="err-banner">
+      网络断了——Echo 等你回来。
+    </div>
+    <header class="hdr">
+      <div class="avatar dim">E</div>
+      <div class="hdr-info">
+        <div class="hdr-name">Echo</div>
+        <div class="hdr-status" style="color: var(--text-3);">离线 · 等你网回来</div>
+      </div>
+    </header>
+
+    <div style="flex: 1; padding: 20px 18px; background: var(--bg-2); display: flex; flex-direction: column; gap: 14px;">
+      <div style="align-self: flex-start; max-width: 88%;">
+        <div style="background: var(--bg); padding: 12px 15px; border-radius: 14px; border-top-left-radius: 4px; line-height: 1.75; font-size: 13.5px; color: var(--text-2);">
+          (上一条对话保留显示,继续放完正在播的歌)
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ -->
+<!-- ⑮ 通用 · API key 失效 -->
+<!-- ============================================ -->
+<div class="case">
+  <div class="case-head">
+    <span class="case-num">⑮ P0</span>
+    <span class="case-title">通用 · API key 失效 · Echo 在对话里说</span>
+  </div>
+  <div class="case-desc">不弹技术错误。Echo 用自己的话说"我连不上自己脑子",并提供去设置页的链接。</div>
+
+  <div class="app">
+    <header class="hdr">
+      <div class="avatar">E</div>
+      <div class="hdr-info">
+        <div class="hdr-name">Echo</div>
+        <div class="hdr-status">在线 · 但脑子断线了</div>
+      </div>
+    </header>
+
+    <div style="flex: 1; overflow-y: auto; padding: 20px 18px; background: var(--bg-2); display: flex; flex-direction: column; gap: 14px;">
+      <div style="align-self: flex-end; max-width: 88%;">
+        <div style="background: var(--ayin-100); color: var(--ayin-900); padding: 12px 15px; border-radius: 14px; border-top-right-radius: 4px; font-size: 13.5px; line-height: 1.75;">
+          推几首慢的
+        </div>
+      </div>
+
+      <div style="align-self: flex-start; max-width: 88%;">
+        <div style="background: var(--bg); padding: 12px 15px; border-radius: 14px; border-top-left-radius: 4px; line-height: 1.75; font-size: 13.5px;">
+          我连不上自己的脑子了——你的 API key 可能过期或者余额没了。<br>
+          去<a href="#" style="color: var(--ayin-700); text-decoration: underline;">设置页</a>看看?
+        </div>
+        <div style="font-size: 10px; color: var(--text-3); margin: 4px 0 0 14px; font-family: var(--mono); letter-spacing: 0.5px;">刚刚</div>
+      </div>
+    </div>
+
+    <div class="input-disabled">
+      <span class="ph">和 Echo 说点什么...</span>
+      <button class="voice" style="background: var(--ayin-600);"></button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

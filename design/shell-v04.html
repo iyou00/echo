@@ -1,0 +1,1005 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Echo · v0.4 Unified Shell · 五页高保真原型</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    /* === Echo 视觉 token(必须严格遵守) === */
+    --ayin-900: #173404;
+    --ayin-800: #27500A;
+    --ayin-700: #3B6D11;
+    --ayin-600: #639922;
+    --ayin-400: #8FBC57;
+    --ayin-300: #C0DD97;
+    --ayin-100: #EAF3DE;
+    --ayin-50:  #F5FAED;
+
+    --bg: #FFFFFF;
+    --bg-2: #F7F7F5;
+    --text: #1A1A1A;
+    --text-2: #5F5E5A;
+    --text-3: #999996;
+
+    /* 三种允许的边框 */
+    --border-default: 0.5px solid rgba(0,0,0,0.06);
+    --border-soft: 0.5px solid rgba(0,0,0,0.1);
+    --border-accent: 0.5px solid rgba(99,153,34,0.3);
+    --border-bubble: 1.5px solid rgba(99,153,34,0.4);
+
+    --danger: #C04A3A;
+    --paper: #FBFBF6;
+
+    --sans: "Noto Sans SC", -apple-system, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", monospace;
+    --serif: "Noto Serif SC", Georgia, serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    background: #ECECE6;
+    font-family: var(--sans);
+    color: var(--text);
+    font-size: 13.5px;
+    -webkit-font-smoothing: antialiased;
+    padding: 36px 16px 80px;
+  }
+
+  h1 { font-family: var(--serif); font-weight: 500; font-size: 24px; text-align: center; margin-bottom: 6px; }
+  .h-sub { text-align: center; font-family: var(--mono); font-size: 10px; color: var(--text-3); letter-spacing: 2.5px; margin-bottom: 32px; }
+  .intro { text-align: center; max-width: 580px; margin: 0 auto 40px; font-family: var(--serif); font-style: italic; color: var(--text-2); font-size: 13px; line-height: 1.8; }
+
+  /* === 案例容器 === */
+  .case { max-width: 480px; margin: 0 auto 56px; }
+  .case-head { padding: 0 4px; margin-bottom: 14px; }
+  .case-num {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 1.8px;
+    color: var(--ayin-600); font-weight: 500; margin-bottom: 4px;
+  }
+  .case-title { font-family: var(--serif); font-size: 17px; font-weight: 500; margin-bottom: 4px; }
+  .case-desc { font-family: var(--serif); font-size: 12px; color: var(--text-2); font-style: italic; line-height: 1.7; }
+
+  /* === Echo App 主体框架 === */
+  .app {
+    width: 460px;
+    background: var(--bg);
+    border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(0,40,0,0.12), 0 2px 6px rgba(0,40,0,0.06);
+    overflow: hidden;
+    margin: 0 auto;
+  }
+
+  /* ------- 顶栏(全局额头) · 单行高度 44px ------- */
+  .hdr {
+    background: var(--ayin-50);
+    padding: 8px 12px;
+    border-bottom: var(--border-default);
+    -webkit-app-region: drag;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    height: 44px;
+  }
+
+  /* 头像 · 28px · 在线呼吸点 */
+  .av {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: var(--ayin-600);
+    color: var(--ayin-100);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 500; font-size: 12px;
+    flex-shrink: 0; cursor: pointer;
+    position: relative;
+    -webkit-app-region: no-drag;
+    transition: transform 0.18s ease;
+  }
+  .av:hover { transform: scale(1.06); }
+  .av::after {
+    content: '';
+    position: absolute; bottom: 0; right: 0;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--ayin-600);
+    border: 1.8px solid var(--ayin-50);     /* 嵌入感 · 边框=顶栏底色 */
+  }
+  .av.offline::after { background: var(--text-3); }
+
+  /* Tab 居中 · 等宽小字 · 短横线指示 */
+  .tabs {
+    display: flex;
+    gap: 22px;
+    flex: 1;
+    justify-content: center;
+  }
+  .tab {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 2.2px;
+    color: var(--text-3);
+    cursor: pointer;
+    padding: 4px 2px;
+    -webkit-app-region: no-drag;
+    position: relative;
+    transition: color 0.15s;
+  }
+  .tab:hover { color: var(--ayin-700); }
+  .tab.active { color: var(--ayin-700); }
+  .tab.active::after {
+    content: '';
+    position: absolute;
+    left: 50%; bottom: -3px;
+    transform: translateX(-50%);
+    width: 14px; height: 1.5px;
+    background: var(--ayin-600);
+    border-radius: 1px;
+  }
+
+  /* 窗口控件 · 22px 圆 · 主色描边 30% */
+  .ctrls {
+    display: flex; gap: 4px;
+    flex-shrink: 0;
+    -webkit-app-region: no-drag;
+  }
+  .ctrl {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    border: var(--border-accent);
+    background: transparent;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .ctrl:hover { background: rgba(99,153,34,0.12); }
+  .ctrl-close:hover { background: var(--danger); border-color: var(--danger); }
+  .ctrl-close:hover .ic { background: white !important; }
+  .ctrl-close:hover .ic::after { background: white !important; }
+
+  .ctrl-min .ic {
+    width: 8px; height: 1.2px;
+    background: var(--ayin-700);
+    border-radius: 1px;
+  }
+  .ctrl-max .ic {
+    width: 7px; height: 7px;
+    border: 1.1px solid var(--ayin-700);
+    border-radius: 1.5px;
+    background: transparent;
+  }
+  .ctrl-close .ic {
+    width: 8px; height: 1.2px;
+    background: var(--ayin-700);
+    transform: rotate(45deg);
+    position: relative;
+    border-radius: 1px;
+  }
+  .ctrl-close .ic::after {
+    content: ''; position: absolute; inset: 0;
+    background: var(--ayin-700);
+    transform: rotate(-90deg);
+    border-radius: 1px;
+  }
+
+  /* ------- 工具行(第二行 · 子页面专用) ------- */
+  .toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 9px 14px;
+    background: var(--bg);
+    border-bottom: var(--border-default);
+    height: 36px;
+  }
+  .tb-status {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 12px;
+    color: var(--ayin-700);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+  }
+  .tb-status .sep {
+    color: var(--text-3);
+    margin: 0 6px;
+    font-style: normal;
+    font-family: var(--mono);
+    font-size: 9px;
+  }
+  .tb-actions {
+    display: flex; gap: 5px;
+    flex-shrink: 0;
+    margin-left: 12px;
+  }
+  .tb-btn {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    border: var(--border-soft);
+    background: transparent;
+    color: var(--text-2);
+    font-size: 11px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+  }
+  .tb-btn:hover {
+    background: var(--ayin-50);
+    border-color: var(--ayin-400);
+    color: var(--ayin-700);
+  }
+  .tb-btn-pill {
+    width: auto;
+    padding: 0 10px;
+    height: 22px;
+    border-radius: 11px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 1.5px;
+  }
+
+  /* ------- 内容区 ------- */
+  .content { background: var(--bg-2); min-height: 240px; }
+
+  /* === 对话页内容 === */
+  .convo { padding: 14px 14px 12px; }
+  .msg-echo { display: flex; flex-direction: column; align-items: flex-start; margin-bottom: 12px; }
+  .msg-user { display: flex; flex-direction: column; align-items: flex-end; margin-bottom: 12px; }
+  .bubble-echo {
+    background: var(--ayin-50);
+    padding: 9px 12px;
+    border-radius: 12px;
+    border-top-left-radius: 4px;
+    border-left: var(--border-bubble);
+    line-height: 1.75;
+    font-size: 13px;
+    max-width: 92%;
+    color: var(--text);
+  }
+  .bubble-user {
+    background: var(--ayin-600);
+    color: white;
+    padding: 9px 12px;
+    border-radius: 12px;
+    border-top-right-radius: 4px;
+    line-height: 1.75;
+    font-size: 13px;
+    max-width: 86%;
+  }
+  .ts {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-3);
+    letter-spacing: 0.3px;
+    margin-top: 4px;
+    padding-left: 4px;
+  }
+
+  /* track card */
+  .tcard {
+    background: white;
+    border: var(--border-default);
+    border-radius: 8px;
+    padding: 9px 11px;
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    transition: all 0.18s ease;
+  }
+  .tcard:hover {
+    border-color: rgba(99,153,34,0.4);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(99,153,34,0.08);
+  }
+  .tplay {
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    background: var(--ayin-600);
+    color: white;
+    border: 0;
+    font-size: 9px;
+    flex-shrink: 0;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .tinfo { flex: 1; min-width: 0; }
+  .tt { font-weight: 500; font-size: 13px; }
+  .tm { font-family: var(--mono); font-size: 10px; color: var(--text-2); margin-top: 1px; letter-spacing: 0.2px; }
+  .tn { font-family: var(--serif); font-style: italic; font-size: 11.5px; color: var(--ayin-700); margin-top: 4px; }
+  .tdur { font-family: var(--mono); font-size: 10px; color: var(--text-3); flex-shrink: 0; }
+
+  /* 输入栏 */
+  .input {
+    padding: 9px 12px;
+    background: var(--bg);
+    border-top: var(--border-default);
+    display: flex; gap: 8px; align-items: center;
+  }
+  .ifield {
+    flex: 1;
+    padding: 8px 14px;
+    border: var(--border-soft);
+    border-radius: 18px;
+    color: var(--text-3);
+    font-size: 12.5px;
+    background: var(--bg-2);
+  }
+  .send {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: var(--ayin-600);
+    color: white;
+    border: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px;
+    cursor: pointer;
+  }
+
+  /* 底部播放器 */
+  .pb {
+    padding: 8px 12px 10px;
+    background: var(--bg);
+    border-top: var(--border-default);
+  }
+  .wave {
+    height: 18px;
+    display: flex;
+    gap: 1.5px;
+    align-items: end;
+    margin-bottom: 5px;
+  }
+  .wave span {
+    flex: 1;
+    background: var(--ayin-600);
+    opacity: 0.7;
+    border-radius: 1px;
+  }
+  .pb-row { display: flex; align-items: center; gap: 8px; }
+  .pb-info { flex: 1; min-width: 0; }
+  .pb-title { font-weight: 500; font-size: 12px; }
+  .pb-artist { font-family: var(--mono); font-size: 10px; color: var(--text-2); margin-top: 1px; letter-spacing: 0.2px; }
+  .pb-btn {
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    background: transparent;
+    border: 0;
+    color: var(--text-2);
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .pb-btn.main {
+    background: var(--ayin-600);
+    color: white;
+    width: 28px; height: 28px;
+  }
+
+  /* 进度分段 */
+  .seg { display: flex; gap: 1.5px; margin-top: 4px; }
+  .seg span { flex: 1; height: 2px; background: rgba(0,0,0,0.06); border-radius: 1px; }
+  .seg span.on { background: var(--ayin-600); }
+
+  /* === 音忆页内容 === */
+  .paper {
+    background: var(--paper);
+    background-image: radial-gradient(circle at 1px 1px, rgba(99, 80, 40, 0.04) 0.5px, transparent 0);
+    background-size: 14px 14px;
+    padding: 24px 26px;
+    min-height: 240px;
+  }
+  .y-date {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: var(--text-3);
+    letter-spacing: 2.2px;
+    margin-bottom: 14px;
+  }
+  .y-entry {
+    font-family: var(--serif);
+    font-size: 14.5px;
+    line-height: 2;
+    color: var(--ayin-900);
+  }
+  .y-entry p {
+    margin-bottom: 0.9em;
+    text-indent: 2em;
+  }
+  .y-entry p:first-child { text-indent: 0; }
+  .y-entry p:first-child::first-letter {
+    font-size: 1.5em;
+    line-height: 1;
+    color: var(--ayin-600);
+    font-weight: 500;
+  }
+  .y-divider {
+    text-align: center;
+    color: var(--ayin-400);
+    font-size: 12px;
+    letter-spacing: 6px;
+    margin: 4px 0 12px;
+  }
+
+  /* === 听音页内容 === */
+  .voice-bg {
+    background: linear-gradient(180deg, var(--ayin-100) 0%, var(--ayin-300) 100%);
+    padding: 32px 24px;
+    min-height: 280px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+  .voice-status {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 2.5px;
+    color: var(--ayin-700);
+    margin-bottom: 16px;
+    padding: 4px 12px;
+    border: 0.5px solid rgba(59,109,17,0.3);
+    border-radius: 12px;
+    background: rgba(255,255,255,0.4);
+  }
+  .voice-text {
+    font-family: var(--serif);
+    font-size: 15.5px;
+    line-height: 1.95;
+    color: var(--ayin-900);
+    max-width: 360px;
+    margin-bottom: 22px;
+  }
+  .voice-text .said { color: var(--ayin-900); }
+  .voice-text .now {
+    color: var(--ayin-600);
+    font-weight: 500;
+    background: rgba(99,153,34,0.15);
+    padding: 0 2px;
+  }
+  .voice-text .pending { color: var(--ayin-900); opacity: 0.32; }
+  .voice-wave {
+    height: 30px;
+    display: flex;
+    gap: 2px;
+    align-items: end;
+    width: 60%;
+  }
+  .voice-wave span {
+    flex: 1;
+    background: var(--ayin-700);
+    opacity: 0.6;
+    border-radius: 1px;
+  }
+
+  /* === 列表页内容 === */
+  .q-subtabs {
+    display: flex;
+    gap: 4px;
+    padding: 8px 14px;
+    background: var(--bg);
+    border-bottom: var(--border-default);
+  }
+  .q-pill {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    padding: 4px 10px;
+    color: var(--text-3);
+    border-radius: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .q-pill.active {
+    color: var(--ayin-700);
+    background: var(--ayin-50);
+  }
+  .q-pill:hover:not(.active) { color: var(--ayin-700); }
+
+  .now-playing {
+    background: linear-gradient(90deg, var(--ayin-50) 0%, white 100%);
+    padding: 10px 14px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    border-bottom: var(--border-default);
+  }
+  .np-bars {
+    display: flex; gap: 1.5px;
+    height: 14px;
+    align-items: end;
+    width: 14px;
+    flex-shrink: 0;
+  }
+  .np-bars span { flex: 1; background: var(--ayin-600); border-radius: 1px; }
+  .np-bars span:nth-child(1) { height: 50%; animation: np 0.8s infinite; }
+  .np-bars span:nth-child(2) { height: 100%; animation: np 0.8s infinite 0.2s; }
+  .np-bars span:nth-child(3) { height: 35%; animation: np 0.8s infinite 0.4s; }
+  @keyframes np { 0%,100% { transform: scaleY(1); } 50% { transform: scaleY(0.4); } }
+  .np-info { flex: 1; min-width: 0; }
+  .np-title { font-weight: 500; font-size: 12.5px; color: var(--ayin-800); }
+  .np-meta { font-family: var(--mono); font-size: 10px; color: var(--ayin-700); margin-top: 1px; letter-spacing: 0.2px; }
+  .np-note { font-family: var(--serif); font-style: italic; font-size: 11px; color: var(--ayin-700); margin-top: 3px; }
+  .np-time { font-family: var(--mono); font-size: 10px; color: var(--ayin-600); flex-shrink: 0; font-weight: 500; }
+
+  .q-item {
+    padding: 10px 14px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    border-bottom: var(--border-default);
+    transition: background 0.15s;
+    cursor: pointer;
+  }
+  .q-item:hover { background: var(--ayin-50); }
+  .q-num {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-3);
+    width: 16px;
+    flex-shrink: 0;
+  }
+  .q-info { flex: 1; min-width: 0; }
+  .q-title { font-weight: 500; font-size: 12.5px; }
+  .q-meta { font-family: var(--mono); font-size: 10px; color: var(--text-2); margin-top: 1px; letter-spacing: 0.2px; }
+  .q-note { font-family: var(--serif); font-style: italic; font-size: 10.5px; color: var(--ayin-700); margin-top: 2px; }
+  .q-time { font-family: var(--mono); font-size: 10px; color: var(--text-3); flex-shrink: 0; }
+
+  /* === Echo 主页内容 === */
+  .pp {
+    background: linear-gradient(135deg, var(--ayin-50) 0%, var(--ayin-100) 100%);
+    padding: 24px 22px 20px;
+  }
+  .pp-av {
+    width: 50px; height: 50px;
+    border-radius: 50%;
+    background: var(--ayin-600);
+    color: var(--ayin-100);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 500;
+    font-size: 20px;
+    margin-bottom: 14px;
+  }
+  .pp-text {
+    font-family: var(--serif);
+    font-size: 14.5px;
+    line-height: 1.95;
+    color: var(--ayin-900);
+  }
+  .pp-sign {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: var(--ayin-700);
+    letter-spacing: 1.5px;
+    text-align: right;
+    margin-top: 14px;
+  }
+
+  /* 规格说明 */
+  .specs {
+    max-width: 580px;
+    margin: 32px auto 0;
+    padding: 18px 20px;
+    background: var(--ayin-50);
+    border-radius: 12px;
+    border-left: 3px solid var(--ayin-600);
+    font-size: 12.5px;
+    line-height: 1.85;
+    color: var(--ayin-900);
+  }
+  .specs-h {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 1.8px;
+    color: var(--ayin-700);
+    margin-bottom: 10px;
+  }
+  .specs ul { padding-left: 16px; }
+  .specs li { margin-bottom: 4px; }
+  .specs code {
+    font-family: var(--mono);
+    font-size: 11px;
+    background: white;
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--ayin-800);
+  }
+
+  /* 章节分隔 */
+  .section-title {
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 2.5px;
+    color: var(--ayin-700);
+    margin: 56px 0 24px;
+    padding: 0 16px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    max-width: 600px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .section-title::before, .section-title::after {
+    content: '';
+    flex: 1;
+    height: 0.5px;
+    background: rgba(0,0,0,0.1);
+  }
+
+</style>
+</head>
+<body>
+
+<h1>Echo · v0.4 Unified Shell</h1>
+<div class="h-sub">F I N A L &nbsp; H I G H - F I D E L I T Y &nbsp; M O C K U P</div>
+<div class="intro">
+  五个页面 · 一套外壳 · 顶栏 44px 单行设计<br>
+  所有页面共享:头像 + Tab + 窗口控件,严格视觉一致
+</div>
+
+<div class="section-title">五 套 页 面</div>
+
+<!-- ============== 页面 1 · 对话(默认入口) ============== -->
+<div class="case">
+  <div class="case-head">
+    <div class="case-num">① 对 话 · D E F A U L T</div>
+    <div class="case-title">主对话页 · 启动默认入口</div>
+    <div class="case-desc">无工具栏 · 内容区直接接对话气泡 · 输入栏 + 底部播放器全部保留</div>
+  </div>
+
+  <div class="app">
+    <header class="hdr">
+      <div class="av">E</div>
+      <nav class="tabs">
+        <div class="tab active">对 话</div>
+        <div class="tab">音 忆</div>
+        <div class="tab">听 音</div>
+        <div class="tab">列 表</div>
+      </nav>
+      <div class="ctrls">
+        <button class="ctrl ctrl-min" title="最小化"><div class="ic"></div></button>
+        <button class="ctrl ctrl-max" title="最大化"><div class="ic"></div></button>
+        <button class="ctrl ctrl-close" title="最小化到托盘"><div class="ic"></div></button>
+      </div>
+    </header>
+
+    <main class="content convo">
+      <div class="msg-echo">
+        <div class="bubble-echo">
+          这个早上,我先给你放林俊杰的《不为谁而作的歌》——你回家最爱的开场。
+          <div class="tcard">
+            <button class="tplay">▶</button>
+            <div class="tinfo">
+              <div class="tt">不为谁而作的歌</div>
+              <div class="tm">林俊杰 · 2015</div>
+              <div class="tn">— 你今年回家最爱放的第一首</div>
+            </div>
+            <div class="tdur">4:18</div>
+          </div>
+        </div>
+        <div class="ts">10:42</div>
+      </div>
+      <div class="msg-user">
+        <div class="bubble-user">嗯,正好</div>
+      </div>
+    </main>
+
+    <div class="input">
+      <div class="ifield">和 Echo 说点什么...</div>
+      <button class="send">↗</button>
+    </div>
+
+    <div class="pb">
+      <div class="wave">
+        <span style="height: 30%;"></span><span style="height: 60%;"></span><span style="height: 80%;"></span><span style="height: 50%;"></span><span style="height: 70%;"></span><span style="height: 40%;"></span><span style="height: 90%;"></span><span style="height: 55%;"></span><span style="height: 75%;"></span><span style="height: 35%;"></span><span style="height: 65%;"></span><span style="height: 85%;"></span><span style="height: 45%;"></span><span style="height: 70%;"></span><span style="height: 60%;"></span><span style="height: 80%;"></span><span style="height: 40%;"></span><span style="height: 75%;"></span><span style="height: 55%;"></span><span style="height: 90%;"></span><span style="height: 50%;"></span><span style="height: 70%;"></span><span style="height: 35%;"></span><span style="height: 65%;"></span><span style="height: 80%;"></span><span style="height: 45%;"></span><span style="height: 75%;"></span><span style="height: 60%;"></span><span style="height: 85%;"></span><span style="height: 50%;"></span><span style="height: 70%;"></span><span style="height: 40%;"></span><span style="height: 80%;"></span><span style="height: 55%;"></span><span style="height: 65%;"></span>
+      </div>
+      <div class="pb-row">
+        <div class="pb-info">
+          <div class="pb-title">不为谁而作的歌</div>
+          <div class="pb-artist">林俊杰</div>
+        </div>
+        <button class="pb-btn">‹</button>
+        <button class="pb-btn main">▶</button>
+        <button class="pb-btn">›</button>
+      </div>
+      <div class="seg">
+        <span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============== 页面 2 · 音忆 ============== -->
+<div class="case">
+  <div class="case-head">
+    <div class="case-num">② 音 忆 · Y I N Y I</div>
+    <div class="case-title">音忆页 · Echo 的日记</div>
+    <div class="case-desc">工具栏左侧:第 N 篇 · 已陪伴 N 天 · 右侧:日期跳转 / 随手翻 / 今日</div>
+  </div>
+
+  <div class="app">
+    <header class="hdr">
+      <div class="av">E</div>
+      <nav class="tabs">
+        <div class="tab">对 话</div>
+        <div class="tab active">音 忆</div>
+        <div class="tab">听 音</div>
+        <div class="tab">列 表</div>
+      </nav>
+      <div class="ctrls">
+        <button class="ctrl ctrl-min"><div class="ic"></div></button>
+        <button class="ctrl ctrl-max"><div class="ic"></div></button>
+        <button class="ctrl ctrl-close"><div class="ic"></div></button>
+      </div>
+    </header>
+
+    <div class="toolbar">
+      <div class="tb-status">
+        <span style="font-style: normal; color: var(--text); font-weight: 500;">第 127 篇</span>
+        <span class="sep">·</span>
+        已陪伴你 127 天
+      </div>
+      <div class="tb-actions">
+        <button class="tb-btn" title="跳到指定日期">◷</button>
+        <button class="tb-btn" title="随手翻一页">⤴</button>
+        <button class="tb-btn tb-btn-pill">今 日</button>
+      </div>
+    </div>
+
+    <main class="content paper">
+      <div class="y-date">2 0 2 6 . 0 4 . 2 4 &nbsp;·&nbsp; 周 五</div>
+      <div class="y-entry">
+        <p>今天 19 点你回到家,放林俊杰的《不为谁而作的歌》——前奏一响你就跟着哼。这首你这周已经第三次了。</p>
+        <div class="y-divider">· · ·</div>
+        <p>我刚才在想——你以前不会反复同一首歌的。是这周耗着了吗?还是这首歌真的写得很好,你才听不腻?</p>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- ============== 页面 3 · 听音 ============== -->
+<div class="case">
+  <div class="case-head">
+    <div class="case-num">③ 听 音 · T I N G Y I N</div>
+    <div class="case-title">听音页 · Echo 开口说话</div>
+    <div class="case-desc">工具栏左侧:E C H O · 状态 · 右侧:再说一段。内容区抹茶绿渐变</div>
+  </div>
+
+  <div class="app">
+    <header class="hdr">
+      <div class="av">E</div>
+      <nav class="tabs">
+        <div class="tab">对 话</div>
+        <div class="tab">音 忆</div>
+        <div class="tab active">听 音</div>
+        <div class="tab">列 表</div>
+      </nav>
+      <div class="ctrls">
+        <button class="ctrl ctrl-min"><div class="ic"></div></button>
+        <button class="ctrl ctrl-max"><div class="ic"></div></button>
+        <button class="ctrl ctrl-close"><div class="ic"></div></button>
+      </div>
+    </header>
+
+    <div class="toolbar">
+      <div class="tb-status">
+        <span style="font-family: var(--mono); font-style: normal; color: var(--ayin-700); font-size: 10px; letter-spacing: 1.8px;">E C H O</span>
+        <span class="sep">·</span>
+        正在说一段
+      </div>
+      <div class="tb-actions">
+        <button class="tb-btn tb-btn-pill">再 说 一 段</button>
+      </div>
+    </div>
+
+    <main class="content voice-bg">
+      <div class="voice-status">S P E A K I N G</div>
+      <div class="voice-text">
+        <span class="said">嗨,九点二十了。你今天下午说工作汇报搞完了——</span><span class="now">我刚还在想这事</span><span class="pending">,这会儿应该松一口气了吧。给你放林俊杰的《我怀念的》。</span>
+      </div>
+      <div class="voice-wave">
+        <span style="height: 30%;"></span><span style="height: 70%;"></span><span style="height: 50%;"></span><span style="height: 90%;"></span><span style="height: 40%;"></span><span style="height: 75%;"></span><span style="height: 60%;"></span><span style="height: 85%;"></span><span style="height: 35%;"></span><span style="height: 65%;"></span><span style="height: 80%;"></span><span style="height: 45%;"></span><span style="height: 70%;"></span><span style="height: 55%;"></span><span style="height: 90%;"></span><span style="height: 40%;"></span><span style="height: 75%;"></span><span style="height: 60%;"></span><span style="height: 85%;"></span><span style="height: 30%;"></span><span style="height: 70%;"></span><span style="height: 50%;"></span><span style="height: 80%;"></span><span style="height: 45%;"></span><span style="height: 65%;"></span>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- ============== 页面 4 · 列表 ============== -->
+<div class="case">
+  <div class="case-head">
+    <div class="case-num">④ 列 表 · Q U E U E</div>
+    <div class="case-title">列表页 · 今日推荐流</div>
+    <div class="case-desc">工具栏左侧:今日 8 首 · 总长 33 分钟 · 子 Tab 用胶囊药丸</div>
+  </div>
+
+  <div class="app">
+    <header class="hdr">
+      <div class="av">E</div>
+      <nav class="tabs">
+        <div class="tab">对 话</div>
+        <div class="tab">音 忆</div>
+        <div class="tab">听 音</div>
+        <div class="tab active">列 表</div>
+      </nav>
+      <div class="ctrls">
+        <button class="ctrl ctrl-min"><div class="ic"></div></button>
+        <button class="ctrl ctrl-max"><div class="ic"></div></button>
+        <button class="ctrl ctrl-close"><div class="ic"></div></button>
+      </div>
+    </header>
+
+    <div class="toolbar">
+      <div class="tb-status">
+        <span style="font-style: normal; color: var(--text); font-weight: 500;">今日 8 首</span>
+        <span class="sep">·</span>
+        总长 33 分钟
+      </div>
+      <div class="tb-actions">
+        <button class="tb-btn" title="清空">×</button>
+      </div>
+    </div>
+
+    <nav class="q-subtabs">
+      <div class="q-pill active">今 日</div>
+      <div class="q-pill">E C H O 备 选</div>
+      <div class="q-pill">收 藏</div>
+      <div class="q-pill">过 往</div>
+    </nav>
+
+    <main class="content">
+      <div class="now-playing">
+        <div class="np-bars"><span></span><span></span><span></span></div>
+        <div class="np-info">
+          <div class="np-title">不为谁而作的歌</div>
+          <div class="np-meta">林俊杰 · 2015</div>
+          <div class="np-note">— 你回家最爱的开场</div>
+        </div>
+        <div class="np-time">02:14</div>
+      </div>
+      <div class="q-item">
+        <div class="q-num">02</div>
+        <div class="q-info">
+          <div class="q-title">向云端</div>
+          <div class="q-meta">海洋Bo · 2023</div>
+          <div class="q-note">— 续上前一首的气口</div>
+        </div>
+        <div class="q-time">04:18</div>
+      </div>
+      <div class="q-item">
+        <div class="q-num">03</div>
+        <div class="q-info">
+          <div class="q-title">Attention</div>
+          <div class="q-meta">Charlie Puth · 2017</div>
+        </div>
+        <div class="q-time">03:42</div>
+      </div>
+      <div class="q-item">
+        <div class="q-num">04</div>
+        <div class="q-info">
+          <div class="q-title">我怀念的</div>
+          <div class="q-meta">林俊杰 · 2007</div>
+          <div class="q-note">— 慢一点,别紧绷</div>
+        </div>
+        <div class="q-time">04:55</div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- ============== 页面 5 · Echo 主页(从头像进入) ============== -->
+<div class="case">
+  <div class="case-head">
+    <div class="case-num">⑤ E C H O &nbsp; 主 页 · P R O F I L E</div>
+    <div class="case-title">主页 · 点头像进入 · 出 Tab</div>
+    <div class="case-desc">不在 Tab 里 · 顶栏有"返回"替代头像区 · 工具栏右侧有齿轮 → 设置</div>
+  </div>
+
+  <div class="app">
+    <header class="hdr" style="justify-content: space-between;">
+      <button class="tb-btn tb-btn-pill" style="border-color: rgba(99,153,34,0.3); color: var(--ayin-700); font-size: 9.5px;">◁ &nbsp; 返 回</button>
+      <div style="font-family: var(--serif); font-size: 14px; font-weight: 500; color: var(--text);">
+        Echo
+        <small style="display: block; font-family: var(--mono); font-size: 9px; color: var(--text-3); letter-spacing: 2px; font-weight: 400; margin-top: 2px;">P R O F I L E</small>
+      </div>
+      <div class="ctrls">
+        <button class="ctrl ctrl-min"><div class="ic"></div></button>
+        <button class="ctrl ctrl-max"><div class="ic"></div></button>
+        <button class="ctrl ctrl-close"><div class="ic"></div></button>
+      </div>
+    </header>
+
+    <div class="toolbar">
+      <div class="tb-status">
+        <span style="font-style: normal; color: var(--text); font-weight: 500;">Echo 眼里的你</span>
+      </div>
+      <div class="tb-actions">
+        <button class="tb-btn" title="设置">⚙</button>
+      </div>
+    </div>
+
+    <main class="content pp" style="min-height: 220px;">
+      <div class="pp-av">E</div>
+      <div class="pp-text">
+        你喜欢旋律性强、情感直白的东西。林俊杰和海洋Bo 是你这周的两个轴心——他们完全不像,却又都在你这里。最近对 Charlie Puth 接受度变高了,我看你晚上常放。
+      </div>
+      <div class="pp-sign">— Echo · 写于 2026.04.24</div>
+    </main>
+  </div>
+</div>
+
+<!-- ============== 规格说明 ============== -->
+<div class="section-title">关 键 规 格</div>
+
+<div class="specs">
+  <div class="specs-h">L A Y O U T &nbsp; · &nbsp; 顶栏单行总规则</div>
+  <ul>
+    <li>顶栏高度严格 <code>44px</code> · 内边距 <code>8px 12px</code></li>
+    <li>背景色 <code>--ayin-50</code> · 整条可拖窗口(<code>-webkit-app-region: drag</code>)</li>
+    <li>头像、Tab、窗口控件需要标 <code>no-drag</code> 让点击生效</li>
+    <li>头像 <code>28px</code> · 在线点边框颜色 = 顶栏底色(嵌入感)</li>
+    <li>Tab 之间间距 <code>22px</code> · 字距 <code>2.2px</code> · 字号 <code>10.5px</code></li>
+    <li>Tab active 标识只有"颜色变深 + 14px 主色短横",**不要底色填充**</li>
+    <li>窗口控件 <code>22px</code> 圆 · 关闭 hover 变红 <code>#C04A3A</code></li>
+  </ul>
+</div>
+
+<div class="specs">
+  <div class="specs-h">T O O L B A R &nbsp; · &nbsp; 工具栏(子页面专用)</div>
+  <ul>
+    <li>高度 <code>36px</code> · 背景纯白 · 边距 <code>9px 14px</code></li>
+    <li>左侧:<code>状态文字</code>(衬线 italic + 等宽分隔符)</li>
+    <li>右侧:<code>圆形操作按钮 + 胶囊文字按钮</code>混用</li>
+    <li>圆形按钮 <code>22px</code> · 边框 <code>0.5px rgba(0,0,0,0.1)</code></li>
+    <li>胶囊按钮 <code>11px 圆角</code> · 内边距 <code>0 10px</code></li>
+    <li>对话页**没有**工具栏(因为对话本身没有元数据要展示)</li>
+  </ul>
+</div>
+
+<div class="specs">
+  <div class="specs-h">B U T T O N &nbsp; · &nbsp; 按钮统一规则</div>
+  <ul>
+    <li>所有非主操作按钮:圆形 / 胶囊 + 描边 + 透明背景</li>
+    <li>Hover 时背景变 <code>--ayin-50</code> · 边框变 <code>--ayin-400</code> · 文字变 <code>--ayin-700</code></li>
+    <li><b>禁止</b>:放大、抖动、阴影 · 只换背景色</li>
+    <li>主操作按钮(发送、播放、▶):主色实心圆 · 不变</li>
+  </ul>
+</div>
+
+<div class="specs">
+  <div class="specs-h">B O R D E R &nbsp; · &nbsp; 边框三套</div>
+  <ul>
+    <li><code>0.5px solid rgba(0,0,0,0.06)</code> · 分隔线 · 默认</li>
+    <li><code>0.5px solid rgba(99,153,34,0.3)</code> · 主色描边 · 控件 active</li>
+    <li><code>1.5px solid rgba(99,153,34,0.4)</code> · 气泡左边线 · 唯一</li>
+    <li><b>禁止</b>:粗边框、双边框、虚线、内阴影边框</li>
+  </ul>
+</div>
+
+<div class="specs">
+  <div class="specs-h">N A V &nbsp; · &nbsp; 导航关系</div>
+  <ul>
+    <li><b>对话 / 音忆 / 听音 / 列表</b> 是 Tab · 直接切换 · 无返回按钮</li>
+    <li><b>Echo 主页</b>:点头像进入 · 顶栏头像变成"◁ 返回"按钮 · 工具栏齿轮 → 设置页</li>
+    <li><b>设置页</b>:从主页齿轮进入 · 顶栏左侧"◁ 返回"回到主页</li>
+    <li>Echo 主页和设置页**不在 Tab 里** · 因为它们是"关于 Echo 自己"的页面</li>
+  </ul>
+</div>
+
+<div class="specs">
+  <div class="specs-h">D E V &nbsp; · &nbsp; 实现注意事项</div>
+  <ul>
+    <li>顶栏的 <code>-webkit-app-region: drag</code> 让窗口可拖 · 子元素标 <code>no-drag</code> 让点击生效</li>
+    <li>关闭按钮第一次点击:弹友好提示"我藏到右下角去了,音乐继续放" + 最小化</li>
+    <li>关闭按钮后续点击:静默最小化(读取 settings 标志)</li>
+    <li>Tab 切换:无路由跳转,纯 React state · 减少闪屏</li>
+    <li>"已陪伴 N 天" 数字每天 0 点更新</li>
+  </ul>
+</div>
+
+</body>
+</html>

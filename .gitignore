@@ -1,0 +1,51 @@
+# Dependencies and local package cache
+node_modules/
+.npm-cache/
+
+# Build outputs
+dist/
+dist-electron/
+out/
+release/
+*.AppImage
+*.exe
+*.dmg
+*.msi
+*.zip
+*.7z
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Local app data and databases
+/data/
+/userData/
+echo-app/data/
+echo-app/userData/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+
+# Secrets and local env
+.env
+.env.*
+*.local
+
+# Local tooling and editor state
+.codex/
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Echo · 主界面</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* 主色 · 淡绿 */
+    --ayin-900: #27500A;
+    --ayin-700: #3B6D11;
+    --ayin-600: #639922;
+    --ayin-400: #8FBC57;
+    --ayin-300: #C0DD97;
+    --ayin-100: #EAF3DE;
+
+    /* 中性 */
+    --bg: #FFFFFF;
+    --bg-2: #F7F7F5;
+    --bg-3: #EDEDE8;
+    --text: #1A1A1A;
+    --text-2: #5C5C5A;
+    --text-3: #999996;
+    --border: rgba(0,0,0,0.08);
+
+    /* 字体 */
+    --sans: "Noto Sans SC", -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", "Cascadia Code", monospace;
+    --serif: "Noto Serif SC", "Source Han Serif SC", Georgia, serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    background: var(--bg-3);
+    font-family: var(--sans);
+    color: var(--text);
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* 容器 · 模拟桌面 app 窗口 */
+  .stage {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background:
+      radial-gradient(ellipse at top, rgba(143, 188, 87, 0.08), transparent 50%),
+      var(--bg-3);
+  }
+  .app {
+    width: 440px;
+    height: 720px;
+    background: var(--bg);
+    border-radius: 14px;
+    box-shadow: 0 20px 60px rgba(0, 40, 0, 0.12), 0 4px 12px rgba(0, 40, 0, 0.06);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* 顶栏 */
+  .hdr {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    border-bottom: 0.5px solid var(--border);
+    background: var(--bg);
+  }
+  .avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--ayin-600);
+    color: var(--ayin-100);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 500;
+    font-size: 14px;
+    cursor: pointer;
+    position: relative;
+    flex-shrink: 0;
+    transition: transform 0.15s ease;
+  }
+  .avatar:hover { transform: scale(1.05); }
+  .avatar::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--ayin-600);
+    border: 2.5px solid var(--bg);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+  .hdr-info { flex: 1; min-width: 0; }
+  .hdr-name {
+    font-weight: 500;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .hdr-name .tap-hint {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-3);
+    letter-spacing: 1.5px;
+    border: 0.5px solid var(--border);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-weight: 400;
+  }
+  .hdr-status {
+    color: var(--text-2);
+    font-size: 11px;
+    margin-top: 2px;
+    font-family: var(--mono);
+    letter-spacing: 0.3px;
+  }
+  .nav { display: flex; gap: 2px; }
+  .nav-btn {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-2);
+    padding: 6px 10px;
+    background: transparent;
+    border: 0;
+    letter-spacing: 1px;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background 0.15s ease;
+  }
+  .nav-btn:hover { background: var(--bg-2); color: var(--text); }
+
+  /* 对话区域 */
+  .convo {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    background: var(--bg-2);
+  }
+  .convo::-webkit-scrollbar { width: 4px; }
+  .convo::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .msg-ai { align-self: flex-start; max-width: 88%; }
+  .msg-ai .bubble {
+    background: var(--bg);
+    padding: 12px 15px;
+    border-radius: 14px;
+    border-top-left-radius: 4px;
+    line-height: 1.75;
+    font-size: 13.5px;
+    color: var(--text);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .msg-ai .ts {
+    font-size: 10px;
+    color: var(--text-3);
+    margin: 4px 0 0 14px;
+    font-family: var(--mono);
+    letter-spacing: 0.5px;
+  }
+  .msg-me { align-self: flex-end; max-width: 88%; }
+  .msg-me .bubble {
+    background: var(--ayin-100);
+    color: var(--ayin-900);
+    padding: 12px 15px;
+    border-radius: 14px;
+    border-top-right-radius: 4px;
+    line-height: 1.75;
+    font-size: 13.5px;
+  }
+
+  /* 歌曲卡片(嵌入消息) */
+  .track-card {
+    margin-top: 12px;
+    background: var(--bg-2);
+    border-radius: 10px;
+    padding: 11px 13px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    transition: background 0.15s ease;
+  }
+  .track-card:hover { background: var(--bg-3); }
+  .play-mini {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: var(--ayin-600);
+    color: white;
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border: 0;
+    cursor: pointer;
+    transition: transform 0.15s ease;
+  }
+  .play-mini:hover { transform: scale(1.08); }
+  .track-info { flex: 1; min-width: 0; }
+  .track-title { font-weight: 500; font-size: 13.5px; }
+  .track-meta {
+    color: var(--text-2);
+    font-size: 11px;
+    margin-top: 2px;
+    font-family: var(--mono);
+    letter-spacing: 0.3px;
+  }
+  .track-note {
+    color: var(--ayin-700);
+    font-size: 12px;
+    margin-top: 5px;
+    font-family: var(--serif);
+    font-style: italic;
+  }
+
+  /* 输入区 */
+  .input-row {
+    padding: 12px 16px;
+    border-top: 0.5px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--bg);
+  }
+  .input-field {
+    flex: 1;
+    padding: 10px 14px;
+    border: 0.5px solid var(--border);
+    border-radius: 20px;
+    font-family: var(--sans);
+    font-size: 13px;
+    background: var(--bg-2);
+    outline: none;
+    transition: border-color 0.15s ease;
+  }
+  .input-field:focus { border-color: var(--ayin-400); background: var(--bg); }
+  .voice-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--ayin-600);
+    border: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    flex-shrink: 0;
+    transition: all 0.15s ease;
+  }
+  .voice-btn:hover {
+    background: var(--ayin-700);
+    transform: scale(1.05);
+  }
+  .voice-icon {
+    display: flex;
+    gap: 2px;
+    align-items: center;
+    height: 16px;
+  }
+  .voice-icon span {
+    width: 2.5px;
+    background: var(--ayin-100);
+    border-radius: 1.5px;
+    animation: voiceBar 1.2s ease-in-out infinite;
+  }
+  .voice-icon span:nth-child(1) { height: 5px; animation-delay: 0s; }
+  .voice-icon span:nth-child(2) { height: 10px; animation-delay: 0.2s; }
+  .voice-icon span:nth-child(3) { height: 7px; animation-delay: 0.4s; }
+  .voice-icon span:nth-child(4) { height: 13px; animation-delay: 0.15s; }
+  .voice-icon span:nth-child(5) { height: 5px; animation-delay: 0.3s; }
+  @keyframes voiceBar {
+    0%, 100% { transform: scaleY(0.7); }
+    50% { transform: scaleY(1.2); }
+  }
+
+  /* 底部播放器 */
+  .player {
+    padding: 12px 18px 16px;
+    border-top: 0.5px solid var(--border);
+    background: var(--bg);
+  }
+
+  /* 波形 */
+  .wave {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    height: 24px;
+    margin-bottom: 12px;
+  }
+  .wave span {
+    flex: 1;
+    background: var(--ayin-300);
+    border-radius: 1.5px;
+    min-height: 3px;
+    transition: background 0.2s ease;
+  }
+  .wave span.on { background: var(--ayin-600); }
+  @keyframes waveMove {
+    0% { transform: scaleY(0.7); }
+    50% { transform: scaleY(1); }
+    100% { transform: scaleY(0.8); }
+  }
+  .wave span {
+    animation: waveMove 1.4s ease-in-out infinite;
+    transform-origin: center;
+  }
+
+  .pb-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .pb-info { flex: 1; min-width: 0; }
+  .pb-title { font-weight: 500; font-size: 13.5px; }
+  .pb-artist {
+    color: var(--text-2);
+    font-size: 11px;
+    margin-top: 2px;
+    font-family: var(--mono);
+    letter-spacing: 0.3px;
+  }
+
+  .ctrl { display: flex; gap: 7px; align-items: center; }
+  .ctrl-btn {
+    width: 28px;
+    height: 28px;
+    border: 0.5px solid var(--border);
+    background: var(--bg);
+    border-radius: 50%;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    color: var(--text);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .ctrl-btn:hover { background: var(--bg-2); border-color: var(--text-3); }
+  .ctrl-btn.main {
+    width: 34px;
+    height: 34px;
+    background: var(--ayin-600);
+    color: white;
+    border-color: var(--ayin-600);
+    font-size: 10px;
+  }
+  .ctrl-btn.main:hover { background: var(--ayin-700); border-color: var(--ayin-700); }
+
+  /* 分段进度条 */
+  .progress {
+    margin-top: 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 10px;
+    color: var(--text-3);
+    font-family: var(--mono);
+    letter-spacing: 0.3px;
+  }
+  .seg-bar {
+    flex: 1;
+    display: flex;
+    gap: 2px;
+  }
+  .seg-bar span {
+    flex: 1;
+    height: 4px;
+    background: var(--border);
+    border-radius: 1px;
+    transition: background 0.2s ease;
+  }
+  .seg-bar span.on { background: var(--ayin-600); }
+</style>
+</head>
+<body>
+
+<div class="stage">
+  <div class="app">
+
+    <!-- 顶栏 -->
+    <header class="hdr">
+      <div class="avatar" title="点击进入 Echo 的主页">E</div>
+      <div class="hdr-info">
+        <div class="hdr-name">Echo <span class="tap-hint">TAP</span></div>
+        <div class="hdr-status">下午好 · 心情 微醺</div>
+      </div>
+      <nav class="nav">
+        <button class="nav-btn">音忆</button>
+        <button class="nav-btn">列表</button>
+      </nav>
+    </header>
+
+    <!-- 对话 -->
+    <main class="convo">
+      <div class="msg-ai">
+        <div class="bubble">
+          14:22 了,你这个点该犯困了吧。给你挑一首慢慢飘起来的——海洋Bo 的《向云端》,不是热血的那种,是让你眼皮跟着轻一点的。
+          <div class="track-card">
+            <button class="play-mini">▶</button>
+            <div class="track-info">
+              <div class="track-title">向云端</div>
+              <div class="track-meta">海洋Bo · 2023</div>
+              <div class="track-note">— 让眼皮轻一点</div>
+            </div>
+          </div>
+        </div>
+        <div class="ts">14:22</div>
+      </div>
+
+      <div class="msg-me">
+        <div class="bubble">嗯听过了,挺合适。再来两首类似的?</div>
+      </div>
+
+      <div class="msg-ai">
+        <div class="bubble">
+          好——林俊杰《我怀念的》和 Charlie Puth《How Long》给你加到列表里了。一首华语一首欧美,情绪连得上。
+        </div>
+        <div class="ts">14:24</div>
+      </div>
+    </main>
+
+    <!-- 输入 -->
+    <div class="input-row">
+      <input class="input-field" type="text" placeholder="和Echo说点什么...">
+      <button class="voice-btn" title="让Echo说话">
+        <div class="voice-icon">
+          <span></span><span></span><span></span><span></span><span></span>
+        </div>
+      </button>
+    </div>
+
+    <!-- 播放器 -->
+    <footer class="player">
+      <!-- 波形 -->
+      <div class="wave" id="wave"></div>
+
+      <!-- 控制 -->
+      <div class="pb-row">
+        <div class="pb-info">
+          <div class="pb-title">向云端</div>
+          <div class="pb-artist">海洋Bo</div>
+        </div>
+        <div class="ctrl">
+          <button class="ctrl-btn">◁</button>
+          <button class="ctrl-btn main">❚❚</button>
+          <button class="ctrl-btn">▷</button>
+        </div>
+      </div>
+
+      <!-- 分段进度条 -->
+      <div class="progress">
+        <span>01:27</span>
+        <div class="seg-bar" id="seg"></div>
+        <span>04:32</span>
+      </div>
+    </footer>
+
+  </div>
+</div>
+
+<script>
+  // 生成波形
+  (function() {
+    const wave = document.getElementById('wave');
+    const n = 36;
+    for (let i = 0; i < n; i++) {
+      const bar = document.createElement('span');
+      const h = 25 + Math.random() * 65;
+      bar.style.height = h + '%';
+      if (i % 3 === 2) bar.classList.add('on');
+      bar.style.animationDelay = (i * 0.05) + 's';
+      bar.style.animationDuration = (1.2 + Math.random() * 0.4) + 's';
+      wave.appendChild(bar);
+    }
+  })();
+
+  // 生成分段进度条
+  (function() {
+    const seg = document.getElementById('seg');
+    const total = 30;
+    const done = 10; // 01:27 / 04:32 ≈ 1/3
+    for (let i = 0; i < total; i++) {
+      const s = document.createElement('span');
+      if (i < done) s.classList.add('on');
+      seg.appendChild(s);
+    }
+  })();
+</script>
+
+</body>
+</html>

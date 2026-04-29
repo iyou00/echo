@@ -1,0 +1,1312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Echo v0.3 · 高保真整合设计稿</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --green-950: #183604;
+    --green-900: #27500a;
+    --green-760: #37660f;
+    --green-620: #639922;
+    --green-440: #91bb5a;
+    --green-300: #c0dd97;
+    --green-160: #eaf3de;
+    --green-070: #f6faef;
+    --paper: #fffdf7;
+    --paper-deep: #f4efe3;
+    --ink: #171816;
+    --ink-2: #5f6259;
+    --ink-3: #989b92;
+    --line: rgba(35, 45, 25, 0.11);
+    --line-dark: rgba(39, 80, 10, 0.18);
+    --bg: #e2e8d7;
+    --white: #ffffff;
+    --danger: #b84f3b;
+    --warn: #b8763e;
+    --mono: "JetBrains Mono", "SF Mono", "Cascadia Code", monospace;
+    --sans: "Noto Sans SC", -apple-system, "Segoe UI", sans-serif;
+    --serif: "Noto Serif SC", Georgia, serif;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-width: 1180px;
+    color: var(--ink);
+    font-family: var(--sans);
+    background:
+      linear-gradient(90deg, rgba(39, 80, 10, 0.045) 1px, transparent 1px),
+      linear-gradient(0deg, rgba(39, 80, 10, 0.04) 1px, transparent 1px),
+      var(--bg);
+    background-size: 32px 32px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  button, input, select { font: inherit; }
+
+  .board {
+    padding: 42px 48px 64px;
+  }
+
+  .board-head {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 32px;
+    align-items: end;
+    margin-bottom: 34px;
+  }
+
+  .brand-kicker {
+    color: var(--green-760);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 4px;
+  }
+
+  h1 {
+    margin: 10px 0 12px;
+    color: var(--green-950);
+    font-family: var(--serif);
+    font-size: 42px;
+    font-weight: 500;
+    line-height: 1.12;
+    letter-spacing: 0;
+  }
+
+  .board-copy {
+    max-width: 760px;
+    margin: 0;
+    color: var(--ink-2);
+    font-family: var(--serif);
+    font-size: 15px;
+    line-height: 1.85;
+  }
+
+  .token-strip {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.48);
+    border: 1px solid var(--line);
+  }
+
+  .swatch {
+    width: 34px;
+    height: 34px;
+    border: 1px solid rgba(0,0,0,0.05);
+  }
+
+  .canvas-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 440px);
+    gap: 28px;
+    align-items: start;
+  }
+
+  .spec-card {
+    grid-column: span 3;
+    display: grid;
+    grid-template-columns: 1.1fr 1fr 1fr;
+    gap: 0;
+    border: 1px solid var(--line);
+    background: rgba(255,255,255,0.52);
+  }
+
+  .spec-block {
+    padding: 24px 26px;
+    border-right: 1px solid var(--line);
+  }
+
+  .spec-block:last-child { border-right: 0; }
+
+  .spec-label,
+  .screen-tag,
+  .eyebrow,
+  .mini-meta,
+  .time,
+  .mono {
+    font-family: var(--mono);
+  }
+
+  .spec-label {
+    color: var(--green-760);
+    font-size: 10px;
+    letter-spacing: 3px;
+    margin-bottom: 12px;
+  }
+
+  .spec-block p {
+    margin: 0;
+    color: var(--ink-2);
+    font-family: var(--serif);
+    font-size: 13px;
+    line-height: 1.8;
+  }
+
+  .screen-wrap {
+    display: grid;
+    gap: 10px;
+  }
+
+  .screen-tag {
+    color: var(--green-900);
+    font-size: 11px;
+    letter-spacing: 3px;
+  }
+
+  .screen-tag::after {
+    content: " · FRAMELESS";
+    color: var(--ink-3);
+    letter-spacing: 2px;
+  }
+
+  .phone {
+    width: 440px;
+    height: 720px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    background: var(--white);
+    border: 0;
+    border-radius: 0;
+    box-shadow: 0 28px 90px rgba(25, 52, 5, 0.14), 0 4px 18px rgba(25, 52, 5, 0.06);
+  }
+
+  .topbar {
+    flex: 0 0 64px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 18px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(255,255,255,0.94);
+    -webkit-app-region: drag;
+  }
+
+  .topbar button,
+  .topbar input,
+  .topbar select,
+  .nav,
+  .nav button {
+    -webkit-app-region: no-drag;
+  }
+
+  .avatar {
+    position: relative;
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+    display: grid;
+    place-items: center;
+    border-radius: 999px;
+    background: var(--green-620);
+    color: #f7ffe9;
+    font-family: var(--serif);
+    font-size: 18px;
+    font-weight: 600;
+  }
+
+  .avatar::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    bottom: 1px;
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: #78bd42;
+    border: 2px solid #fff;
+  }
+
+  .title-stack {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .app-name {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+
+  .subline {
+    margin-top: 3px;
+    color: var(--ink-3);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.8px;
+  }
+
+  .nav {
+    display: flex;
+    gap: 2px;
+  }
+
+  .nav button,
+  .ghost,
+  .iconbtn,
+  .pillbtn {
+    border: 0;
+    background: transparent;
+    color: var(--ink-2);
+    cursor: default;
+  }
+
+  .nav button {
+    min-height: 30px;
+    padding: 0 7px;
+    border-radius: 5px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 1.2px;
+  }
+
+  .nav .active {
+    color: var(--green-900);
+    background: var(--green-160);
+  }
+
+  .page-title {
+    flex: 1;
+    text-align: center;
+    font-family: var(--serif);
+    font-size: 16px;
+    font-weight: 500;
+  }
+
+  .page-title small {
+    display: block;
+    margin-top: 3px;
+    color: var(--ink-3);
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 3px;
+  }
+
+  .ghost {
+    min-width: 66px;
+    padding: 6px 8px;
+    border-radius: 5px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 1px;
+  }
+
+  .content {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    background: #f7f7f3;
+  }
+
+  .scroll {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .chat {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    padding: 18px 16px 14px;
+    background: #f7f7f3;
+  }
+
+  .msg {
+    display: flex;
+    gap: 9px;
+    align-items: flex-start;
+  }
+
+  .msg.user {
+    justify-content: flex-end;
+  }
+
+  .msg .bubble {
+    max-width: 310px;
+    padding: 11px 13px;
+    border-radius: 4px 13px 13px;
+    background: #fff;
+    color: var(--ink);
+    box-shadow: 0 1px 2px rgba(25, 52, 5, 0.04);
+    font-size: 13px;
+    line-height: 1.72;
+  }
+
+  .msg.user .bubble {
+    border-radius: 13px 4px 13px 13px;
+    background: var(--green-160);
+    color: var(--green-950);
+  }
+
+  .time {
+    margin-top: 4px;
+    color: var(--ink-3);
+    font-size: 10px;
+  }
+
+  .track-card {
+    margin-top: 10px;
+    display: grid;
+    grid-template-columns: 34px 1fr;
+    gap: 10px;
+    align-items: center;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #f7f7f3;
+  }
+
+  .play {
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 999px;
+    background: var(--green-620);
+    color: white;
+    font-size: 12px;
+  }
+
+  .track-title {
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .track-meta {
+    margin-top: 2px;
+    color: var(--ink-3);
+    font-family: var(--mono);
+    font-size: 10px;
+  }
+
+  .track-note {
+    margin-top: 4px;
+    color: var(--green-760);
+    font-family: var(--serif);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .composer {
+    flex: 0 0 58px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 10px 14px;
+    border-top: 1px solid var(--line);
+    background: #fff;
+  }
+
+  .composer input,
+  .input,
+  select {
+    min-width: 0;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    outline: 0;
+    background: #f8f8f4;
+    color: var(--ink);
+  }
+
+  .composer input {
+    flex: 1;
+    height: 40px;
+    padding: 0 13px;
+    font-size: 13px;
+  }
+
+  .send {
+    width: 40px;
+    height: 40px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--green-620);
+    color: #fff;
+    font-size: 17px;
+  }
+
+  .player {
+    flex: 0 0 146px;
+    padding: 13px 16px 16px;
+    border-top: 1px solid var(--line);
+    background: #fff;
+  }
+
+  .wave {
+    height: 34px;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .wave span {
+    flex: 1;
+    border-radius: 999px;
+    background: var(--green-300);
+    opacity: 0.75;
+    animation: wave 1.35s ease-in-out infinite;
+    transform-origin: bottom;
+  }
+
+  .wave span:nth-child(3n) { background: var(--green-620); }
+  .wave span:nth-child(2n) { animation-delay: .12s; }
+  .wave span:nth-child(5n) { animation-delay: .28s; }
+
+  @keyframes wave {
+    0%,100% { transform: scaleY(.58); }
+    50% { transform: scaleY(1); }
+  }
+
+  .player-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    align-items: center;
+    margin-top: 8px;
+  }
+
+  .player-copy { min-width: 0; }
+  .player-copy .track-title,
+  .player-copy .track-meta {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .controls button {
+    width: 28px;
+    height: 28px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: #fff;
+    color: var(--ink-2);
+  }
+
+  .controls .main {
+    width: 34px;
+    height: 34px;
+    border-color: var(--green-620);
+    background: var(--green-620);
+    color: #fff;
+  }
+
+  .progress {
+    display: grid;
+    grid-template-columns: 38px 1fr 38px;
+    gap: 8px;
+    align-items: center;
+    margin-top: 12px;
+    color: var(--ink-3);
+    font-family: var(--mono);
+    font-size: 10px;
+  }
+
+  .seg {
+    display: flex;
+    gap: 2px;
+  }
+
+  .seg i {
+    flex: 1;
+    height: 4px;
+    border-radius: 1px;
+    background: var(--line);
+  }
+
+  .seg i.on { background: var(--green-620); }
+
+  .voice-body {
+    flex: 1;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    padding: 30px;
+    overflow: hidden;
+    background:
+      linear-gradient(135deg, rgba(255,255,255,0.3), transparent 38%),
+      var(--green-160);
+  }
+
+  .voice-body::before,
+  .paper::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image: radial-gradient(circle at 1px 1px, rgba(39,80,10,.12) .5px, transparent 0);
+    background-size: 16px 16px;
+    opacity: .32;
+  }
+
+  .voice-status {
+    align-self: flex-start;
+    z-index: 1;
+    padding: 6px 10px;
+    border: 1px solid rgba(39,80,10,.16);
+    border-radius: 999px;
+    color: var(--green-760);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 2px;
+  }
+
+  .voice-text {
+    z-index: 1;
+    flex: 1;
+    margin: 34px 0 22px;
+    color: var(--green-950);
+    font-family: var(--serif);
+    font-size: 18px;
+    line-height: 1.96;
+  }
+
+  .voice-text .said { color: var(--green-950); }
+  .voice-text .now { color: var(--green-620); font-weight: 600; }
+  .voice-text .pending { opacity: .27; }
+
+  .big-wave {
+    z-index: 1;
+    height: 72px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 18px;
+  }
+
+  .big-wave span {
+    width: 4px;
+    border-radius: 999px;
+    background: linear-gradient(180deg, var(--green-620), var(--green-300));
+    animation: wave 1.1s ease-in-out infinite;
+  }
+
+  .voice-foot {
+    z-index: 1;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .voice-label {
+    color: var(--green-760);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 1.5px;
+  }
+
+  .pillbtn {
+    padding: 8px 14px;
+    border: 1px solid var(--green-620);
+    border-radius: 999px;
+    color: var(--green-760);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 1.6px;
+  }
+
+  .paper {
+    position: relative;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: var(--paper);
+    background-image: radial-gradient(circle at 1px 1px, rgba(99,80,40,.045) .5px, transparent 0);
+    background-size: 14px 14px;
+  }
+
+  .paper-head {
+    display: flex;
+    justify-content: space-between;
+    padding: 28px 32px 4px;
+    color: var(--ink-3);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 2px;
+  }
+
+  .entry {
+    flex: 1;
+    padding: 18px 32px 0;
+    color: var(--green-900);
+    font-family: var(--serif);
+    font-size: 15.5px;
+    line-height: 2.05;
+    overflow: hidden;
+  }
+
+  .entry p { margin: 0 0 1.15em; text-indent: 2em; }
+  .entry p:first-child { text-indent: 0; }
+
+  .divider {
+    margin: 8px 0 18px;
+    color: var(--green-440);
+    text-align: center;
+    letter-spacing: 6px;
+  }
+
+  .entry-foot {
+    padding: 14px 32px 18px;
+    border-top: 1px dashed rgba(99,80,40,.14);
+    background: rgba(255,253,247,.86);
+  }
+
+  .sign {
+    color: var(--green-760);
+    font-family: var(--mono);
+    font-size: 10px;
+    text-align: right;
+    letter-spacing: 1.5px;
+  }
+
+  .played {
+    margin-top: 9px;
+    color: var(--ink-3);
+    font-family: var(--mono);
+    font-size: 10px;
+    line-height: 1.65;
+  }
+
+  .played b {
+    color: var(--green-760);
+    font-weight: 500;
+    letter-spacing: 2px;
+  }
+
+  .profile-scroll,
+  .settings-scroll,
+  .queue-scroll {
+    height: 100%;
+    overflow: hidden;
+    background: #fff;
+  }
+
+  .portrait {
+    padding: 30px 26px 26px;
+    background:
+      linear-gradient(120deg, rgba(255,255,255,.42), transparent 48%),
+      var(--green-070);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .avatar-big {
+    width: 56px;
+    height: 56px;
+    display: grid;
+    place-items: center;
+    margin-bottom: 18px;
+    border-radius: 999px;
+    background: var(--green-620);
+    color: #f7ffe9;
+    font-family: var(--serif);
+    font-size: 23px;
+    font-weight: 600;
+  }
+
+  .portrait p {
+    margin: 0;
+    color: var(--green-950);
+    font-family: var(--serif);
+    font-size: 15.5px;
+    line-height: 1.95;
+  }
+
+  .section {
+    padding: 22px;
+    border-bottom: 1px solid var(--line);
+    background: #fff;
+  }
+
+  .section-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+    color: var(--green-760);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 2.5px;
+  }
+
+  .section-title::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--line);
+  }
+
+  .sig-row,
+  .q-row,
+  .queue-row,
+  .field-row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px dashed var(--line);
+  }
+
+  .sig-row:last-child,
+  .q-row:last-child,
+  .queue-row:last-child,
+  .field-row:last-child { border-bottom: 0; }
+
+  .num {
+    width: 22px;
+    color: var(--ink-3);
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+
+  .grow { flex: 1; min-width: 0; }
+
+  .reason {
+    margin-top: 4px;
+    color: var(--green-760);
+    font-family: var(--serif);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .bar {
+    height: 6px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: #f1f3ed;
+  }
+
+  .bar span {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: var(--green-620);
+  }
+
+  .moods {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .mood {
+    padding: 5px 10px;
+    border-radius: 999px;
+    background: var(--green-160);
+    color: var(--green-900);
+    font-family: var(--serif);
+    font-size: 13px;
+  }
+
+  .queue-tabs {
+    display: flex;
+    height: 44px;
+    padding: 0 18px;
+    gap: 6px;
+    border-bottom: 1px solid var(--line);
+    background: #fff;
+  }
+
+  .queue-tabs button {
+    position: relative;
+    border: 0;
+    background: transparent;
+    color: var(--ink-3);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 1.5px;
+  }
+
+  .queue-tabs .active {
+    color: var(--green-760);
+  }
+
+  .queue-tabs .active::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    background: var(--green-620);
+  }
+
+  .now-playing {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin: 18px 16px 10px;
+    padding: 13px 14px;
+    border: 1px solid rgba(99,153,34,.23);
+    border-radius: 8px;
+    background: var(--green-070);
+  }
+
+  .tiny-bars {
+    width: 18px;
+    height: 16px;
+    display: flex;
+    align-items: end;
+    gap: 2px;
+    justify-content: center;
+  }
+
+  .tiny-bars span {
+    width: 3px;
+    border-radius: 2px;
+    background: var(--green-620);
+    animation: wave 1s ease-in-out infinite;
+  }
+
+  .queue-section-label {
+    margin: 18px 22px 8px;
+    color: var(--green-760);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 2px;
+  }
+
+  .queue-row {
+    padding: 11px 22px 11px 16px;
+  }
+
+  .drag {
+    color: var(--ink-3);
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+
+  .status-dot {
+    width: 9px;
+    height: 9px;
+    border: 1px solid var(--green-620);
+    border-radius: 999px;
+  }
+
+  .status-dot.on {
+    background: var(--green-620);
+    box-shadow: 0 0 0 4px rgba(99,153,34,.11);
+  }
+
+  .settings-scroll {
+    background: #fff;
+  }
+
+  .input {
+    width: 100%;
+    height: 38px;
+    margin-top: 8px;
+    padding: 0 12px;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+
+  .field-label {
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+
+  .hint {
+    margin-top: 4px;
+    color: var(--ink-3);
+    font-family: var(--serif);
+    font-size: 11px;
+    line-height: 1.55;
+  }
+
+  .toggle {
+    width: 42px;
+    height: 24px;
+    position: relative;
+    border-radius: 999px;
+    background: var(--green-620);
+    flex: 0 0 42px;
+  }
+
+  .toggle::after {
+    content: "";
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    background: #fff;
+  }
+
+  .qr {
+    display: grid;
+    grid-template-columns: 96px 1fr;
+    gap: 14px;
+    margin-top: 12px;
+    padding: 12px;
+    border: 1px solid var(--line-dark);
+    border-radius: 8px;
+    background: var(--green-070);
+  }
+
+  .qrbox {
+    width: 96px;
+    height: 96px;
+    display: grid;
+    place-items: center;
+    background:
+      linear-gradient(90deg, var(--green-900) 12px, transparent 12px) 0 0 / 24px 24px,
+      linear-gradient(var(--green-900) 12px, transparent 12px) 0 0 / 24px 24px,
+      #fff;
+    border: 1px solid var(--line);
+  }
+
+  .close-layer {
+    position: relative;
+    height: 100%;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background:
+      linear-gradient(rgba(23,24,22,.18), rgba(23,24,22,.18)),
+      var(--green-070);
+  }
+
+  .close-dialog {
+    width: 350px;
+    padding: 22px 22px 18px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(255,255,255,.96);
+    box-shadow: 0 24px 70px rgba(25,52,5,.16);
+  }
+
+  .close-dialog h2 {
+    margin: 0 0 10px;
+    color: var(--green-950);
+    font-family: var(--serif);
+    font-size: 20px;
+    font-weight: 500;
+  }
+
+  .close-dialog p {
+    margin: 0;
+    color: var(--ink-2);
+    font-family: var(--serif);
+    font-size: 13px;
+    line-height: 1.75;
+  }
+
+  .check {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: 18px;
+    color: var(--ink-3);
+    font-size: 12px;
+  }
+
+  .actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 20px;
+  }
+
+  .btn {
+    min-height: 34px;
+    padding: 0 14px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fff;
+    color: var(--ink-2);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 1px;
+  }
+
+  .btn.primary {
+    border-color: var(--green-620);
+    background: var(--green-620);
+    color: #fff;
+  }
+
+  .album {
+    width: 34px;
+    height: 34px;
+    border-radius: 6px;
+    background:
+      linear-gradient(135deg, rgba(255,255,255,.5), transparent),
+      var(--green-300);
+    border: 1px solid rgba(39,80,10,.16);
+  }
+
+  .small-note {
+    color: var(--ink-3);
+    font-size: 11px;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+<main class="board">
+  <header class="board-head">
+    <div>
+      <div class="brand-kicker">E C H O · v 0 . 3 · REDESIGN BOARD</div>
+      <h1>私人音乐日记本,会在合适的时刻开口。</h1>
+      <p class="board-copy">这版把 Echo 的方向收束为“安静、具体、朋友感”。界面采用无系统窗口边框的单窗口尺度,每个页面都像同一本手帐里的不同页:主对话负责当下,听音负责开口,音忆负责回看,主页负责认识你,列表负责正在发生。</p>
+    </div>
+    <div class="token-strip" aria-label="color tokens">
+      <span class="swatch" style="background:#27500a"></span>
+      <span class="swatch" style="background:#639922"></span>
+      <span class="swatch" style="background:#c0dd97"></span>
+      <span class="swatch" style="background:#eaf3de"></span>
+      <span class="swatch" style="background:#fffdf7"></span>
+      <span class="swatch" style="background:#f7f7f3"></span>
+    </div>
+  </header>
+
+  <section class="canvas-grid">
+    <div class="spec-card">
+      <div class="spec-block">
+        <div class="spec-label">D I R E C T I O N</div>
+        <p>视觉方向是“纸张里的播放状态”。窗口使用 frameless 结构,内容直接成为产品外壳,用衬线正文、等宽元信息、细分隔线和低饱和抹茶绿建立私人空间。</p>
+      </div>
+      <div class="spec-block">
+        <div class="spec-label">W I N D O W</div>
+        <p>顶部 64px 是自定义窗口栏,承担拖拽、返回、导航和状态展示。后期 Electron 可用 frame:false,标题栏与系统菜单交给产品 UI 接管。</p>
+      </div>
+      <div class="spec-block">
+        <div class="spec-label">C O P Y</div>
+        <p>文案从“推荐播报”转为“朋友小语音”。气泡、音忆、听音都保留具体由头,少用抽象安慰。</p>
+      </div>
+    </div>
+
+    <article class="screen-wrap">
+      <div class="screen-tag">0 1 · 主对话 / Chat</div>
+      <div class="phone">
+        <header class="topbar">
+          <div class="avatar">E</div>
+          <div class="title-stack">
+            <div class="app-name">Echo <span class="mono" style="font-size:9px;color:var(--green-620);letter-spacing:1.5px;">ON AIR</span></div>
+            <div class="subline">晚上好 · 听音刚刚说完</div>
+          </div>
+          <nav class="nav">
+            <button>音忆</button><button class="active">听音</button><button>列表</button>
+          </nav>
+        </header>
+        <div class="content chat">
+          <div class="msg">
+            <div class="avatar" style="width:30px;height:30px;font-size:15px;">E</div>
+            <div>
+              <div class="bubble">你刚说今天脑子有点散,我先不把歌推得太满。给你放陈慧娴的《飘雪》,前奏一进来就会把房间压低一点。<div class="track-card"><button class="play">▶</button><div><div class="track-title">飘雪</div><div class="track-meta">陈慧娴 · 网易云 · 可播放</div><div class="track-note">— 适合把刚才那点乱慢慢收回来</div></div></div></div>
+              <div class="time">21:14</div>
+            </div>
+          </div>
+          <div class="msg user"><div class="bubble">这个感觉对。再来两首类似的。</div></div>
+          <div class="msg">
+            <div class="avatar" style="width:30px;height:30px;font-size:15px;">E</div>
+            <div>
+              <div class="bubble">好,我按“慢、老一点、别太重”接下去。第一首先放《千千阙歌》,后面排《人生何处不相逢》。这三首会连成一条线。</div>
+              <div class="time">21:16</div>
+            </div>
+          </div>
+        </div>
+        <div class="composer"><input placeholder="和 Echo 说点什么..."><button class="send">➤</button></div>
+        <footer class="player">
+          <div class="wave"></div>
+          <div class="player-row">
+            <div class="player-copy"><div class="track-title">飘雪</div><div class="track-meta">陈慧娴</div></div>
+            <div class="controls"><button>‹</button><button class="main">▶</button><button>›</button></div>
+          </div>
+          <div class="progress"><span>01:12</span><div class="seg"></div><span>04:18</span></div>
+        </footer>
+      </div>
+    </article>
+
+    <article class="screen-wrap">
+      <div class="screen-tag">0 2 · 听音 / Voice</div>
+      <div class="phone">
+        <header class="topbar">
+          <button class="ghost">◁ 返回</button>
+          <div class="page-title">听 音<small>T I N G Y I N</small></div>
+          <button class="ghost">再说</button>
+        </header>
+        <section class="voice-body">
+          <div class="voice-status">E C H O · S P E A K I N G</div>
+          <div class="voice-text"><span class="said">嗨,九点二十了。你刚说今天脑子有点散——我刚还在想这事,这种时候其实不用急着振作。</span><span class="now">我给你放陈慧娴的《飘雪》。</span><span class="pending">它不会催你,只是慢慢把房间里的声音铺平。</span></div>
+          <div class="big-wave"></div>
+          <div class="voice-foot">
+            <span class="voice-label">陈慧娴 · 飘雪 · 30% 背景音量</span>
+            <button class="pillbtn">回 主 对 话</button>
+          </div>
+        </section>
+        <footer class="player" style="flex-basis:118px;">
+          <div class="player-row">
+            <div class="player-copy"><div class="track-title">飘雪</div><div class="track-meta">Echo 正在说话 · 音量闪避</div></div>
+            <div class="controls"><button class="main">▶</button></div>
+          </div>
+          <div class="progress"><span>00:09</span><div class="seg"></div><span>00:24</span></div>
+        </footer>
+      </div>
+    </article>
+
+    <article class="screen-wrap">
+      <div class="screen-tag">0 3 · 音忆 / Yinyi</div>
+      <div class="phone">
+        <header class="topbar">
+          <button class="ghost">◁ 返回</button>
+          <div class="page-title">音 忆<small>Y I N Y I</small></div>
+          <button class="ghost">今 日</button>
+        </header>
+        <article class="paper">
+          <div class="paper-head"><span>2 0 2 6 . 0 4 . 2 6</span><span>阴 · 周日</span></div>
+          <div class="entry">
+            <p>今天你打开我两次。第一次只是看了一眼正在播放,没说话;第二次是晚上,你问我“有没有值得听的”。我记得这个问法,它通常不是要很多选择,只是想让我替你先开个头。</p>
+            <div class="divider">· · ·</div>
+            <p>我刚才在想,你最近会把同一类慢歌听得更完整。以前你切得快,现在会让一首歌走到最后。我说不准这是变耐心了,还是今天真的不想动。</p>
+            <p>后来《飘雪》播完,你没有切走。这个小动作比一句“好听”还清楚。</p>
+          </div>
+          <div class="entry-foot">
+            <div class="sign">— E C H O</div>
+            <div class="played"><b>T O D A Y · P L A Y E D</b><br>陈慧娴 · 飘雪 ×1<br>林俊杰 · 我怀念的 ×1</div>
+          </div>
+        </article>
+      </div>
+    </article>
+
+    <article class="screen-wrap">
+      <div class="screen-tag">0 4 · 品味主页 / Profile</div>
+      <div class="phone">
+        <header class="topbar">
+          <button class="ghost">◁ 返回</button>
+          <div class="page-title">Echo<small>P R O F I L E</small></div>
+          <button class="ghost">设置</button>
+        </header>
+        <div class="profile-scroll">
+          <section class="portrait">
+            <div class="avatar-big">E</div>
+            <p>你喜欢旋律性强、情感直白的歌。林俊杰是稳定轴,陈慧娴和陈奕迅像夜里的旧灯,Charlie Puth 是你工作时的节奏底。我最近才发现:你不是只喜欢慢歌,你喜欢“入口不硬”的歌。</p>
+          </section>
+          <section class="section">
+            <div class="section-title">S I G N A T U R E · 7</div>
+            <div class="sig-row"><div class="num">01</div><div class="grow"><div class="track-title">飘雪</div><div class="track-meta">陈慧娴</div><div class="reason">— 晚上需要低一点的时候,它很合适</div></div><button class="iconbtn">▶</button></div>
+            <div class="sig-row"><div class="num">02</div><div class="grow"><div class="track-title">我怀念的</div><div class="track-meta">林俊杰</div><div class="reason">— 你总说不用力的版本更耐听</div></div><button class="iconbtn">▶</button></div>
+            <div class="sig-row"><div class="num">03</div><div class="grow"><div class="track-title">How Long</div><div class="track-meta">Charlie Puth</div><div class="reason">— 你的晚上工作底色</div></div><button class="iconbtn">▶</button></div>
+          </section>
+          <section class="section">
+            <div class="section-title">M O O D</div>
+            <div class="moods"><span class="mood">回家路上</span><span class="mood">晚上工作</span><span class="mood">慢下来</span><span class="mood">旧歌</span><span class="mood">一点点劲</span><span class="mood">发呆</span></div>
+          </section>
+          <section class="section" style="background:var(--green-070);">
+            <div class="section-title">E C H O 问 你</div>
+            <div class="q-row"><div class="num">Q</div><div class="grow"><div class="reason" style="margin-top:0;color:var(--green-950);font-size:13px;">你最近听陈慧娴变多了,是喜欢这个年代,还是只对她有感觉?</div></div></div>
+          </section>
+        </div>
+      </div>
+    </article>
+
+    <article class="screen-wrap">
+      <div class="screen-tag">0 5 · 播放列表 / Queue</div>
+      <div class="phone">
+        <header class="topbar">
+          <button class="ghost">◁ 返回</button>
+          <div class="page-title">列 表<small>Q U E U E</small></div>
+          <button class="ghost">清空</button>
+        </header>
+        <div class="queue-scroll">
+          <div class="queue-tabs"><button class="active">当前 <span>3</span></button><button>历史</button><button>收藏</button></div>
+          <div class="now-playing"><div class="tiny-bars"><span style="height:60%"></span><span style="height:100%"></span><span style="height:42%"></span></div><div class="grow"><div class="track-title">飘雪</div><div class="track-meta">陈慧娴 · 正在播放</div></div><span class="mini-meta">01:12</span></div>
+          <div class="queue-section-label">U P · N E X T</div>
+          <div class="queue-row"><span class="drag">⋮⋮</span><span class="status-dot"></span><div class="grow"><div class="track-title">千千阙歌</div><div class="track-meta">陈慧娴 · Echo 推荐</div><div class="reason">— 和上一首连得上</div></div><button class="iconbtn">↑</button></div>
+          <div class="queue-row"><span class="drag">⋮⋮</span><span class="status-dot"></span><div class="grow"><div class="track-title">人生何处不相逢</div><div class="track-meta">陈慧娴 · Echo 推荐</div><div class="reason">— 情绪再放低一点</div></div><button class="iconbtn">×</button></div>
+          <div class="queue-section-label">T O D A Y · H I S T O R Y</div>
+          <div class="queue-row" style="opacity:.56;"><span class="drag">✓</span><span class="status-dot on"></span><div class="grow"><div class="track-title">我怀念的</div><div class="track-meta">林俊杰 · 已听完</div></div><span class="mini-meta">20:48</span></div>
+          <div class="queue-row" style="opacity:.42;"><span class="drag">—</span><span class="status-dot"></span><div class="grow"><div class="track-title">七友</div><div class="track-meta">梁汉文 · 已跳过</div></div><span class="mini-meta">20:41</span></div>
+        </div>
+        <footer class="player">
+          <div class="wave"></div>
+          <div class="player-row"><div><div class="track-title">飘雪</div><div class="track-meta">陈慧娴</div></div><div class="controls"><button>‹</button><button class="main">▶</button><button>›</button></div></div>
+        </footer>
+      </div>
+    </article>
+
+    <article class="screen-wrap">
+      <div class="screen-tag">0 6 · 设置 / Settings</div>
+      <div class="phone">
+        <header class="topbar">
+          <button class="ghost">◁ 返回</button>
+          <div class="page-title">设 置<small>S E T T I N G S</small></div>
+          <span style="width:66px"></span>
+        </header>
+        <div class="settings-scroll">
+          <section class="section">
+            <div class="section-title">A I · M O D E L</div>
+            <div class="field-label">API 端点</div><div class="hint">支持 OpenAI 兼容服务,Key 本地加密。</div><input class="input" value="https://api.deepseek.com/v1">
+            <div style="height:12px"></div><div class="field-label">模型</div><input class="input" value="deepseek-chat">
+            <div style="margin-top:12px;display:flex;gap:8px;align-items:center;"><button class="btn primary">测试连接</button><span class="mono" style="color:var(--green-760);font-size:10px;">● 187 ms</span></div>
+          </section>
+          <section class="section">
+            <div class="section-title">听 音 · v 0 . 3</div>
+            <div class="field-row"><div class="grow"><div class="field-label">所在城市</div><div class="hint">天气开场会用到。</div></div><input class="input" style="width:120px;margin-top:0" value="北京"></div>
+            <div class="field-row"><div class="grow"><div class="field-label">音色</div><div class="hint">默认晓辰 · 知性。</div></div><select class="input" style="width:150px;margin-top:0"><option>晓辰 · 知性</option></select></div>
+          </section>
+          <section class="section">
+            <div class="section-title">网 易 云</div>
+            <div class="field-row"><div class="grow"><div class="field-label">登录状态</div><div class="hint">已登录 · WuSix</div></div><span class="mono" style="color:var(--green-760);font-size:10px;">● ONLINE</span></div>
+            <div class="qr"><div class="qrbox"></div><div><div class="field-label">扫码登录</div><div class="hint">二维码过期后自动刷新。cookie 只保存在本机。</div></div></div>
+          </section>
+        </div>
+      </div>
+    </article>
+
+    <article class="screen-wrap">
+      <div class="screen-tag">0 7 · 退出弹窗 / Close Dialog</div>
+      <div class="phone">
+        <header class="topbar">
+          <div class="avatar">E</div><div class="title-stack"><div class="app-name">Echo</div><div class="subline">关闭窗口时的第一次确认</div></div>
+        </header>
+        <div class="close-layer">
+          <div class="close-dialog">
+            <div class="spec-label">E C H O · C L O S E</div>
+            <h2>要让我先待在托盘里吗?</h2>
+            <p>我可以安静地留在后台,音乐继续,下次点开还能接着刚才的位置。你也可以直接退出,我会在关掉前把今天的线索收好。</p>
+            <label class="check"><input type="checkbox"> 下次按这个选择处理</label>
+            <div class="actions"><button class="btn">直接退出</button><button class="btn primary">最小化到托盘</button></div>
+          </div>
+        </div>
+      </div>
+    </article>
+  </section>
+</main>
+
+<script>
+  function fillBars(selector, count, active) {
+    document.querySelectorAll(selector).forEach((box) => {
+      if (box.children.length) return;
+      for (let i = 0; i < count; i += 1) {
+        const el = document.createElement(selector === '.seg' ? 'i' : 'span');
+        if (selector === '.wave' || selector === '.big-wave') {
+          const base = selector === '.big-wave' ? 16 : 8;
+          const spread = selector === '.big-wave' ? 58 : 24;
+          el.style.height = `${base + ((i * 17) % spread)}px`;
+        }
+        if (i < active) el.className = 'on';
+        box.appendChild(el);
+      }
+    });
+  }
+  fillBars('.wave', 36, 0);
+  fillBars('.big-wave', 34, 0);
+  fillBars('.seg', 30, 9);
+</script>
+</body>
+</html>

@@ -1,0 +1,114 @@
+{
+  "_meta": {
+    "purpose": "v0.1 启动时的艺人 → genre/mood 映射种子。覆盖用户实际喜欢的艺人。recommender.ts 在 autoTag() 时优先查这份表,未命中再 fallback 到默认。",
+    "schema_version": 1,
+    "user_seed_at": "2026-04-24",
+    "note": "标签是启发式的,不需要严格学术准确——目的是给推荐打分提供基础信号。后续用户行为反馈会调整这些权重。"
+  },
+
+  "artists": {
+
+    "林俊杰": {
+      "aliases": ["JJ Lin", "JJ"],
+      "genre": ["华语流行", "华语 R&B", "华语流行情歌"],
+      "mood": ["calm", "melancholy", "happy"],
+      "signature_vibe": "细腻、抒情、技术派华语流行",
+      "tempo_default": "mid",
+      "era": "00s-20s"
+    },
+
+    "海洋Bo": {
+      "aliases": ["鲍海洋", "刘广文"],
+      "genre": ["民谣说唱", "治愈系流行", "华语独立"],
+      "mood": ["calm", "melancholy", "happy"],
+      "signature_vibe": "治愈、生活化叙事、轻说唱",
+      "tempo_default": "mid",
+      "era": "20s",
+      "note_for_echo": "Echo 推这位时可以提到《向云端》是 2023 年的现象级作品"
+    },
+
+    "银河快递": {
+      "aliases": [],
+      "genre": ["华语独立"],
+      "mood": ["calm"],
+      "signature_vibe": "(用户喜欢但 Echo 资料较少,首次推荐时建议主动询问用户感受)",
+      "tempo_default": "mid",
+      "era": "unknown",
+      "echo_should_ask": true
+    },
+
+    "陈默之": {
+      "aliases": [],
+      "genre": ["华语独立"],
+      "mood": ["calm", "melancholy"],
+      "signature_vibe": "(用户喜欢但 Echo 资料较少,首次推荐时建议主动询问用户感受)",
+      "tempo_default": "mid",
+      "era": "unknown",
+      "echo_should_ask": true
+    },
+
+    "P!nk": {
+      "aliases": ["Pink", "Alecia Beth Moore"],
+      "genre": ["pop rock", "pop", "alternative"],
+      "mood": ["energetic", "happy", "sad"],
+      "signature_vibe": "powerful vocals, anthemic pop rock",
+      "tempo_default": "mid",
+      "era": "00s-20s"
+    },
+
+    "南征北战NZBZ": {
+      "aliases": ["南征北战", "NZBZ"],
+      "genre": ["华语 hip-hop", "华语流行说唱"],
+      "mood": ["energetic", "happy"],
+      "signature_vibe": "热血、励志、节奏感强的华语说唱",
+      "tempo_default": "fast",
+      "era": "10s-20s"
+    },
+
+    "Justin Bieber": {
+      "aliases": ["Bieber", "JB"],
+      "genre": ["pop", "R&B", "dance pop"],
+      "mood": ["happy", "calm", "melancholy"],
+      "signature_vibe": "modern pop ballads + dance",
+      "tempo_default": "mid",
+      "era": "10s-20s"
+    },
+
+    "Charlie Puth": {
+      "aliases": ["查理普斯"],
+      "genre": ["pop", "R&B"],
+      "mood": ["calm", "melancholy", "happy"],
+      "signature_vibe": "clean production, smooth vocal pop",
+      "tempo_default": "mid",
+      "era": "10s-20s"
+    }
+  },
+
+  "kpop_groups_placeholder": {
+    "_note": "用户提到'等韩国组合'但未具体列名。v0.1 启动时,首次导入歌单后 Echo 应该主动确认:'你喜欢的韩国组合具体是哪几个?BLACKPINK / TWICE / SEVENTEEN / Stray Kids 还是其他?'。确认后写入下方。",
+    "examples_to_ask_about": [
+      "BLACKPINK", "TWICE", "SEVENTEEN", "Stray Kids", "NewJeans",
+      "(G)I-DLE", "aespa", "IVE", "BTS", "EXO"
+    ]
+  },
+
+  "genre_groups": {
+    "_note": "genre 的同义词归一化,recommender.ts 检索时把这些视为同一组",
+    "华语流行": ["mandopop", "c-pop", "华语流行情歌"],
+    "华语 hip-hop": ["华语说唱", "华语流行说唱", "中文 rap"],
+    "pop": ["流行", "western pop"],
+    "R&B": ["rnb", "r-and-b", "rhythm and blues"],
+    "民谣说唱": ["folk rap", "lo-fi rap", "治愈系说唱"]
+  },
+
+  "user_taste_signals": {
+    "_note": "从这份艺人列表归纳出的初始品味标签。Echo 启动时把这段写到 taste_profile.summary 里,作为 system prompt 的一部分。",
+    "summary": "用户的口味很宽:华语方面横跨技术派抒情(林俊杰)、治愈说唱(海洋Bo)、励志说唱(南征北战);欧美方面是主流流行 + R&B(Bieber、Charlie Puth、Pink)；同时听 K-pop 组合。共同点是:旋律性强、情感直白、不偏冷门 indie 也不偏先锋实验。Echo 推歌时,'好听 + 共鸣感强'比'独特 / 小众'更重要。",
+    "discovery_appetite": 0.5,
+    "anti_patterns_guess": [
+      "纯实验电子",
+      "noise / drone",
+      "古典纯器乐(除非用户后续表示喜欢)"
+    ]
+  }
+}

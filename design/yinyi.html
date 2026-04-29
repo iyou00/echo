@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Echo · 音忆</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ayin-900: #27500A;
+    --ayin-700: #3B6D11;
+    --ayin-600: #639922;
+    --ayin-400: #8FBC57;
+    --ayin-300: #C0DD97;
+    --ayin-100: #EAF3DE;
+    --ayin-50:  #F5FAED;
+
+    --bg: #FFFFFF;
+    --bg-2: #F7F7F5;
+    --bg-3: #EDEDE8;
+    --text: #1A1A1A;
+    --text-2: #5C5C5A;
+    --text-3: #999996;
+    --border: rgba(0,0,0,0.08);
+
+    --sans: "Noto Sans SC", -apple-system, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", monospace;
+    --serif: "Noto Serif SC", Georgia, serif;
+
+    /* 手帐纸张色 */
+    --paper: #FBFBF6;
+    --paper-edge: #F0EEE3;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    background: var(--bg-3);
+    font-family: var(--sans);
+    color: var(--text);
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .stage {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background:
+      radial-gradient(ellipse at top, rgba(143, 188, 87, 0.08), transparent 50%),
+      var(--bg-3);
+  }
+  .app {
+    width: 440px;
+    height: 720px;
+    background: var(--bg);
+    border-radius: 14px;
+    box-shadow: 0 20px 60px rgba(0, 40, 0, 0.12), 0 4px 12px rgba(0, 40, 0, 0.06);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* 顶栏 · 与其他页一致 */
+  .hdr {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    border-bottom: 0.5px solid var(--border);
+    background: var(--bg);
+    z-index: 3;
+  }
+  .back-btn {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-2);
+    padding: 6px 10px;
+    background: transparent;
+    border: 0;
+    letter-spacing: 1px;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  .back-btn:hover { background: var(--bg-2); color: var(--text); }
+  .hdr-title {
+    flex: 1;
+    text-align: center;
+    font-family: var(--serif);
+    font-size: 15px;
+    font-weight: 500;
+  }
+  .hdr-title small {
+    display: block;
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-3);
+    letter-spacing: 2px;
+    margin-top: 2px;
+    font-weight: 400;
+  }
+  .today-btn {
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 5px 10px;
+    background: transparent;
+    border: 0.5px solid var(--border);
+    color: var(--text-2);
+    border-radius: 12px;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .today-btn:hover {
+    border-color: var(--ayin-600);
+    color: var(--ayin-700);
+  }
+  .today-btn.icon-only {
+    padding: 5px 8px;
+    font-size: 12px;
+    letter-spacing: 0;
+  }
+  .hdr-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+
+  /* 主内容 · 翻页容器 */
+  .book {
+    flex: 1;
+    display: flex;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* 左右翻页热区 */
+  .page-hot {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 44px;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.2s ease;
+  }
+  .page-hot:hover { background: rgba(99, 153, 34, 0.04); }
+  .page-hot.left { left: 0; }
+  .page-hot.right { right: 0; }
+  .page-arrow {
+    opacity: 0;
+    font-family: var(--serif);
+    font-size: 22px;
+    color: var(--ayin-600);
+    font-weight: 300;
+    transition: opacity 0.2s ease;
+  }
+  .page-hot:hover .page-arrow { opacity: 0.6; }
+
+  /* 单页(手帐纸) */
+  .page {
+    flex: 1;
+    background: var(--paper);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    /* 纸张的细微纹理 */
+    background-image:
+      radial-gradient(circle at 1px 1px, rgba(99, 80, 40, 0.04) 0.5px, transparent 0);
+    background-size: 14px 14px;
+  }
+  /* 纸张左侧装订线的微妙阴影 */
+  .page::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: linear-gradient(to right, rgba(99, 80, 40, 0.1), transparent);
+  }
+
+  /* 页头:日期(小字) */
+  .page-head {
+    padding: 28px 32px 4px;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+  }
+  .date-stamp {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-3);
+    letter-spacing: 2.5px;
+  }
+  .date-weather {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-3);
+    letter-spacing: 1px;
+  }
+
+  /* 日记正文(滚动) */
+  .entry {
+    flex: 1;
+    overflow-y: auto;
+    padding: 18px 32px 0;
+  }
+  .entry::-webkit-scrollbar { width: 3px; }
+  .entry::-webkit-scrollbar-thumb { background: var(--paper-edge); border-radius: 2px; }
+
+  .entry-body {
+    font-family: var(--serif);
+    font-size: 15.5px;
+    line-height: 2.1;
+    color: var(--ayin-900);
+    letter-spacing: 0.3px;
+  }
+  .entry-body p {
+    margin-bottom: 1.3em;
+    text-indent: 2em;  /* 中文段首缩进 */
+  }
+  .entry-body p:first-child {
+    text-indent: 0;
+  }
+  .entry-body p:first-child::first-letter {
+    font-size: 1.6em;
+    line-height: 1;
+    color: var(--ayin-600);
+    font-weight: 500;
+    margin-right: 2px;
+  }
+
+  /* 段间的小装饰分隔 */
+  .divider {
+    text-align: center;
+    margin: 8px 0 20px;
+    color: var(--ayin-400);
+    font-size: 14px;
+    letter-spacing: 6px;
+  }
+
+  /* 底部 · Echo 签名 + 今日听过 */
+  .entry-foot {
+    padding: 14px 32px 18px;
+    border-top: 0.5px dashed var(--paper-edge);
+    background: var(--paper);
+  }
+  .sign {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ayin-700);
+    letter-spacing: 1.5px;
+    margin-bottom: 10px;
+    text-align: right;
+  }
+  .today-played {
+    font-size: 10.5px;
+    color: var(--text-3);
+    line-height: 1.7;
+    font-family: var(--mono);
+    letter-spacing: 0.2px;
+  }
+  .today-played-label {
+    display: block;
+    color: var(--ayin-700);
+    letter-spacing: 2px;
+    margin-bottom: 4px;
+    font-size: 9px;
+  }
+  .today-played .t {
+    color: var(--text-2);
+  }
+
+  /* 日期跳转(原生 date picker 伪装成按钮) */
+  .date-jump {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+  }
+  .date-jump input[type="date"] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+
+  /* 页脚信息条 */
+  .meta-bar {
+    padding: 10px 18px;
+    border-top: 0.5px solid var(--border);
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-3);
+    letter-spacing: 1px;
+    z-index: 3;
+  }
+  .meta-nav {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .meta-nav button {
+    font-family: var(--mono);
+    font-size: 11px;
+    background: transparent;
+    border: 0;
+    color: var(--text-2);
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+  .meta-nav button:hover { background: var(--bg-2); color: var(--text); }
+  .page-num {
+    letter-spacing: 1.5px;
+    color: var(--ayin-700);
+  }
+</style>
+</head>
+<body>
+
+<div class="stage">
+  <div class="app">
+
+    <!-- 顶栏 -->
+    <header class="hdr">
+      <button class="back-btn">◁ 返回</button>
+      <div class="hdr-title">
+        音 忆
+        <small>Y I N Y I</small>
+      </div>
+      <div class="hdr-actions">
+        <span class="date-jump" title="跳转到某一天">
+          <button class="today-btn icon-only">◷</button>
+          <input type="date" value="2026-04-24">
+        </span>
+        <button class="today-btn icon-only" title="随手翻一页">⤴</button>
+        <button class="today-btn" title="回到今日">今 日</button>
+      </div>
+    </header>
+
+    <!-- 翻页容器 -->
+    <div class="book">
+
+      <!-- 左侧翻页热区 -->
+      <div class="page-hot left" title="前一天">
+        <span class="page-arrow">‹</span>
+      </div>
+
+      <!-- 单页内容 -->
+      <article class="page">
+        <div class="page-head">
+          <span class="date-stamp">2 0 2 6 . 0 4 . 2 4</span>
+          <span class="date-weather">阴 · 周五</span>
+        </div>
+
+        <div class="entry">
+          <div class="entry-body">
+            <p>今天 19 点你回到家,第一件事是放林俊杰那首《不为谁而作的歌》——前奏一响你就跟着哼。这首你这周已经第三次了,以前你不会这样反复同一首。</p>
+
+            <p>后来我推了 Charlie Puth 的《Attention》,你听完了。我有点意外——本来以为你今晚的状态不太想要这种带节奏的,但你说"挺好"就放下手机了。三个字。</p>
+
+            <div class="divider">· · ·</div>
+
+            <p>你上次说工作上有点焦虑——这事我没忘。今晚你没在歌里提到它,但 9 点之后你没再换歌,放着海洋Bo 的《向云端》直到结束。</p>
+
+            <p>明天周六,你要是早起,我想给你放 Charlie Puth 别的几首——你今天对他接受度比上周高了点。</p>
+          </div>
+        </div>
+
+        <div class="entry-foot">
+          <div class="sign">— E C H O</div>
+          <div class="today-played">
+            <span class="today-played-label">T O D A Y &nbsp; P L A Y E D</span>
+            <span class="t">林俊杰 · 不为谁而作的歌</span> &nbsp;×3<br>
+            <span class="t">海洋Bo · 向云端</span> &nbsp;×2<br>
+            <span class="t">Charlie Puth · Attention</span>
+          </div>
+        </div>
+      </article>
+
+      <!-- 右侧翻页热区 -->
+      <div class="page-hot right" title="后一天">
+        <span class="page-arrow">›</span>
+      </div>
+
+    </div>
+
+    <!-- 底部翻页指示 -->
+    <div class="meta-bar">
+      <div class="meta-nav">
+        <button>‹</button>
+        <span>前一天</span>
+      </div>
+      <div class="page-num">第 1 2 7 篇 · 已陪伴 1 2 7 天</div>
+      <div class="meta-nav">
+        <span style="color: var(--text-3);">—</span>
+        <button style="color: var(--text-3); cursor: not-allowed;">›</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  // 点击日期选择器后 Electron 端会负责跳转逻辑,原型里无动作
+</script>
+
+</body>
+</html>

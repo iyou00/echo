@@ -1,0 +1,900 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Echo · Care Pings · v0.5 高保真原型</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ayin-900: #173404;
+    --ayin-800: #27500A;
+    --ayin-700: #3B6D11;
+    --ayin-600: #639922;
+    --ayin-400: #8FBC57;
+    --ayin-300: #C0DD97;
+    --ayin-100: #EAF3DE;
+    --ayin-50:  #F5FAED;
+
+    --bg: #FFFFFF;
+    --bg-2: #F7F7F5;
+    --text: #1A1A1A;
+    --text-2: #5F5E5A;
+    --text-3: #999996;
+
+    --sans: "Noto Sans SC", -apple-system, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", monospace;
+    --serif: "Noto Serif SC", Georgia, serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    background: #ECECE6;
+    font-family: var(--sans);
+    color: var(--text);
+    font-size: 13.5px;
+    -webkit-font-smoothing: antialiased;
+    padding: 36px 16px 80px;
+  }
+
+  h1 { font-family: var(--serif); font-weight: 500; font-size: 24px; text-align: center; margin-bottom: 6px; }
+  .h-sub { text-align: center; font-family: var(--mono); font-size: 10px; color: var(--text-3); letter-spacing: 2.5px; margin-bottom: 10px; }
+  .intro { text-align: center; max-width: 600px; margin: 0 auto 36px; font-family: var(--serif); font-style: italic; color: var(--text-2); font-size: 12.5px; line-height: 1.8; }
+
+  .section-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 2.5px;
+    color: var(--ayin-700);
+    margin: 56px auto 24px;
+    padding: 0 16px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    max-width: 720px;
+  }
+  .section-title::before, .section-title::after {
+    content: '';
+    flex: 1;
+    height: 0.5px;
+    background: rgba(0,0,0,0.1);
+  }
+
+  .case {
+    max-width: 720px;
+    margin: 0 auto 36px;
+  }
+  .case-head {
+    text-align: center;
+    margin-bottom: 16px;
+  }
+  .case-title {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 16px;
+    margin-bottom: 4px;
+  }
+  .case-desc {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 12.5px;
+    color: var(--text-2);
+    line-height: 1.7;
+  }
+
+  /* === 桌面背景模拟(macOS) === */
+  .desktop-mac {
+    background: linear-gradient(135deg, #2A3F2C 0%, #1A2818 100%);
+    border-radius: 16px;
+    padding: 24px;
+    position: relative;
+    min-height: 220px;
+    overflow: hidden;
+  }
+  .desktop-mac::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 28px;
+    background: rgba(255,255,255,0.08);
+    backdrop-filter: blur(20px);
+  }
+  .desktop-tag {
+    position: absolute;
+    top: 7px;
+    right: 14px;
+    font-family: var(--mono);
+    font-size: 9px;
+    color: rgba(255,255,255,0.5);
+    letter-spacing: 1.5px;
+  }
+  .desktop-tag .time { color: white; margin-left: 12px; }
+
+  /* macOS 通知 */
+  .notif-mac {
+    position: absolute;
+    top: 50px;
+    right: 16px;
+    width: 360px;
+    background: rgba(245, 245, 247, 0.94);
+    backdrop-filter: blur(40px);
+    -webkit-backdrop-filter: blur(40px);
+    border-radius: 12px;
+    padding: 12px 14px;
+    box-shadow: 0 12px 28px rgba(0,0,0,0.3);
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .notif-icon {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: var(--ayin-600);
+    color: var(--ayin-100);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 500;
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+  .notif-content { flex: 1; min-width: 0; }
+  .notif-app {
+    font-size: 11.5px;
+    font-weight: 500;
+    color: #1A1A1A;
+    margin-bottom: 1px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .notif-app-time {
+    font-size: 10.5px;
+    color: rgba(0,0,0,0.5);
+    font-weight: 400;
+  }
+  .notif-body {
+    font-size: 12.5px;
+    color: #1A1A1A;
+    line-height: 1.55;
+  }
+  .notif-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 0.5px solid rgba(0,0,0,0.08);
+  }
+  .notif-action {
+    flex: 1;
+    text-align: center;
+    padding: 4px 0;
+    font-size: 11px;
+    color: rgba(0,0,0,0.7);
+    background: rgba(0,0,0,0.04);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .notif-action:hover { background: rgba(0,0,0,0.08); }
+  .notif-action.primary { color: var(--ayin-700); }
+
+  /* === 桌面背景模拟(Windows) === */
+  .desktop-win {
+    background: linear-gradient(135deg, #1F1F2E 0%, #2A2A3E 100%);
+    border-radius: 16px;
+    padding: 24px;
+    position: relative;
+    min-height: 220px;
+    overflow: hidden;
+  }
+  .desktop-win::before {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 36px;
+    background: rgba(0,0,0,0.5);
+    backdrop-filter: blur(20px);
+  }
+
+  .notif-win {
+    position: absolute;
+    bottom: 50px;
+    right: 16px;
+    width: 360px;
+    background: rgba(40, 40, 50, 0.92);
+    backdrop-filter: blur(20px);
+    border-radius: 8px;
+    padding: 14px 16px;
+    box-shadow: 0 12px 28px rgba(0,0,0,0.4);
+    border: 0.5px solid rgba(255,255,255,0.08);
+  }
+  .notif-win-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: rgba(255,255,255,0.6);
+    margin-bottom: 8px;
+    font-family: var(--mono);
+    letter-spacing: 0.5px;
+  }
+  .notif-win-icon {
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: var(--ayin-600);
+    color: var(--ayin-100);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: 500;
+  }
+  .notif-win-body {
+    font-size: 13px;
+    color: white;
+    line-height: 1.55;
+    margin-bottom: 10px;
+  }
+  .notif-win-foot {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10.5px;
+    font-family: var(--mono);
+    color: rgba(255,255,255,0.4);
+  }
+  .notif-win-foot a {
+    color: rgba(255,255,255,0.6);
+    cursor: pointer;
+    text-decoration: underline;
+  }
+
+  /* 类型标签(在原型里给我们看 · 真实通知不显示) */
+  .type-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 8px;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+  }
+  .type-tag-recommend { background: var(--ayin-100); color: var(--ayin-800); }
+  .type-tag-casual { background: #FFE9D5; color: #8B4513; }
+  .type-tag-voice { background: #E6E0F8; color: #5046A5; }
+
+  /* 文案对比卡片 */
+  .case-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    max-width: 720px;
+    margin: 0 auto;
+  }
+  .case-card {
+    background: var(--bg-2);
+    border-radius: 12px;
+    padding: 14px;
+    border-left: 1.5px solid rgba(99,153,34,0.4);
+  }
+  .case-card-label {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: var(--ayin-600);
+    letter-spacing: 1.5px;
+    margin-bottom: 6px;
+  }
+  .case-card-text {
+    font-size: 12.5px;
+    line-height: 1.7;
+  }
+
+  /* 设置页 */
+  .settings-mock {
+    width: 460px;
+    margin: 0 auto;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(0,40,0,0.1);
+    overflow: hidden;
+  }
+  .set-hdr {
+    background: var(--ayin-50);
+    padding: 10px 14px;
+    border-bottom: 0.5px solid rgba(0,0,0,0.08);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 44px;
+  }
+  .set-back {
+    padding: 4px 10px;
+    border: 0.5px solid rgba(99,153,34,0.3);
+    border-radius: 11px;
+    background: transparent;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 1.5px;
+    color: var(--ayin-700);
+    cursor: pointer;
+  }
+  .set-title {
+    flex: 1;
+    text-align: center;
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 14px;
+  }
+  .set-title small {
+    display: block;
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-3);
+    letter-spacing: 2px;
+    margin-top: 2px;
+    font-weight: 400;
+  }
+  .set-spacer { width: 60px; }
+
+  .set-section {
+    padding: 18px;
+    border-bottom: 0.5px solid rgba(0,0,0,0.06);
+  }
+  .set-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 2.2px;
+    color: var(--ayin-700);
+    margin-bottom: 14px;
+  }
+
+  .row-toggle {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+  }
+  .row-toggle-info { flex: 1; min-width: 0; padding-right: 12px; }
+  .row-toggle-name {
+    font-size: 13.5px;
+    font-weight: 500;
+    margin-bottom: 2px;
+  }
+  .row-toggle-desc {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 11.5px;
+    color: var(--text-2);
+    line-height: 1.6;
+  }
+
+  .toggle {
+    width: 36px;
+    height: 20px;
+    border-radius: 10px;
+    background: var(--ayin-600);
+    position: relative;
+    flex-shrink: 0;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .toggle::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 18px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: white;
+    transition: left 0.2s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  }
+  .toggle.off { background: rgba(0,0,0,0.15); }
+  .toggle.off::after { left: 2px; }
+
+  .freq-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 12px;
+  }
+  .freq-pill {
+    flex: 1;
+    padding: 9px 0;
+    border: 0.5px solid rgba(0,0,0,0.1);
+    border-radius: 8px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .freq-pill .name {
+    font-size: 12.5px;
+    font-weight: 500;
+    margin-bottom: 2px;
+  }
+  .freq-pill .count {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: var(--text-3);
+    letter-spacing: 0.3px;
+  }
+  .freq-pill.active {
+    background: var(--ayin-50);
+    border-color: rgba(99,153,34,0.5);
+  }
+  .freq-pill.active .name { color: var(--ayin-700); }
+  .freq-pill.active .count { color: var(--ayin-600); }
+  .freq-pill:hover:not(.active) {
+    background: rgba(245,250,237,0.5);
+  }
+
+  .test-btn {
+    margin-top: 14px;
+    padding: 8px 16px;
+    border: 0.5px solid rgba(99,153,34,0.4);
+    background: transparent;
+    color: var(--ayin-700);
+    border-radius: 16px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 1.5px;
+    cursor: pointer;
+  }
+  .test-btn:hover { background: var(--ayin-50); }
+
+  .annot {
+    max-width: 720px;
+    margin: 14px auto 0;
+    padding: 12px 14px;
+    background: var(--ayin-50);
+    border-left: 1.5px solid var(--ayin-600);
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.75;
+    color: var(--ayin-800);
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+  }
+  .annot .num {
+    font-family: var(--mono);
+    color: var(--ayin-600);
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+  .annot code {
+    font-family: var(--mono);
+    background: white;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 11px;
+    color: var(--ayin-800);
+  }
+
+  /* 静音后状态 */
+  .muted-card {
+    max-width: 460px;
+    margin: 0 auto;
+    background: var(--ayin-50);
+    border-radius: 12px;
+    padding: 22px;
+    border: 0.5px dashed rgba(99,153,34,0.3);
+    text-align: center;
+  }
+  .muted-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    color: var(--ayin-700);
+    margin-bottom: 14px;
+  }
+  .muted-text {
+    font-family: var(--serif);
+    font-size: 14.5px;
+    line-height: 1.85;
+    color: var(--ayin-800);
+  }
+  .muted-foot {
+    margin-top: 14px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ayin-600);
+    letter-spacing: 1px;
+  }
+
+  /* 流程图 · 推歌点击行为 */
+  .flow {
+    max-width: 720px;
+    margin: 0 auto;
+    background: white;
+    border-radius: 12px;
+    padding: 22px;
+    box-shadow: 0 4px 12px rgba(0,40,0,0.06);
+  }
+  .flow-step {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    padding: 10px 0;
+  }
+  .flow-num {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--ayin-600);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+  .flow-text {
+    flex: 1;
+    line-height: 1.7;
+    padding-top: 2px;
+  }
+  .flow-text b {
+    color: var(--ayin-700);
+    font-weight: 500;
+  }
+  .flow-text small {
+    display: block;
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 11.5px;
+    color: var(--text-2);
+    margin-top: 2px;
+  }
+  .flow-arrow {
+    margin-left: 12px;
+    color: var(--ayin-300);
+    font-family: var(--mono);
+    font-size: 14px;
+    line-height: 1;
+    height: 14px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Echo · Care Pings</h1>
+<div class="h-sub">v 0 . 5 &nbsp; · &nbsp; H I G H - F I D E L I T Y &nbsp; M O C K U P</div>
+<div class="intro">
+  Echo 在合适时机发系统通知 · 不弹气泡 · 不发声(可选)<br>
+  三种类型轮换:推歌 / 寒暄 / 邀请听音 · 文案永远走 LLM
+</div>
+
+<!-- ============================================ -->
+<!-- 类型 1 · 推歌通知 -->
+<!-- ============================================ -->
+<div class="section-title">类 型 1 · 推 歌 通 知 · 40%</div>
+
+<div class="case">
+  <div class="case-head">
+    <div class="case-title">macOS 通知中心样式</div>
+    <div class="case-desc">下午 14:30 触发 · 用户犯困点 · 推一首慢歌</div>
+  </div>
+
+  <div class="desktop-mac">
+    <div class="desktop-tag"><span>● 桌面预览</span><span class="time">14:32</span></div>
+    
+    <div class="notif-mac">
+      <div class="notif-icon">E</div>
+      <div class="notif-content">
+        <div class="notif-app">
+          Echo
+          <span class="notif-app-time">刚刚</span>
+        </div>
+        <div class="type-tag type-tag-recommend">R E C O M M E N D</div>
+        <div class="notif-body">下午三点犯困点。给你放林俊杰的《不为谁而作的歌》?</div>
+        <div class="notif-actions">
+          <div class="notif-action primary">点开听</div>
+          <div class="notif-action">今天别再提醒</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="annot">
+  <span class="num">①</span>
+  <span><b>点击行为</b>:用户点"点开听"或通知主体 → Echo 主程序自动打开 → 切到对话 tab → 那首歌开始播放 → Echo 在对话里说一句简短的话(例:"来了。")。整个链路<b>用户感知到的就是"通知 → 听到歌"</b>,中间的 find_tracks / LLM 写文案对用户隐藏。</span>
+</div>
+
+<!-- ============================================ -->
+<!-- 类型 2 · 寒暄通知 -->
+<!-- ============================================ -->
+<div class="section-title">类 型 2 · 寒 暄 通 知 · 30%</div>
+
+<div class="case">
+  <div class="case-head">
+    <div class="case-title">不推歌 · 只关心你</div>
+    <div class="case-desc">周二晚上九点 · Echo 想起你 · 不期待你回复,只想问候一下</div>
+  </div>
+
+  <div class="desktop-mac">
+    <div class="desktop-tag"><span>● 桌面预览</span><span class="time">21:31</span></div>
+    
+    <div class="notif-mac">
+      <div class="notif-icon">E</div>
+      <div class="notif-content">
+        <div class="notif-app">
+          Echo
+          <span class="notif-app-time">刚刚</span>
+        </div>
+        <div class="type-tag type-tag-casual">C H E C K - I N</div>
+        <div class="notif-body">周二晚上九点了,工作差不多了吧。今天还行吗?</div>
+        <div class="notif-actions">
+          <div class="notif-action primary">回 复</div>
+          <div class="notif-action">今天别再提醒</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="annot">
+  <span class="num">②</span>
+  <span><b>点击行为</b>:点"回复"或通知主体 → Echo 主程序打开 → 对话 tab → Echo 把通知文案"重复"作为对话开场,等待用户回复。这样 Echo 不"白发一句",留出对话空间。</span>
+</div>
+
+<!-- ============================================ -->
+<!-- 类型 3 · 邀请听音 · Windows -->
+<!-- ============================================ -->
+<div class="section-title">类 型 3 · 邀 请 听 音 · 30%</div>
+
+<div class="case">
+  <div class="case-head">
+    <div class="case-title">Windows 11 通知样式</div>
+    <div class="case-desc">不剧透具体内容 · 让用户带着期待点开听</div>
+  </div>
+
+  <div class="desktop-win">
+    <div class="desktop-tag"><span>● Windows 11 预览</span><span class="time">19:03</span></div>
+    
+    <div class="notif-win">
+      <div class="notif-win-head">
+        <div class="notif-win-icon">E</div>
+        <span>E C H O</span>
+      </div>
+      <div class="notif-win-body">下午这会儿,我有点话想跟你聊。</div>
+      <div class="notif-win-foot">
+        <span>邀 请 听 音 · 19:03</span>
+        <a>今天别再提醒</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="annot">
+  <span class="num">③</span>
+  <span><b>点击行为</b>:点击通知 → Echo 主程序打开 → 听音 tab → 自动开始 LLM 文案生成 + TTS,等同于用户自己在听音 tab 点了"让 Echo 说一段"按钮。<br><b>Windows 限制</b>:Win10/11 通知不支持 action 按钮(只有 macOS 才支持),所以"今天别再提醒"做成通知底部的小链接。</span>
+</div>
+
+<!-- ============================================ -->
+<!-- 推歌点击行为流程图 -->
+<!-- ============================================ -->
+<div class="section-title">推 歌 通 知 · 完 整 链 路 流 程</div>
+
+<div class="flow">
+  <div class="flow-step">
+    <div class="flow-num">1</div>
+    <div class="flow-text">
+      <b>时间槽位触发</b> · 14:30 概率命中
+      <small>不是闹钟,是按概率分布 · 平均每天 3 条</small>
+    </div>
+  </div>
+  <div class="flow-arrow">↓</div>
+
+  <div class="flow-step">
+    <div class="flow-num">2</div>
+    <div class="flow-text">
+      <b>find_tracks(vibe="下午犯困 慢节奏")</b>
+      <small>recommender 返回 3-5 首候选 · 全部隐藏在后端</small>
+    </div>
+  </div>
+  <div class="flow-arrow">↓</div>
+
+  <div class="flow-step">
+    <div class="flow-num">3</div>
+    <div class="flow-text">
+      <b>从候选选一首</b>(简单规则,不调 LLM)
+      <small>优先选 affinity 高 + 最近 3 天没推过的</small>
+    </div>
+  </div>
+  <div class="flow-arrow">↓</div>
+
+  <div class="flow-step">
+    <div class="flow-num">4</div>
+    <div class="flow-text">
+      <b>调 LLM 生成文案</b>
+      <small>输入:类型 + 时间 + 天气 + 歌名 + 最近对话 · 输出 30-60 字</small>
+    </div>
+  </div>
+  <div class="flow-arrow">↓</div>
+
+  <div class="flow-step">
+    <div class="flow-num">5</div>
+    <div class="flow-text">
+      <b>发送系统通知</b>
+      <small>Electron Notification API · 携带 trackId + type</small>
+    </div>
+  </div>
+  <div class="flow-arrow">↓</div>
+
+  <div class="flow-step">
+    <div class="flow-num">6</div>
+    <div class="flow-text">
+      <b>用户点击 → 显示主窗口 → 切对话 tab → 自动播放</b>
+      <small>整个链路用户感知到的就是"通知 → 听到歌"</small>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ -->
+<!-- 文案风格对比 -->
+<!-- ============================================ -->
+<div class="section-title">不 同 时 段 · 文 案 风 格 对 比</div>
+
+<div class="case-grid">
+  <div class="case-card">
+    <div class="case-card-label">早 晨 9:00 · 推 歌</div>
+    <div class="case-card-text">"早,周二开工——给你放 Charlie Puth 的《How Long》开个场。"</div>
+  </div>
+  <div class="case-card">
+    <div class="case-card-label">中 午 11:00 · 寒 暄</div>
+    <div class="case-card-text">"上午快过去了,你这会儿状态怎么样?"</div>
+  </div>
+  <div class="case-card">
+    <div class="case-card-label">下 午 14:30 · 推 歌</div>
+    <div class="case-card-text">"犯困点了。海洋Bo《向云端》给你垫一下,不抢戏。"</div>
+  </div>
+  <div class="case-card">
+    <div class="case-card-label">傍 晚 16:30 · 邀 请 听 音</div>
+    <div class="case-card-text">"今天有点想跟你说说话,你方便吗?"</div>
+  </div>
+  <div class="case-card">
+    <div class="case-card-label">晚 上 19:00 · 寒 暄</div>
+    <div class="case-card-text">"下班路上还是到家了?这会儿挺安静的。"</div>
+  </div>
+  <div class="case-card">
+    <div class="case-card-label">晚 上 21:30 · 推 歌</div>
+    <div class="case-card-text">"周五晚上你常听慢歌——林俊杰《我怀念的》给你?"</div>
+  </div>
+</div>
+
+<div class="annot">
+  <span class="num">④</span>
+  <span>每条都由 LLM 实时生成,基于此刻时间 / 天气 / 最近对话 / day_seal。<b>不会重复</b>,因为最近 7 天的通知文案会注入到下次 prompt 作为去重输入。</span>
+</div>
+
+<!-- ============================================ -->
+<!-- 设置页 -->
+<!-- ============================================ -->
+<div class="section-title">设 置 页 · 用 户 配 置</div>
+
+<div class="case">
+  <div class="case-head">
+    <div class="case-title">在设置页"听音"段下方新增 Care Pings 段</div>
+    <div class="case-desc">极简三个选项:开关 / 频率 / 全屏不打扰</div>
+  </div>
+
+  <div class="settings-mock">
+    <div class="set-hdr">
+      <button class="set-back">◁ &nbsp; 返 回</button>
+      <div class="set-title">设 置<small>S E T T I N G S</small></div>
+      <div class="set-spacer"></div>
+    </div>
+
+    <div class="set-section" style="background: rgba(245,250,237,0.4);">
+      <div class="set-label">E C H O &nbsp; 的 &nbsp; 关 心</div>
+
+      <div class="row-toggle">
+        <div class="row-toggle-info">
+          <div class="row-toggle-name">主动来找你</div>
+          <div class="row-toggle-desc">Echo 在合适的时候发系统通知问候你或推荐歌</div>
+        </div>
+        <div class="toggle"></div>
+      </div>
+
+      <div style="margin-top: 8px;">
+        <div style="font-size: 11.5px; color: var(--text-2); margin-bottom: 8px;">频 率</div>
+        <div class="freq-row">
+          <div class="freq-pill">
+            <div class="name">克 制</div>
+            <div class="count">每天 ≈ 1.5 条</div>
+          </div>
+          <div class="freq-pill active">
+            <div class="name">适 中</div>
+            <div class="count">每天 ≈ 3 条</div>
+          </div>
+          <div class="freq-pill">
+            <div class="name">频 繁</div>
+            <div class="count">每天 ≈ 4.5 条</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row-toggle" style="margin-top: 12px;">
+        <div class="row-toggle-info">
+          <div class="row-toggle-name">全屏时不打扰</div>
+          <div class="row-toggle-desc">检测到你在全屏视频或会议时静默</div>
+        </div>
+        <div class="toggle"></div>
+      </div>
+
+      <button class="test-btn">立 刻 测 试 一 条</button>
+    </div>
+
+    <div class="set-section" style="opacity: 0.4; pointer-events: none;">
+      <div class="set-label" style="color: var(--text-3);">L L M &nbsp; · &nbsp; T T S &nbsp; · &nbsp; 数 据 &nbsp; ...</div>
+      <div style="font-family: var(--serif); font-style: italic; font-size: 11.5px; color: var(--text-2); line-height: 1.7;">(其他设置项保持不变 · 此处省略)</div>
+    </div>
+  </div>
+</div>
+
+<div class="annot">
+  <span class="num">⑤</span>
+  <span><b>"立刻测试一条"按钮</b>是关键:用户点了 → 1 秒内收到一条通知,可以马上感受文案质量。这个按钮也用于开发期调试 · <b>正式发布也保留</b>,因为新用户开启功能时希望"立刻验证它能工作"。</span>
+</div>
+
+<!-- ============================================ -->
+<!-- 静音后状态 -->
+<!-- ============================================ -->
+<div class="section-title">边 界 · 用 户 静 音 后</div>
+
+<div class="case">
+  <div class="case-head">
+    <div class="case-title">用户点了"今天别再提醒"</div>
+    <div class="case-desc">当天剩余时段全部静默 · 第二天 0 点自动恢复</div>
+  </div>
+
+  <div class="muted-card">
+    <div class="muted-label">M U T E D &nbsp; T O D A Y</div>
+    <div class="muted-text">
+      好 · 我今天先不打扰你了 ·<br>
+      明天再来。
+    </div>
+    <div class="muted-foot">
+      下 一 条 通 知 · 明 天 早 晨 9 : 0 0 起
+    </div>
+  </div>
+</div>
+
+<div class="annot">
+  <span class="num">⑥</span>
+  <span>用户在通知里点了"今天别再提醒" · 后台执行 <code>muteToday()</code> · 写入 <code>care_pings_mute</code> 表。第二天 0:00 后自动失效。<b>用户感知不到这条状态卡片</b> — 它只是给我们(产品/设计)看的隐喻。Echo 安静的方式就是真的安静,不弹任何提示告诉用户"我已经静音了"。</span>
+</div>
+
+<!-- ============================================ -->
+<!-- 关键设计决策 -->
+<!-- ============================================ -->
+<div class="section-title">关 键 设 计 决 策</div>
+
+<div style="max-width: 720px; margin: 0 auto;">
+
+  <div class="annot">
+    <span class="num">A</span>
+    <span><b>类型标签是给我们看的,真实通知不显示</b> · 设计稿里的 <code>RECOMMEND</code> / <code>CHECK-IN</code> / <code>VOICE</code> 标签只是为了让原型清晰。<b>真实通知用户只看到一句话</b>。但数据库里 <code>care_pings.type</code> 字段会记下来,用于产品分析。</span>
+  </div>
+
+  <div class="annot">
+    <span class="num">B</span>
+    <span><b>macOS 和 Windows 通知样式真的不同</b> · macOS 支持通知里的 action 按钮(右下方)· Windows 11 不支持 action,所以"今天别再提醒"做成通知体里的小链接。这个跨平台差异必须做对,否则 Windows 上会出现根本不工作的功能。</span>
+  </div>
+
+  <div class="annot">
+    <span class="num">C</span>
+    <span><b>用户感知不到链路</b> · 推歌通知背后是 find_tracks → 选歌 → LLM 写文案 → 推送,但用户感受到的就是一句话 + 点开就放歌。这个"隐藏链路"是关键体验。</span>
+  </div>
+
+  <div class="annot">
+    <span class="num">D</span>
+    <span><b>文案永远走 LLM,绝不用模板</b> · Echo 这个产品的灵魂就是"每一句话都新鲜"。每天 3 次 LLM 调用成本极低(几分钱),换 Echo 永远说人话,是稳赚的投资。</span>
+  </div>
+
+</div>
+
+</body>
+</html>

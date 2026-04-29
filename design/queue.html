@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Echo · 列表</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ayin-900: #27500A;
+    --ayin-700: #3B6D11;
+    --ayin-600: #639922;
+    --ayin-400: #8FBC57;
+    --ayin-300: #C0DD97;
+    --ayin-100: #EAF3DE;
+    --ayin-50:  #F5FAED;
+
+    --bg: #FFFFFF;
+    --bg-2: #F7F7F5;
+    --bg-3: #EDEDE8;
+    --text: #1A1A1A;
+    --text-2: #5C5C5A;
+    --text-3: #999996;
+    --border: rgba(0,0,0,0.08);
+
+    --sans: "Noto Sans SC", -apple-system, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", monospace;
+    --serif: "Noto Serif SC", Georgia, serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    background: var(--bg-3);
+    font-family: var(--sans);
+    color: var(--text);
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .stage {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background:
+      radial-gradient(ellipse at top, rgba(143, 188, 87, 0.08), transparent 50%),
+      var(--bg-3);
+  }
+  .app {
+    width: 440px;
+    height: 720px;
+    background: var(--bg);
+    border-radius: 14px;
+    box-shadow: 0 20px 60px rgba(0, 40, 0, 0.12), 0 4px 12px rgba(0, 40, 0, 0.06);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* 顶栏 */
+  .hdr {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    border-bottom: 0.5px solid var(--border);
+    background: var(--bg);
+  }
+  .back-btn {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-2);
+    padding: 6px 10px;
+    background: transparent;
+    border: 0;
+    letter-spacing: 1px;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  .back-btn:hover { background: var(--bg-2); color: var(--text); }
+  .hdr-title {
+    flex: 1;
+    text-align: center;
+    font-family: var(--serif);
+    font-size: 15px;
+    font-weight: 500;
+  }
+  .hdr-title small {
+    display: block;
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-3);
+    letter-spacing: 2px;
+    margin-top: 2px;
+    font-weight: 400;
+  }
+  .clear-btn {
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 5px 10px;
+    background: transparent;
+    border: 0.5px solid var(--border);
+    color: var(--text-2);
+    border-radius: 12px;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .clear-btn:hover {
+    border-color: #B86B3E;
+    color: #B86B3E;
+  }
+
+  /* tab 切换 */
+  .tabs {
+    display: flex;
+    padding: 0 18px;
+    border-bottom: 0.5px solid var(--border);
+    background: var(--bg);
+    gap: 4px;
+  }
+  .tab {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    padding: 12px 14px;
+    background: transparent;
+    border: 0;
+    color: var(--text-3);
+    cursor: pointer;
+    position: relative;
+    transition: color 0.15s ease;
+  }
+  .tab.active { color: var(--ayin-700); }
+  .tab.active::after {
+    content: '';
+    position: absolute;
+    left: 14px;
+    right: 14px;
+    bottom: 0;
+    height: 1.5px;
+    background: var(--ayin-600);
+    border-radius: 2px;
+  }
+  .tab:hover { color: var(--text); }
+  .tab .count {
+    font-size: 9px;
+    margin-left: 4px;
+    color: var(--text-3);
+  }
+  .tab.active .count { color: var(--ayin-600); }
+
+  /* 主滚动区 */
+  .scroll {
+    flex: 1;
+    overflow-y: auto;
+  }
+  .scroll::-webkit-scrollbar { width: 4px; }
+  .scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  /* 段落标题 · 与主页风格统一 */
+  .section-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 2.5px;
+    color: var(--ayin-700);
+    margin: 0 0 10px;
+    padding: 0 22px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .section-label::after {
+    content: '';
+    flex: 1;
+    height: 0.5px;
+    background: var(--border);
+  }
+
+  /* === 当前队列 === */
+  .queue-section {
+    padding: 20px 0 4px;
+  }
+
+  /* 当前正在播放(高亮) */
+  .now-playing {
+    background:
+      radial-gradient(circle at 90% 50%, rgba(143, 188, 87, 0.15), transparent 60%),
+      var(--ayin-50);
+    margin: 0 16px 8px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border: 0.5px solid rgba(99, 153, 34, 0.2);
+  }
+  .np-indicator {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 14px;
+    flex-shrink: 0;
+    width: 16px;
+    justify-content: center;
+  }
+  .np-indicator span {
+    width: 2px;
+    background: var(--ayin-600);
+    border-radius: 1px;
+    animation: bounce 1s ease-in-out infinite;
+  }
+  .np-indicator span:nth-child(1) { height: 60%; animation-delay: 0s; }
+  .np-indicator span:nth-child(2) { height: 100%; animation-delay: 0.2s; }
+  .np-indicator span:nth-child(3) { height: 40%; animation-delay: 0.4s; }
+  @keyframes bounce {
+    0%, 100% { transform: scaleY(0.4); }
+    50% { transform: scaleY(1); }
+  }
+  .np-info { flex: 1; min-width: 0; }
+  .np-title {
+    font-weight: 500;
+    font-size: 13.5px;
+    color: var(--ayin-900);
+  }
+  .np-meta {
+    color: var(--ayin-700);
+    font-size: 10.5px;
+    margin-top: 2px;
+    font-family: var(--mono);
+    letter-spacing: 0.3px;
+  }
+  .np-note {
+    color: var(--ayin-700);
+    font-size: 11.5px;
+    margin-top: 5px;
+    font-family: var(--serif);
+    font-style: italic;
+    line-height: 1.45;
+  }
+  .np-time {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ayin-700);
+    flex-shrink: 0;
+    letter-spacing: 0.3px;
+  }
+
+  /* 队列项 */
+  .q-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 22px 10px 16px;
+    transition: background 0.15s ease;
+    cursor: grab;
+    position: relative;
+  }
+  .q-item:hover {
+    background: var(--bg-2);
+  }
+  .q-item:hover .q-num { display: none; }
+  .q-item:hover .q-handle { display: flex; }
+  .q-item:hover .q-actions { opacity: 1; }
+  .q-item.dragging { opacity: 0.5; }
+
+  .q-num {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-3);
+    width: 22px;
+    text-align: center;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+  }
+  .q-handle {
+    display: none;
+    width: 22px;
+    height: 22px;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-3);
+    font-size: 11px;
+    cursor: grab;
+    flex-shrink: 0;
+  }
+  .q-body {
+    flex: 1;
+    min-width: 0;
+  }
+  .q-title {
+    font-weight: 500;
+    font-size: 13px;
+  }
+  .q-meta {
+    color: var(--text-2);
+    font-size: 10.5px;
+    margin-top: 1px;
+    font-family: var(--mono);
+    letter-spacing: 0.3px;
+  }
+  .q-note {
+    color: var(--ayin-700);
+    font-size: 11.5px;
+    margin-top: 4px;
+    font-family: var(--serif);
+    font-style: italic;
+    line-height: 1.45;
+  }
+  .q-actions {
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    flex-shrink: 0;
+  }
+  .q-act-btn {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: transparent;
+    border: 0;
+    color: var(--text-3);
+    font-size: 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .q-act-btn:hover {
+    background: var(--bg-3);
+    color: var(--text);
+  }
+  .q-time {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-3);
+    flex-shrink: 0;
+    letter-spacing: 0.3px;
+  }
+
+  /* === Echo 备选 · 像 DJ 手边的几张唱片 === */
+  .stash-section {
+    padding: 24px 0 8px;
+    background: var(--bg-2);
+    border-top: 0.5px solid var(--border);
+  }
+  .stash-intro {
+    font-family: var(--serif);
+    font-size: 12.5px;
+    color: var(--text-2);
+    line-height: 1.7;
+    padding: 0 22px;
+    margin-bottom: 16px;
+    font-style: italic;
+  }
+  .stash-grid {
+    display: flex;
+    gap: 10px;
+    padding: 0 22px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+  }
+  .stash-grid::-webkit-scrollbar { display: none; }
+
+  .stash-card {
+    flex-shrink: 0;
+    width: 200px;
+    background: var(--bg);
+    border-radius: 10px;
+    padding: 14px 14px 12px;
+    border: 0.5px solid var(--border);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    scroll-snap-align: start;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .stash-card:hover {
+    border-color: var(--ayin-600);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(99, 153, 34, 0.1);
+  }
+  .stash-tag {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    color: var(--ayin-700);
+    text-transform: uppercase;
+  }
+  .stash-name {
+    font-family: var(--serif);
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text);
+    line-height: 1.3;
+  }
+  .stash-desc {
+    font-size: 11.5px;
+    color: var(--text-2);
+    line-height: 1.55;
+    font-family: var(--serif);
+    font-style: italic;
+    flex: 1;
+  }
+  .stash-foot {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 8px;
+    border-top: 0.5px dashed var(--border);
+    margin-top: 4px;
+  }
+  .stash-count {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-3);
+    letter-spacing: 0.5px;
+  }
+  .stash-play {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--ayin-600);
+    color: white;
+    border: 0;
+    font-size: 9px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .stash-play:hover { background: var(--ayin-700); }
+
+  /* 底部信息 */
+  .foot {
+    padding: 12px 22px 16px;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-3);
+    letter-spacing: 1.5px;
+  }
+
+  /* 空状态 (后续可用) */
+  .empty {
+    padding: 60px 22px;
+    text-align: center;
+    color: var(--text-3);
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 13px;
+    line-height: 1.7;
+  }
+</style>
+</head>
+<body>
+
+<div class="stage">
+  <div class="app">
+
+    <!-- 顶栏 -->
+    <header class="hdr">
+      <button class="back-btn">◁ 返回</button>
+      <div class="hdr-title">
+        列 表
+        <small>Q U E U E</small>
+      </div>
+      <button class="clear-btn">清 空</button>
+    </header>
+
+    <!-- Tab -->
+    <nav class="tabs">
+      <button class="tab active">正 在 播 放<span class="count">8</span></button>
+      <button class="tab">E C H O 备 选<span class="count">3</span></button>
+      <button class="tab">收 藏<span class="count">42</span></button>
+    </nav>
+
+    <!-- 滚动区 -->
+    <div class="scroll">
+
+      <!-- 当前队列 -->
+      <section class="queue-section">
+        <div class="section-label">N O W &nbsp; P L A Y I N G</div>
+
+        <!-- 正在播放 -->
+        <div class="now-playing">
+          <div class="np-indicator">
+            <span></span><span></span><span></span>
+          </div>
+          <div class="np-info">
+            <div class="np-title">向云端</div>
+            <div class="np-meta">海洋Bo · 2023</div>
+            <div class="np-note">— 让眼皮轻一点</div>
+          </div>
+          <div class="np-time">04:32</div>
+        </div>
+
+        <!-- 队列项 -->
+        <div class="q-item" draggable="true">
+          <span class="q-num">02</span>
+          <span class="q-handle">⋮⋮</span>
+          <div class="q-body">
+            <div class="q-title">不为谁而作的歌</div>
+            <div class="q-meta">林俊杰 · 2015</div>
+            <div class="q-note">— 你回家最爱的开场</div>
+          </div>
+          <div class="q-actions">
+            <button class="q-act-btn" title="移除">×</button>
+          </div>
+          <div class="q-time">04:18</div>
+        </div>
+
+        <div class="q-item" draggable="true">
+          <span class="q-num">03</span>
+          <span class="q-handle">⋮⋮</span>
+          <div class="q-body">
+            <div class="q-title">How Long</div>
+            <div class="q-meta">Charlie Puth · 2017</div>
+            <div class="q-note">— 你晚上工作时常放的</div>
+          </div>
+          <div class="q-actions">
+            <button class="q-act-btn" title="移除">×</button>
+          </div>
+          <div class="q-time">03:42</div>
+        </div>
+
+        <div class="q-item" draggable="true">
+          <span class="q-num">04</span>
+          <span class="q-handle">⋮⋮</span>
+          <div class="q-body">
+            <div class="q-title">普通人生</div>
+            <div class="q-meta">海洋Bo · 2023</div>
+            <div class="q-note">— 续上《向云端》的气口</div>
+          </div>
+          <div class="q-actions">
+            <button class="q-act-btn" title="移除">×</button>
+          </div>
+          <div class="q-time">04:08</div>
+        </div>
+
+        <div class="q-item" draggable="true">
+          <span class="q-num">05</span>
+          <span class="q-handle">⋮⋮</span>
+          <div class="q-body">
+            <div class="q-title">Ghost</div>
+            <div class="q-meta">Justin Bieber · 2021</div>
+          </div>
+          <div class="q-actions">
+            <button class="q-act-btn" title="移除">×</button>
+          </div>
+          <div class="q-time">03:33</div>
+        </div>
+
+        <div class="q-item" draggable="true">
+          <span class="q-num">06</span>
+          <span class="q-handle">⋮⋮</span>
+          <div class="q-body">
+            <div class="q-title">我怀念的</div>
+            <div class="q-meta">林俊杰 · 2007</div>
+            <div class="q-note">— 慢一点,让你别紧绷</div>
+          </div>
+          <div class="q-actions">
+            <button class="q-act-btn" title="移除">×</button>
+          </div>
+          <div class="q-time">04:55</div>
+        </div>
+
+        <div class="q-item" draggable="true">
+          <span class="q-num">07</span>
+          <span class="q-handle">⋮⋮</span>
+          <div class="q-body">
+            <div class="q-title">What About Us</div>
+            <div class="q-meta">P!nk · 2017</div>
+          </div>
+          <div class="q-actions">
+            <button class="q-act-btn" title="移除">×</button>
+          </div>
+          <div class="q-time">04:30</div>
+        </div>
+
+        <div class="q-item" draggable="true">
+          <span class="q-num">08</span>
+          <span class="q-handle">⋮⋮</span>
+          <div class="q-body">
+            <div class="q-title">骄傲的少年</div>
+            <div class="q-meta">南征北战NZBZ · 2018</div>
+            <div class="q-note">— 你说要有点劲的,这首压轴</div>
+          </div>
+          <div class="q-actions">
+            <button class="q-act-btn" title="移除">×</button>
+          </div>
+          <div class="q-time">03:25</div>
+        </div>
+      </section>
+
+      <!-- Echo 备选 -->
+      <section class="stash-section">
+        <div class="section-label">E C H O &nbsp; 给 你 准 备 的</div>
+        <p class="stash-intro">
+          手边几张唱片,看你想听哪种。点一下,我把整张接到当前队列后面。
+        </p>
+
+        <div class="stash-grid">
+          <div class="stash-card">
+            <div class="stash-tag">回 家 路 上</div>
+            <div class="stash-name">下班的车里</div>
+            <div class="stash-desc">"林俊杰和海洋Bo 排着,慢慢把白天的紧绷卸下来。"</div>
+            <div class="stash-foot">
+              <span class="stash-count">10 首</span>
+              <button class="stash-play">▶</button>
+            </div>
+          </div>
+
+          <div class="stash-card">
+            <div class="stash-tag">需 要 一 点 劲</div>
+            <div class="stash-name">还得再撑一会</div>
+            <div class="stash-desc">"南征北战 + Pink + BLACKPINK。不嘶吼,但够稳。"</div>
+            <div class="stash-foot">
+              <span class="stash-count">8 首</span>
+              <button class="stash-play">▶</button>
+            </div>
+          </div>
+
+          <div class="stash-card">
+            <div class="stash-tag">惊 喜</div>
+            <div class="stash-name">你可能没注意的</div>
+            <div class="stash-desc">"基于你最近口味挑的几首,不一定中。"</div>
+            <div class="stash-foot">
+              <span class="stash-count">10 首</span>
+              <button class="stash-play">▶</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 底部信息 -->
+      <footer class="foot">
+        共 8 首 · 总长 33 分钟 · 由 Echo 编排
+      </footer>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  // 简单的拖拽排序占位(原型展示用,真实开发时由 Electron + React 重做)
+  (function() {
+    const items = document.querySelectorAll('.q-item');
+    let dragging = null;
+    items.forEach(item => {
+      item.addEventListener('dragstart', e => {
+        dragging = item;
+        item.classList.add('dragging');
+      });
+      item.addEventListener('dragend', e => {
+        item.classList.remove('dragging');
+        dragging = null;
+      });
+      item.addEventListener('dragover', e => {
+        e.preventDefault();
+        if (!dragging || dragging === item) return;
+        const rect = item.getBoundingClientRect();
+        const after = e.clientY > rect.top + rect.height / 2;
+        item.parentNode.insertBefore(dragging, after ? item.nextSibling : item);
+      });
+    });
+  })();
+</script>
+
+</body>
+</html>

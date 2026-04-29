@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Echo · 主页</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ayin-900: #27500A;
+    --ayin-700: #3B6D11;
+    --ayin-600: #639922;
+    --ayin-400: #8FBC57;
+    --ayin-300: #C0DD97;
+    --ayin-100: #EAF3DE;
+    --ayin-50:  #F5FAED;
+
+    --bg: #FFFFFF;
+    --bg-2: #F7F7F5;
+    --bg-3: #EDEDE8;
+    --text: #1A1A1A;
+    --text-2: #5C5C5A;
+    --text-3: #999996;
+    --border: rgba(0,0,0,0.08);
+
+    --sans: "Noto Sans SC", -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", monospace;
+    --serif: "Noto Serif SC", Georgia, serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    background: var(--bg-3);
+    font-family: var(--sans);
+    color: var(--text);
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .stage {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background:
+      radial-gradient(ellipse at top, rgba(143, 188, 87, 0.08), transparent 50%),
+      var(--bg-3);
+  }
+  .app {
+    width: 440px;
+    height: 720px;
+    background: var(--bg);
+    border-radius: 14px;
+    box-shadow: 0 20px 60px rgba(0, 40, 0, 0.12), 0 4px 12px rgba(0, 40, 0, 0.06);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* 顶栏 · 与主界面一致 */
+  .hdr {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    border-bottom: 0.5px solid var(--border);
+    background: var(--bg);
+    z-index: 2;
+  }
+  .back-btn {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-2);
+    padding: 6px 10px;
+    background: transparent;
+    border: 0;
+    letter-spacing: 1px;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  .back-btn:hover { background: var(--bg-2); color: var(--text); }
+  .hdr-title {
+    flex: 1;
+    text-align: center;
+    font-family: var(--serif);
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text);
+    letter-spacing: 0.5px;
+  }
+  .hdr-title small {
+    display: block;
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-3);
+    letter-spacing: 2px;
+    margin-top: 2px;
+    font-weight: 400;
+  }
+  .hdr-spacer { width: 44px; } /* 平衡左边的 back 按钮 */
+
+  /* 内容区 · 可滚动 */
+  .scroll {
+    flex: 1;
+    overflow-y: auto;
+    scroll-behavior: smooth;
+  }
+  .scroll::-webkit-scrollbar { width: 4px; }
+  .scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  /* 章节通用 */
+  .section {
+    padding: 24px 22px;
+    border-bottom: 0.5px solid var(--border);
+  }
+  .section:last-child { border-bottom: 0; }
+
+  .section-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 2.5px;
+    color: var(--ayin-700);
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .section-label::after {
+    content: '';
+    flex: 1;
+    height: 0.5px;
+    background: var(--border);
+  }
+
+  /* === 章 1 · Echo 对你的画像(C 位) === */
+  .portrait {
+    background:
+      radial-gradient(circle at 80% 20%, rgba(143, 188, 87, 0.18), transparent 60%),
+      var(--ayin-50);
+    padding: 32px 26px 28px;
+    position: relative;
+  }
+  .portrait .avatar-big {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--ayin-600);
+    color: var(--ayin-100);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 500;
+    font-size: 22px;
+    margin-bottom: 18px;
+    box-shadow: 0 4px 14px rgba(99, 153, 34, 0.25);
+  }
+  .portrait-text {
+    font-family: var(--serif);
+    font-size: 16px;
+    line-height: 2;
+    color: var(--ayin-900);
+    letter-spacing: 0.3px;
+    margin-bottom: 14px;
+  }
+  .portrait-text::before {
+    content: '"';
+    font-family: var(--serif);
+    font-size: 42px;
+    line-height: 0.5;
+    color: var(--ayin-400);
+    margin-right: 4px;
+    vertical-align: -16px;
+  }
+  .portrait-sign {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ayin-700);
+    letter-spacing: 1.5px;
+    text-align: right;
+  }
+
+  /* === 章 2 · 代表你的 7 首 === */
+  .sig-track {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 0.5px dashed var(--border);
+  }
+  .sig-track:last-child { border-bottom: 0; }
+  .sig-num {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-3);
+    width: 20px;
+    letter-spacing: 1px;
+  }
+  .sig-track-body { flex: 1; min-width: 0; }
+  .sig-title { font-weight: 500; font-size: 13.5px; }
+  .sig-meta {
+    color: var(--text-2);
+    font-size: 11px;
+    margin-top: 2px;
+    font-family: var(--mono);
+    letter-spacing: 0.3px;
+  }
+  .sig-reason {
+    color: var(--ayin-700);
+    font-size: 12px;
+    margin-top: 5px;
+    font-family: var(--serif);
+    font-style: italic;
+    line-height: 1.5;
+  }
+  .sig-play {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: transparent;
+    border: 0.5px solid var(--border);
+    color: var(--text-2);
+    font-size: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all 0.15s ease;
+  }
+  .sig-play:hover {
+    background: var(--ayin-600);
+    color: white;
+    border-color: var(--ayin-600);
+  }
+
+  /* === 章 3 · 流派条带 === */
+  .genre-row {
+    margin-bottom: 14px;
+  }
+  .genre-row:last-child { margin-bottom: 0; }
+  .genre-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 5px;
+  }
+  .genre-name {
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .genre-trend {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.5px;
+  }
+  .trend-up { color: var(--ayin-600); }
+  .trend-down { color: #B86B3E; }
+  .trend-steady { color: var(--text-3); }
+  .genre-bar-bg {
+    height: 6px;
+    background: var(--bg-2);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 5px;
+  }
+  .genre-bar-fill {
+    height: 100%;
+    background: var(--ayin-600);
+    border-radius: 3px;
+    transition: width 0.5s ease;
+  }
+  .genre-note {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 11.5px;
+    color: var(--text-2);
+    line-height: 1.5;
+  }
+
+  /* === 章 4 · 钟爱艺人 === */
+  .artist-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .artist-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+  }
+  .artist-rank {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-3);
+    width: 22px;
+    letter-spacing: 1px;
+  }
+  .artist-name {
+    flex: 1;
+    font-weight: 500;
+    font-size: 13.5px;
+  }
+  .artist-name small {
+    display: block;
+    color: var(--text-3);
+    font-weight: 400;
+    font-family: var(--mono);
+    font-size: 10px;
+    margin-top: 2px;
+    letter-spacing: 0.3px;
+  }
+  .affinity-bar {
+    width: 80px;
+    height: 3px;
+    background: var(--bg-2);
+    border-radius: 2px;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .affinity-fill {
+    height: 100%;
+    background: var(--ayin-600);
+    border-radius: 2px;
+  }
+
+  /* === 章 5 · 年代 · 双列简表 === */
+  .era-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 20px;
+  }
+  .era-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .era-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-2);
+    letter-spacing: 0.3px;
+    width: 28px;
+  }
+  .era-fill-bg {
+    flex: 1;
+    height: 4px;
+    background: var(--bg-2);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .era-fill {
+    height: 100%;
+    background: var(--ayin-400);
+    border-radius: 2px;
+  }
+  .era-pct {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-3);
+    width: 28px;
+    text-align: right;
+  }
+
+  /* === 章 6 · 情绪标签云 === */
+  .moods {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 10px;
+    align-items: baseline;
+  }
+  .mood {
+    font-family: var(--serif);
+    color: var(--ayin-900);
+    line-height: 1.3;
+    padding: 4px 10px;
+    background: var(--ayin-100);
+    border-radius: 14px;
+    transition: all 0.15s ease;
+    cursor: default;
+  }
+  .mood:hover {
+    background: var(--ayin-300);
+  }
+
+  /* === 章 7 · Echo 的问题 === */
+  .questions {
+    background: var(--ayin-50);
+    margin: 0 -22px;
+    padding: 24px 22px;
+  }
+  .q-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 0.5px dashed rgba(99, 153, 34, 0.25);
+  }
+  .q-item:last-child { border-bottom: 0; }
+  .q-mark {
+    font-family: var(--serif);
+    font-size: 22px;
+    color: var(--ayin-600);
+    line-height: 1;
+    flex-shrink: 0;
+    margin-top: -2px;
+    font-weight: 500;
+  }
+  .q-body { flex: 1; }
+  .q-text {
+    font-family: var(--serif);
+    font-size: 13.5px;
+    color: var(--ayin-900);
+    line-height: 1.6;
+    margin-bottom: 8px;
+  }
+  .q-actions {
+    display: flex;
+    gap: 6px;
+  }
+  .q-btn {
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 4px 10px;
+    background: transparent;
+    border: 0.5px solid var(--ayin-600);
+    color: var(--ayin-700);
+    border-radius: 12px;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .q-btn:hover {
+    background: var(--ayin-600);
+    color: var(--ayin-100);
+  }
+  .q-btn.sec {
+    border-color: var(--border);
+    color: var(--text-2);
+  }
+  .q-btn.sec:hover {
+    background: var(--bg-2);
+    border-color: var(--text-3);
+    color: var(--text);
+  }
+
+  /* === 页脚 · 元信息 === */
+  .foot {
+    padding: 18px 22px 26px;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-3);
+    letter-spacing: 1.5px;
+    line-height: 1.8;
+  }
+  .foot .div { color: var(--border); margin: 0 8px; }
+</style>
+</head>
+<body>
+
+<div class="stage">
+  <div class="app">
+
+    <!-- 顶栏 -->
+    <header class="hdr">
+      <button class="back-btn">◁ 返回</button>
+      <div class="hdr-title">
+        Echo
+        <small>P R O F I L E</small>
+      </div>
+      <button class="back-btn" title="设置" style="font-size: 14px; padding: 4px 8px;">⚙</button>
+    </header>
+
+    <!-- 可滚动内容 -->
+    <div class="scroll">
+
+      <!-- 章 1 · Echo 的画像(C 位) -->
+      <section class="section portrait">
+        <div class="avatar-big">E</div>
+        <p class="portrait-text">
+          你喜欢旋律性强、情感直白的东西。林俊杰和海洋Bo 是你这周的两个轴心——他们完全不像,却又都在你这里。最近对 Charlie Puth 接受度变高了,我看你晚上常放,上个月你还嫌他"太软"。K-pop 是你的"白天电池",但你没给我一个具体喜欢的组合——改天告诉我。
+        </p>
+        <div class="portrait-sign">— Echo · 写于 2026.04.24</div>
+      </section>
+
+      <!-- 章 2 · 代表曲目 -->
+      <section class="section">
+        <div class="section-label">S I G N A T U R E · 7</div>
+
+        <div class="sig-track">
+          <div class="sig-num">01</div>
+          <div class="sig-track-body">
+            <div class="sig-title">不为谁而作的歌</div>
+            <div class="sig-meta">林俊杰 · 2015</div>
+            <div class="sig-reason">— 你今年回家最爱放的第一首</div>
+          </div>
+          <button class="sig-play">▶</button>
+        </div>
+
+        <div class="sig-track">
+          <div class="sig-num">02</div>
+          <div class="sig-track-body">
+            <div class="sig-title">向云端</div>
+            <div class="sig-meta">海洋Bo · 2023</div>
+            <div class="sig-reason">— 你今年新加进来的"治愈轴心"</div>
+          </div>
+          <button class="sig-play">▶</button>
+        </div>
+
+        <div class="sig-track">
+          <div class="sig-num">03</div>
+          <div class="sig-track-body">
+            <div class="sig-title">Attention</div>
+            <div class="sig-meta">Charlie Puth · 2017</div>
+            <div class="sig-reason">— 你晚上工作时的"节奏底"</div>
+          </div>
+          <button class="sig-play">▶</button>
+        </div>
+
+        <div class="sig-track">
+          <div class="sig-num">04</div>
+          <div class="sig-track-body">
+            <div class="sig-title">我怀念的</div>
+            <div class="sig-meta">林俊杰 · 2007</div>
+            <div class="sig-reason">— 你说过,"这首听不腻"</div>
+          </div>
+          <button class="sig-play">▶</button>
+        </div>
+
+        <div class="sig-track">
+          <div class="sig-num">05</div>
+          <div class="sig-track-body">
+            <div class="sig-title">Ghost</div>
+            <div class="sig-meta">Justin Bieber · 2021</div>
+            <div class="sig-reason">— 你最近悄悄加进来的那种"软"</div>
+          </div>
+          <button class="sig-play">▶</button>
+        </div>
+
+        <div class="sig-track">
+          <div class="sig-num">06</div>
+          <div class="sig-track-body">
+            <div class="sig-title">骄傲的少年</div>
+            <div class="sig-meta">南征北战NZBZ · 2018</div>
+            <div class="sig-reason">— 你需要一点电的时候,这首总在</div>
+          </div>
+          <button class="sig-play">▶</button>
+        </div>
+
+        <div class="sig-track">
+          <div class="sig-num">07</div>
+          <div class="sig-track-body">
+            <div class="sig-title">How You Like That</div>
+            <div class="sig-meta">BLACKPINK · 2020</div>
+            <div class="sig-reason">— 你白天的电池,具体哪个组合还没告诉我</div>
+          </div>
+          <button class="sig-play">▶</button>
+        </div>
+      </section>
+
+      <!-- 章 3 · 流派 -->
+      <section class="section">
+        <div class="section-label">G E N R E</div>
+
+        <div class="genre-row">
+          <div class="genre-head">
+            <span class="genre-name">华语流行</span>
+            <span class="genre-trend trend-steady">· 78%</span>
+          </div>
+          <div class="genre-bar-bg"><div class="genre-bar-fill" style="width: 78%;"></div></div>
+          <div class="genre-note">— 你的主轴,林俊杰是核心</div>
+        </div>
+
+        <div class="genre-row">
+          <div class="genre-head">
+            <span class="genre-name">治愈说唱</span>
+            <span class="genre-trend trend-up">↑ 65%</span>
+          </div>
+          <div class="genre-bar-bg"><div class="genre-bar-fill" style="width: 65%;"></div></div>
+          <div class="genre-note">— 海洋Bo 带起来的,从去年才有</div>
+        </div>
+
+        <div class="genre-row">
+          <div class="genre-head">
+            <span class="genre-name">Pop / R&amp;B</span>
+            <span class="genre-trend trend-up">↑ 58%</span>
+          </div>
+          <div class="genre-bar-bg"><div class="genre-bar-fill" style="width: 58%;"></div></div>
+          <div class="genre-note">— 最近上来,Charlie Puth 推动</div>
+        </div>
+
+        <div class="genre-row">
+          <div class="genre-head">
+            <span class="genre-name">K-pop</span>
+            <span class="genre-trend trend-steady">· 42%</span>
+          </div>
+          <div class="genre-bar-bg"><div class="genre-bar-fill" style="width: 42%;"></div></div>
+          <div class="genre-note">— 白天电池,具体哪个组合还没告诉我</div>
+        </div>
+
+        <div class="genre-row">
+          <div class="genre-head">
+            <span class="genre-name">华语说唱</span>
+            <span class="genre-trend trend-steady">· 35%</span>
+          </div>
+          <div class="genre-bar-bg"><div class="genre-bar-fill" style="width: 35%;"></div></div>
+          <div class="genre-note">— 南征北战,情境性强,不常听但来就猛</div>
+        </div>
+      </section>
+
+      <!-- 章 4 · 艺人 -->
+      <section class="section">
+        <div class="section-label">A R T I S T S</div>
+
+        <div class="artist-list">
+          <div class="artist-item">
+            <div class="artist-rank">01</div>
+            <div class="artist-name">林俊杰<small>今年听了 87 次</small></div>
+            <div class="affinity-bar"><div class="affinity-fill" style="width: 95%;"></div></div>
+          </div>
+          <div class="artist-item">
+            <div class="artist-rank">02</div>
+            <div class="artist-name">海洋Bo<small>《向云端》几乎每周来一遍</small></div>
+            <div class="affinity-bar"><div class="affinity-fill" style="width: 88%;"></div></div>
+          </div>
+          <div class="artist-item">
+            <div class="artist-rank">03</div>
+            <div class="artist-name">Charlie Puth<small>晚上工作时的默认</small></div>
+            <div class="affinity-bar"><div class="affinity-fill" style="width: 80%;"></div></div>
+          </div>
+          <div class="artist-item">
+            <div class="artist-rank">04</div>
+            <div class="artist-name">Justin Bieber<small>你以前说"软",最近改口了</small></div>
+            <div class="affinity-bar"><div class="affinity-fill" style="width: 72%;"></div></div>
+          </div>
+          <div class="artist-item">
+            <div class="artist-rank">05</div>
+            <div class="artist-name">P!nk<small>需要点劲的时候,这个永远在</small></div>
+            <div class="affinity-bar"><div class="affinity-fill" style="width: 65%;"></div></div>
+          </div>
+          <div class="artist-item">
+            <div class="artist-rank">06</div>
+            <div class="artist-name">南征北战NZBZ<small>低频但每次出现都对</small></div>
+            <div class="affinity-bar"><div class="affinity-fill" style="width: 58%;"></div></div>
+          </div>
+          <div class="artist-item">
+            <div class="artist-rank">07</div>
+            <div class="artist-name">陈默之 / 银河快递<small>你喜欢但我还不熟,改天聊聊</small></div>
+            <div class="affinity-bar"><div class="affinity-fill" style="width: 50%;"></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 章 5 · 情绪标签 · 按频率缩放字号 -->
+      <section class="section">
+        <div class="section-label">M O O D</div>
+
+        <div class="moods">
+          <span class="mood" style="font-size: 22px;">回家路上</span>
+          <span class="mood" style="font-size: 18px;">晚上工作</span>
+          <span class="mood" style="font-size: 20px;">通勤</span>
+          <span class="mood" style="font-size: 14px;">周末清晨</span>
+          <span class="mood" style="font-size: 16px;">需要一点劲</span>
+          <span class="mood" style="font-size: 13px;">散步</span>
+          <span class="mood" style="font-size: 17px;">失眠</span>
+          <span class="mood" style="font-size: 15px;">久别重逢</span>
+          <span class="mood" style="font-size: 13px;">心情有点闷</span>
+          <span class="mood" style="font-size: 14px;">放松发呆</span>
+        </div>
+      </section>
+
+      <!-- 章 6 · Echo 的问题 -->
+      <section class="section">
+        <div class="questions">
+          <div class="section-label" style="color: var(--ayin-700); margin-bottom: 10px;">E C H O 问 你</div>
+          <p style="font-family: var(--serif); font-size: 12px; color: var(--text-2); line-height: 1.6; margin-bottom: 14px; font-style: italic;">
+            有几件事我还不太确定,你抽空告诉我一下就好。
+          </p>
+
+          <div class="q-item">
+            <div class="q-mark">Q</div>
+            <div class="q-body">
+              <div class="q-text">你说喜欢 K-pop,但具体是哪几个组合?BLACKPINK?TWICE?还是别的?</div>
+              <div class="q-actions">
+                <button class="q-btn">回答</button>
+                <button class="q-btn sec">跳过</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="q-item">
+            <div class="q-mark">Q</div>
+            <div class="q-body">
+              <div class="q-text">陈默之和银河快递我还不太熟,你怎么形容他们?</div>
+              <div class="q-actions">
+                <button class="q-btn">回答</button>
+                <button class="q-btn sec">跳过</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="q-item">
+            <div class="q-mark">Q</div>
+            <div class="q-body">
+              <div class="q-text">Justin Bieber 你以前说"软听不进",最近却听了很多。改主意了吗?</div>
+              <div class="q-actions">
+                <button class="q-btn">回答</button>
+                <button class="q-btn sec">跳过</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 页脚元信息 -->
+      <footer class="foot">
+        画像上次更新 · 2026.04.24
+        <span class="div">|</span>
+        共陪伴 127 天
+        <span class="div">|</span>
+        听过 1,842 首
+      </footer>
+
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
