@@ -109,6 +109,21 @@ export function initializeDatabase(database = getDb()): void {
     );
     CREATE INDEX IF NOT EXISTS idx_care_ping_schedule_lookup ON care_ping_schedule(date, planned_at ASC);
 
+    CREATE TABLE IF NOT EXISTS scene_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL DEFAULT 1,
+      scene_key TEXT NOT NULL,
+      label TEXT NOT NULL,
+      started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      ended_at DATETIME,
+      expires_at DATETIME NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      meta_json TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_scene_sessions_active ON scene_sessions(user_id, status, started_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_scene_sessions_today ON scene_sessions(user_id, started_at DESC);
+
     CREATE TABLE IF NOT EXISTS scheduled_jobs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       job_name TEXT NOT NULL,
@@ -213,6 +228,21 @@ export function initializeDatabase(database = getDb()): void {
     );
     CREATE INDEX IF NOT EXISTS idx_track_feedback_user ON track_feedback(user_id, updated_at DESC);
 
+    CREATE TABLE IF NOT EXISTS track_feedback_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL DEFAULT 1,
+      track_key TEXT NOT NULL,
+      action TEXT NOT NULL,
+      context TEXT,
+      title TEXT NOT NULL,
+      artist TEXT NOT NULL,
+      album TEXT,
+      source TEXT,
+      track_json TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_track_feedback_events_recent ON track_feedback_events(user_id, created_at DESC);
+
     CREATE TABLE IF NOT EXISTS playlists_imported (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER,
@@ -276,6 +306,7 @@ export function resetDatabase(): void {
     DELETE FROM playlists_imported;
     DELETE FROM recommendation_cache;
     DELETE FROM track_semantics;
+    DELETE FROM track_feedback_events;
     DELETE FROM track_feedback;
     DELETE FROM queue_history_hidden_dates;
     DELETE FROM tracks_listened;
@@ -286,6 +317,7 @@ export function resetDatabase(): void {
     DELETE FROM care_pings_mute;
     DELETE FROM care_pings;
     DELETE FROM care_ping_schedule;
+    DELETE FROM scene_sessions;
     DELETE FROM conversation_summaries;
     DELETE FROM conversations;
     DELETE FROM events;

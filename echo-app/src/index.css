@@ -612,6 +612,22 @@ button:disabled {
   font-size: 10px;
 }
 
+.q-scene-tag {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 18px;
+  margin-top: 5px;
+  padding: 0 7px;
+  border: 1px solid rgba(99, 153, 34, 0.18);
+  border-radius: var(--radius-full);
+  background: rgba(241, 248, 232, 0.86);
+  color: var(--ayin-green-700);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.4px;
+}
+
 .track-note,
 .np-note,
 .q-note,
@@ -627,7 +643,43 @@ button:disabled {
   display: grid;
   gap: 4px;
   justify-items: end;
+  align-content: center;
   flex-shrink: 0;
+}
+
+.track-card-actions,
+.track-feedback-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.track-card-actions {
+  justify-content: flex-end;
+}
+
+.feedback-mini {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--text-tertiary);
+  display: grid;
+  place-items: center;
+  line-height: 1;
+}
+
+.feedback-mini:hover,
+.feedback-mini.active {
+  color: var(--ayin-green-700);
+  background: var(--ayin-green-100);
+}
+
+.feedback-mini.miss:hover,
+.feedback-mini.miss.active {
+  color: #9f6a48;
+  background: rgba(184, 107, 62, 0.12);
 }
 
 .favorite-mini {
@@ -686,6 +738,18 @@ button:disabled {
   background: var(--bg-primary);
 }
 
+.scene-composer {
+  flex-basis: auto;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.composer-row {
+  display: flex;
+  gap: 8px;
+  height: 40px;
+}
+
 .composer input,
 .input,
 .question-item input {
@@ -701,6 +765,10 @@ button:disabled {
   flex: 1;
   padding: 0 13px;
   font-size: 13px;
+}
+
+.composer-row input {
+  min-width: 0;
 }
 
 .composer input:disabled {
@@ -742,6 +810,116 @@ button:disabled {
 
 .composer .cancel-button:active {
   transform: scale(0.94);
+}
+
+.scene-rail {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+}
+
+.scene-rail.compact {
+  gap: 6px;
+}
+
+.scene-current {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid rgba(99, 153, 34, 0.18);
+  border-radius: var(--radius-md);
+  background: rgba(241, 248, 232, 0.9);
+  color: var(--ayin-green-900);
+}
+
+.scene-current span {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.scene-current small {
+  grid-column: 1 / 2;
+  color: var(--text-secondary);
+  font-family: var(--font-serif);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.scene-current button,
+.scene-composer .scene-current button {
+  grid-row: 1 / 3;
+  grid-column: 2 / 3;
+  width: auto;
+  height: auto;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--ayin-green-700);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.scene-scroll {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.scene-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.scene-chip,
+.scene-composer .scene-chip {
+  width: auto;
+  height: 28px;
+  min-width: 48px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.scene-chip.active,
+.scene-composer .scene-chip.active {
+  border-color: rgba(99, 153, 34, 0.38);
+  background: rgba(241, 248, 232, 0.95);
+  color: var(--ayin-green-800);
+  box-shadow: inset 0 -2px 0 var(--ayin-green-600);
+}
+
+.voice-page .scene-rail {
+  margin: 2px 0 6px;
+  max-width: 360px;
+}
+
+.voice-page .scene-current {
+  text-align: left;
+}
+
+.queue-scene-pill {
+  margin-left: 8px;
+  min-height: 22px;
+  padding: 0 8px;
+  border: 1px solid rgba(99, 153, 34, 0.22);
+  border-radius: var(--radius-full);
+  background: var(--ayin-green-50);
+  color: var(--ayin-green-700);
+  font-family: var(--font-mono);
+  font-size: 10px;
 }
 
 @keyframes cancelPulse {
@@ -3862,6 +4040,11 @@ body {
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.8px;
+}
+
+.scene-composer {
+  flex: 0 0 auto;
+  min-height: 58px;
 }
 
 .queue-tabs button.active {

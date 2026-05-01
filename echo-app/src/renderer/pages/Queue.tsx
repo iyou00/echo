@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ArrowUpToLine, Check, Heart, Play, Trash2, X } from 'lucide-react'
-import type { EchoApi, PlaybackState, QueueHistoryDay, Track } from '../../types/ipc'
+import type { ActiveScene, EchoApi, PlaybackState, QueueHistoryDay, Track } from '../../types/ipc'
 import type { AppPageProps } from '../../App'
 import { EmptyState } from '../components'
 import { pageLabels } from '../labels'
@@ -13,6 +13,8 @@ interface QueuePageProps extends AppPageProps {
   refreshQueue: () => Promise<Track[]>
   autoPlayNext: boolean
   updateAutoPlayNext: (value: boolean) => Promise<void>
+  currentScene: ActiveScene | null
+  endScene: () => Promise<void>
 }
 
 function historyStatusLabel(status?: Track['queueStatus']) {
@@ -28,6 +30,11 @@ function trackKey(track?: Track | null): string {
   return `name:${track.title.trim().toLowerCase()}::${track.artist.trim().toLowerCase()}`
 }
 
+function SceneTag({ track }: { track: Track }) {
+  if (!track.sceneLabel) return null
+  return <span className="q-scene-tag">{track.sceneLabel}</span>
+}
+
 export function QueuePage({
   queue,
   echo,
@@ -37,6 +44,8 @@ export function QueuePage({
   navigate,
   autoPlayNext,
   updateAutoPlayNext,
+  currentScene,
+  endScene,
 }: QueuePageProps) {
   const [tab, setTab] = useState<'now' | 'favorites' | 'past'>('now')
   const [dragIndex, setDragIndex] = useState<number | null>(null)
@@ -221,7 +230,14 @@ export function QueuePage({
   return (
     <div className="phone-surface queue-page">
       <div className="page-toolbar">
-        <div className="tb-status">今日 {rest.length + (playing ? 1 : 0)} 首 · 总长 {totalMinutes || '-'} 分钟</div>
+        <div className="tb-status">
+          今日 {rest.length + (playing ? 1 : 0)} 首 · 总长 {totalMinutes || '-'} 分钟
+          {currentScene && (
+            <button className="queue-scene-pill" type="button" onClick={() => { void endScene() }} title="结束当前场景">
+              {currentScene.label}中 · 结束
+            </button>
+          )}
+        </div>
         <div className="tb-actions">
           {tab === 'now' && (
             <button
@@ -280,6 +296,7 @@ export function QueuePage({
                   <div className="np-title">{playing.title}</div>
                   <div className="np-meta">{playing.artist}{playing.year ? ` · ${playing.year}` : ''}</div>
                   {playing.reason && <div className="np-note">— {playing.reason}</div>}
+                  <SceneTag track={playing} />
                 </div>
                 <div className="np-actions">
                   <button
@@ -322,6 +339,7 @@ export function QueuePage({
                     <div className="q-body">
                       <div className="q-title">{track.title}</div>
                       <div className="q-meta">{track.artist}{track.year ? ` · ${track.year}` : ''}</div>
+                      <SceneTag track={track} />
                       {track.reason && <div className="q-note">— {track.reason}</div>}
                     </div>
                     <div className="q-tail">
@@ -361,6 +379,7 @@ export function QueuePage({
                     <div className="q-body">
                       <div className="q-title">{track.title}</div>
                       <div className="q-meta">{track.artist}{track.year ? ` · ${track.year}` : track.album ? ` · ${track.album}` : ''}</div>
+                      <SceneTag track={track} />
                       {(track.echoNote || track.reason) && <div className="q-note">— {track.echoNote ?? track.reason}</div>}
                     </div>
                     <div className="q-tail q-tail-favorite">
@@ -430,6 +449,7 @@ export function QueuePage({
                                 <div className="q-body">
                                   <div className="q-title">{track.title}</div>
                                   <div className="q-meta">{track.artist}{track.year ? ` · ${track.year}` : ''}</div>
+                                  <SceneTag track={track} />
                                   {(track.echoNote || track.reason) && <div className="q-note">— {track.echoNote ?? track.reason}</div>}
                                 </div>
                                 <div className="q-tail q-tail-history">

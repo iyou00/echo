@@ -8,6 +8,8 @@ import { getYinyiRange } from '../db/yinyi'
 import { getSettings } from '../db/settings'
 import { readRootFile } from '../utils/paths'
 import { getMostRecentSeal } from '../services/daySeal'
+import { buildTodayMusicSessionSummary } from '../services/musicSession'
+import { buildCurrentSceneContext, buildTodaySceneContext } from '../services/scene'
 
 export interface ChatContextOptions {
   recommendationCandidates?: Track[]
@@ -32,6 +34,8 @@ export function buildChatContext(userText: string, options: ChatContextOptions =
   const recentSeal = getMostRecentSeal()
   const candidates = options.recommendationCandidates ?? []
   const followUpQuestion = options.followUpQuestion
+  const musicSession = buildTodayMusicSessionSummary()
+  const sceneContext = buildCurrentSceneContext()
   const candidatesBlock = candidates.length > 0
     ? `
 
@@ -67,6 +71,10 @@ ${profile?.echo_portrait ?? '用户还没有导入歌单，Echo 对 Ta 的品味
 <current_context>
 - 当前时间:${new Date().toLocaleString('zh-CN', { hour12: false })}
 </current_context>${candidatesBlock}${authBlock}${followUpBlock}
+<today_music_session>
+${musicSession}
+</today_music_session>
+${sceneContext}
 ${recentSeal ? `
 <recent_day_seal>
 ${recentSeal}
@@ -88,6 +96,7 @@ export function buildYinyiContext(date: string): LlmMessage[] {
   const tracks = loadTodayTrackEvents(60)
   const recommendations = tracks.filter((track) => track.source === 'recommended_by_echo')
   const activeEvents = loadActiveEvents(8)
+  const todaySceneContext = buildTodaySceneContext()
   const recentYinyi = getYinyiRange(7).filter((entry) => entry.date !== date)
   const settings = getSettings()
   const firstUsedAt = new Date(settings.meta.firstUsedAt)
@@ -125,6 +134,8 @@ ${recommendations.length > 0 ? recommendations.map((track) => `- ${track.artist}
 <active_events>
 ${activeEvents.length > 0 ? activeEvents.map((event) => `- ${event.content} (kind:${event.kind}, weight:${event.weight ?? '-'}, started:${event.startedAt ?? '-'})`).join('\n') : '(暂无)'}
 </active_events>
+
+${todaySceneContext}
 
 <taste_profile_summary>
 ${profile?.echo_portrait ?? '还没有完整画像。'}

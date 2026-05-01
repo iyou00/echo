@@ -1,6 +1,6 @@
-import { Heart, Pause, Play } from 'lucide-react'
+import { Heart, Pause, Play, ThumbsDown, ThumbsUp } from 'lucide-react'
 import type { ReactNode } from 'react'
-import type { PlaybackStatus, Track } from '../types/ipc'
+import type { ActiveScene, PlaybackStatus, SceneDefinition, SceneKey, Track } from '../types/ipc'
 import { brand } from '../brand'
 
 export function PageHeader({
@@ -92,6 +92,46 @@ export function WindowControls({
   )
 }
 
+export function SceneRail({
+  scenes,
+  currentScene,
+  onStart,
+  onEnd,
+  compact = false,
+}: {
+  scenes: SceneDefinition[]
+  currentScene: ActiveScene | null
+  onStart: (key: SceneKey) => void
+  onEnd: () => void
+  compact?: boolean
+}) {
+  const activeKey = currentScene?.key
+  return (
+    <div className={compact ? 'scene-rail compact' : 'scene-rail'}>
+      {currentScene && (
+        <div className="scene-current">
+          <span>当前：{currentScene.label}中</span>
+          <small>{currentScene.line}</small>
+          <button type="button" onClick={onEnd}>结束</button>
+        </div>
+      )}
+      <div className="scene-scroll" aria-label="场景模式">
+        {scenes.map((scene) => (
+          <button
+            type="button"
+            key={scene.key}
+            className={activeKey === scene.key ? 'scene-chip active' : 'scene-chip'}
+            onClick={() => onStart(scene.key)}
+            title={scene.line}
+          >
+            <span>{compact ? scene.label : scene.shortLabel}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function formatDuration(ms?: number) {
   if (!ms || ms <= 0) return ''
   const total = Math.floor(ms / 1000)
@@ -105,17 +145,21 @@ export function TrackCard({
   compact = false,
   onPlay,
   onToggleFavorite,
+  onFeedback,
   isCurrent = false,
   playbackStatus = 'idle',
   favorited = false,
+  feedbackState,
 }: {
   track: Track
   compact?: boolean
   onPlay?: (track: Track) => void
   onToggleFavorite?: (track: Track) => void
+  onFeedback?: (track: Track, action: 'more_like_this' | 'not_right') => void
   isCurrent?: boolean
   playbackStatus?: PlaybackStatus
   favorited?: boolean
+  feedbackState?: 'more_like_this' | 'not_right'
 }) {
   const isPlaying = isCurrent && playbackStatus === 'playing'
   const isPaused = isCurrent && playbackStatus === 'paused'
@@ -154,20 +198,43 @@ export function TrackCard({
         </div>
       </div>
       <div className="track-card-side">
-        {onToggleFavorite && (
-          <button
-            className={favorited ? 'favorite-mini active' : 'favorite-mini'}
-            type="button"
-            title={favorited ? '取消收藏' : '收藏'}
-            aria-label={favorited ? '取消收藏' : '收藏'}
-            onClick={(event) => {
-              event.stopPropagation()
-              onToggleFavorite(track)
-            }}
-          >
-            <Heart size={13} fill={favorited ? 'currentColor' : 'none'} />
-          </button>
-        )}          
+        {(onFeedback || onToggleFavorite) && (
+          <div className="track-card-actions" onClick={(event) => event.stopPropagation()}>
+            {onFeedback && (
+              <>
+                <button
+                  className={feedbackState === 'more_like_this' ? 'feedback-mini active' : 'feedback-mini'}
+                  type="button"
+                  title="多来这种"
+                  aria-label="多来这种"
+                  onClick={() => onFeedback(track, 'more_like_this')}
+                >
+                  <ThumbsUp size={12} />
+                </button>
+                <button
+                  className={feedbackState === 'not_right' ? 'feedback-mini active miss' : 'feedback-mini miss'}
+                  type="button"
+                  title="这首不对"
+                  aria-label="这首不对"
+                  onClick={() => onFeedback(track, 'not_right')}
+                >
+                  <ThumbsDown size={12} />
+                </button>
+              </>
+            )}
+            {onToggleFavorite && (
+              <button
+                className={favorited ? 'favorite-mini active' : 'favorite-mini'}
+                type="button"
+                title={favorited ? '取消收藏' : '收藏'}
+                aria-label={favorited ? '取消收藏' : '收藏'}
+                onClick={() => onToggleFavorite(track)}
+              >
+                <Heart size={13} fill={favorited ? 'currentColor' : 'none'} />
+              </button>
+            )}
+          </div>
+        )}
         {track.durationMs ? <span className="track-duration">{formatDuration(track.durationMs)}</span> : null}
       </div>
     </div>

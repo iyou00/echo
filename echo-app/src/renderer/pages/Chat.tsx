@@ -1,8 +1,8 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
 import { Send, Square } from 'lucide-react'
-import type { ChatMessage, EchoApi, PlaybackState, TasteProfile, Track } from '../../types/ipc'
+import type { ActiveScene, ChatMessage, EchoApi, PlaybackState, SceneDefinition, SceneKey, TasteProfile, Track } from '../../types/ipc'
 import type { AppPageProps } from '../../App'
-import { BrandLogo, EmptyState, TrackCard } from '../components'
+import { BrandLogo, EmptyState, SceneRail, TrackCard } from '../components'
 
 interface ChatPageProps extends AppPageProps {
   echo: EchoApi
@@ -13,6 +13,12 @@ interface ChatPageProps extends AppPageProps {
   profile: TasteProfile | null
   refreshQueue: () => Promise<Track[]>
   restoreOnStart: boolean
+  scenes: SceneDefinition[]
+  currentScene: ActiveScene | null
+  startScene: (key: SceneKey) => Promise<ActiveScene>
+  endScene: () => Promise<void>
+  autoPlayNext: boolean
+  updateAutoPlayNext: (value: boolean) => Promise<void>
 }
 
 const WAITING_LINES = [
@@ -111,11 +117,12 @@ function friendlyChatError(error: unknown) {
   return message || 'Echo 这会儿接不上模型。先去设置里看一眼。'
 }
 
-export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasLlmConfig, profile, refreshQueue, restoreOnStart }: ChatPageProps) {
+export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasLlmConfig, profile, refreshQueue, restoreOnStart, scenes, currentScene, startScene, endScene, autoPlayNext, updateAutoPlayNext }: ChatPageProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [favoriteKeys, setFavoriteKeys] = useState<Set<string>>(new Set())
+  const [feedbackMap, setFeedbackMap] = useState<Record<string, 'more_like_this' | 'not_right'>>({})
   const [waitingLines, setWaitingLines] = useState<Record<number, string>>({})
   const [pendingDisplayIds, setPendingDisplayIds] = useState<Set<number>>(new Set())
   // 仅会话内有效：标记需要展示"去登录网易云"CTA 的助手消息 id（不持久化）。
@@ -201,7 +208,11 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
 
   async function sendMessage(event: FormEvent) {
     event.preventDefault()
-    const text = draft.trim()
+    await submitText(draft)
+  }
+
+  async function submitText(rawText: string) {
+    const text = rawText.trim()
     if (!text || sending || !hasLlmConfig) return
 
     const userMessage: ChatMessage = {
@@ -406,6 +417,33 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
     setFavoriteKeys(new Set(result.favorites.map(trackKey)))
   }
 
+  async function enterScene(key: SceneKey) {
+    if (sending || !hasLlmConfig) return
+    const scene = await startScene(key)
+    if (!autoPlayNext) await updateAutoPlayNext(true)
+    if (scene.key === 'random') {
+      setDraft(scene.prompt)
+      return
+    }
+    setDraft('')
+    await echo.playback.clearQueue().then(setPlaybackState).catch(() => undefined)
+    await submitText(scene.prompt)
+  }
+
+  async function recordTrackFeedback(track: Track, action: 'more_like_this' | 'not_right') {
+    const key = trackKey(track)
+    setFeedbackMap((items) => ({ ...items, [key]: action }))
+    try {
+      await echo.feedback.record(track, action, 'chat_recommendation_card')
+    } catch {
+      setFeedbackMap((items) => {
+        const next = { ...items }
+        delete next[key]
+        return next
+      })
+    }
+  }
+
   function renderEmptyChat() {
     if (!hasLlmConfig) {
       return (
@@ -479,9 +517,11 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
                       track={track}
                       onPlay={(track) => handleTrackAction(track, message.tracks ?? [])}
                       onToggleFavorite={toggleFavorite}
+                      onFeedback={recordTrackFeedback}
                       isCurrent={trackKey(track) === activeTrackKey}
                       playbackStatus={playbackState.status}
                       favorited={favoriteKeys.has(trackKey(track))}
+                      feedbackState={feedbackMap[trackKey(track)]}
                     />
                   ))}
                   {authHintIds.has(message.id) && (
@@ -501,22 +541,33 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
         )}
       </div>
 
-      <form className="composer" onSubmit={sendMessage}>
-        <input
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder={hasLlmConfig ? '和 Echo 说点什么...' : '先填好 LLM 才能说话...'}
-          disabled={!hasLlmConfig}
-        />
-        {sending ? (
-          <button className="cancel-button" type="button" onClick={cancelMessage} title="让 Echo 先停一下">
-            <Square size={13} fill="currentColor" />
-          </button>
-        ) : (
-          <button type="submit" disabled={!draft.trim() || !hasLlmConfig} title="发送">
-            <Send size={17} />
-          </button>
+      <form className="composer scene-composer" onSubmit={sendMessage}>
+        {scenes.length > 0 && (
+          <SceneRail
+            scenes={scenes}
+            currentScene={currentScene}
+            onStart={(key) => { void enterScene(key) }}
+            onEnd={() => { void endScene() }}
+            compact
+          />
         )}
+        <div className="composer-row">
+          <input
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder={hasLlmConfig ? '和 Echo 说点什么...' : '先填好 LLM 才能说话...'}
+            disabled={!hasLlmConfig}
+          />
+          {sending ? (
+            <button className="cancel-button" type="button" onClick={cancelMessage} title="让 Echo 先停一下">
+              <Square size={13} fill="currentColor" />
+            </button>
+          ) : (
+            <button type="submit" disabled={!draft.trim() || !hasLlmConfig} title="发送">
+              <Send size={17} />
+            </button>
+          )}
+        </div>
       </form>
     </div>
   )

@@ -9,6 +9,7 @@ import { applySignal } from './taste'
 import { resolvePlayableTrack } from '../netease/music'
 import { recordHealth } from './health'
 import { MAX_RECOMMENDATION_COUNT, OVER_LIMIT_RECOMMENDATION_LINE, inferIntentWithLlm, NeteaseAuthRequiredError, parseRequestedTrackCount, recommendFromNetease } from './recommendation'
+import { getCurrentScene } from './scene'
 import {
   appendFollowUpQuestion,
   capturePendingQuestionAnswer,
@@ -41,7 +42,7 @@ function friendlyError(error: unknown): string {
  * - 显式音乐词：歌 / 听 / 曲 / 放 / 推 / 推荐 / 歌单 / music / song
  * - 节奏/氛围词：慢 / 快 / 安静 / 热闹 / 舒缓 / 燃 / 治愈 / 怀旧
  * - 心情信号：累 / 困 / 烦 / 燥 / 低落 / emo / 想哭 / 难过 / 开心 / 兴奋
- * - 场景信号：下班 / 通勤 / 睡前 / 雨天 / 一个人 / 发呆 / 加班
+ * - 场景信号：工作 / 专注 / 犯困 / 放松 / 雨天 / 烦躁 / 发呆 / 加班
  * - 语言/地区：国外 / 外国 / 英文 / 欧美 / 粤语 / 韩 / 日
  */
 function looksLikeMusicRelated(text: string): boolean {
@@ -54,6 +55,20 @@ function looksLikeRecommendationRequest(text: string): boolean {
 
 function trackKey(track: Track): string {
   return `${track.id ?? track.neteaseId ?? ''}::${track.title.trim().toLowerCase()}::${track.artist.trim().toLowerCase()}`
+}
+
+function attachSceneToTracks(tracks: Track[]): Track[] {
+  const scene = getCurrentScene()
+  if (!scene || tracks.length === 0) return tracks
+  return tracks.map((track) => ({
+    ...track,
+    sceneKey: scene.key,
+    sceneLabel: scene.label,
+    sceneLine: scene.line,
+    sceneSessionId: scene.id,
+    reason: track.reason ?? scene.line,
+    echoNote: track.echoNote ?? track.reason ?? scene.line,
+  }))
 }
 
 function compactText(value: string): string {
@@ -336,13 +351,14 @@ export async function send(text: string, sender?: WebContents): Promise<SendChat
     activeChats.delete(active)
   }
 
-  appendRecommendedTracks(tracks)
-  const message = appendConversation('assistant', content.trim(), tracks)
+  const finalTracks = attachSceneToTracks(tracks)
+  appendRecommendedTracks(finalTracks)
+  const message = appendConversation('assistant', content.trim(), finalTracks)
   recordFollowUpQuestionAsked(followUpQuestion, message.id)
   const hints = authRequired ? { neteaseAuthRequired: true } : undefined
-  sender?.send('chat:stream:end', { message, tracks, durationMs: Date.now() - started, hints })
+  sender?.send('chat:stream:end', { message, tracks: finalTracks, durationMs: Date.now() - started, hints })
 
-  return { message, tracks, hints }
+  return { message, tracks: finalTracks, hints }
 }
 
 export function loadRecent(limit = 30): ChatMessage[] {

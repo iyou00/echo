@@ -10,6 +10,9 @@ import type {
   NeteasePlaylistSummary,
   NeteaseQrCheckResult,
   NeteaseQrLogin,
+  ActiveScene,
+  SceneDefinition,
+  SceneKey,
   SendChatResult,
   ServiceHealth,
   Settings,
@@ -29,6 +32,16 @@ const mockTracks: Track[] = [
   { id: 'mock-5', title: 'Ghost', artist: 'Justin Bieber', album: 'Justice', year: 2021, reason: '你最近悄悄接受的那种软' },
   { id: 'mock-6', title: '我怀念的', artist: '孙燕姿', album: '逆光', year: 2007, reason: '慢一点，让你别紧绷' },
   { id: 'mock-7', title: '骄傲的少年', artist: '南征北战NZBZ', album: '骄傲的少年', year: 2018, reason: '需要一点电的时候总在' },
+]
+
+const mockScenes: SceneDefinition[] = [
+  { key: 'work', label: '工作', shortLabel: '工 作', line: '让节奏慢慢提起来,先别太炸。', prompt: '我想进入工作状态,帮我接 5 首。', moods: ['清醒', '陪伴'], scenes: ['下午工作'], energy: 'medium', tempo: 'medium', familiarity: 'balanced' },
+  { key: 'focus', label: '专注', shortLabel: '专 注', line: '少一点存在感,让节奏稳定铺着。', prompt: '我想专注一会儿,帮我接 5 首不抢注意力的。', moods: ['陪伴', '清醒'], scenes: ['下午工作'], energy: 'medium', tempo: 'medium', familiarity: 'safe' },
+  { key: 'sleepy', label: '犯困', shortLabel: '犯 困', line: '把精神提一下,别一下子太猛。', prompt: '我有点犯困,帮我接 5 首提神但别太炸的。', moods: ['清醒', '轻快'], scenes: ['下午工作'], energy: 'high', tempo: 'medium', familiarity: 'balanced' },
+  { key: 'relax', label: '放松', shortLabel: '放 松', line: '工作间隙缓一下,别把情绪拽太深。', prompt: '我想放松一下,帮我接 5 首轻一点的。', moods: ['松弛', '治愈'], scenes: ['独处'], energy: 'low', tempo: 'slow', familiarity: 'safe' },
+  { key: 'rain', label: '雨天', shortLabel: '雨 天', line: '窗外慢一点,歌也慢一点。', prompt: '雨天这个气氛,帮我接 5 首。', moods: ['怀旧', '发呆'], scenes: ['雨天'], energy: 'low', tempo: 'slow', familiarity: 'balanced' },
+  { key: 'irritated', label: '烦躁', shortLabel: '烦 躁', line: '先降噪,让脑子别继续被推着走。', prompt: '我有点烦躁,帮我接 5 首别太吵的。', moods: ['松弛', '治愈'], scenes: ['独处'], energy: 'low', tempo: 'slow', familiarity: 'safe' },
+  { key: 'random', label: '随便听', shortLabel: '随 便', line: '交给 Echo 发散,从你的口味里随手捞。', prompt: '随便听点什么吗?不改的话,就给你自动连播 5 首哦。', moods: ['陪伴'], scenes: ['下午工作'], energy: 'medium', tempo: 'medium', familiarity: 'explore' },
 ]
 
 const mockSettings: Settings = {
@@ -125,6 +138,8 @@ let profileState: TasteProfile | null = structuredClone(mockProfile)
 let questionState: TasteQuestion[] = structuredClone(mockQuestions)
 let queueState: Track[] = structuredClone(mockTracks)
 let favoriteState: Track[] = []
+let activeSceneState: ActiveScene | null = null
+let sceneSessions: ActiveScene[] = []
 const playbackState: PlaybackState = {
   current: null,
   position: 0,
@@ -204,6 +219,12 @@ function mockIsFavorite(track: Track) {
   return favoriteState.some((item) => mockTrackKey(item) === mockTrackKey(track))
 }
 
+function mockSceneDefinition(key: SceneKey) {
+  const scene = mockScenes.find((item) => item.key === key)
+  if (!scene) throw new Error('未知场景')
+  return scene
+}
+
 function emitPlayback() {
   const next = structuredClone(playbackState)
   playbackListeners.forEach((listener) => listener(next))
@@ -265,6 +286,8 @@ const mockEcho: EchoApi = {
       questionState = []
       queueState = []
       favoriteState = []
+      activeSceneState = null
+      sceneSessions = []
       messages = []
       playbackState.current = null
       playbackState.position = 0
@@ -449,6 +472,56 @@ const mockEcho: EchoApi = {
     },
     async isFavorite(track) {
       return mockIsFavorite(track)
+    },
+  },
+  feedback: {
+    async record() {
+      return { ok: true, message: '我记住了。' }
+    },
+  },
+  scene: {
+    async definitions() {
+      return structuredClone(mockScenes)
+    },
+    async getCurrent() {
+      if (activeSceneState && new Date(activeSceneState.expiresAt).getTime() <= Date.now()) {
+        activeSceneState = { ...activeSceneState, status: 'expired', endedAt: activeSceneState.expiresAt }
+      }
+      return structuredClone(activeSceneState?.status === 'active' ? activeSceneState : null)
+    },
+    async start(key) {
+      if (activeSceneState?.status === 'active') {
+        activeSceneState = { ...activeSceneState, status: 'ended', endedAt: new Date().toISOString() }
+      }
+      const definition = mockSceneDefinition(key)
+      const nowAt = new Date().toISOString()
+      const scene: ActiveScene = {
+        ...definition,
+        id: Date.now(),
+        startedAt: nowAt,
+        expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+        status: 'active',
+      }
+      activeSceneState = scene
+      sceneSessions.unshift(scene)
+      return structuredClone(scene)
+    },
+    async end() {
+      if (!activeSceneState || activeSceneState.status !== 'active') return null
+      activeSceneState = { ...activeSceneState, status: 'ended', endedAt: new Date().toISOString() }
+      return structuredClone(activeSceneState)
+    },
+    async today() {
+      return sceneSessions.map((scene) => ({
+        id: scene.id,
+        key: scene.key,
+        label: scene.label,
+        startedAt: scene.startedAt,
+        endedAt: scene.endedAt,
+        expiresAt: scene.expiresAt,
+        status: scene.status,
+        durationMinutes: Math.max(0, Math.round((new Date(scene.endedAt ?? scene.expiresAt).getTime() - new Date(scene.startedAt).getTime()) / 60000)),
+      }))
     },
   },
   semantics: {

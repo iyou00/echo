@@ -19,10 +19,16 @@ export interface Track {
   semantic?: TrackSemantic
   recommendSource?: RecommendationSource
   profileEvidence?: TrackProfileEvidence
+  sceneKey?: SceneKey
+  sceneLabel?: string
+  sceneLine?: string
+  sceneSessionId?: number
 }
 
 export type PlaybackStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'error'
 export type RecommendationSource = 'daily' | 'fm' | 'similar' | 'style' | 'search' | 'new_song' | 'artist' | 'playlist'
+export type ExplicitTrackFeedbackAction = 'more_like_this' | 'not_right'
+export type SceneKey = 'work' | 'focus' | 'sleepy' | 'relax' | 'rain' | 'irritated' | 'random'
 export type PingType = 'recommend_track' | 'casual_check' | 'voice_invite'
 export type CareFrequency = 'gentle' | 'normal' | 'frequent'
 export type AppPageKey = 'chat' | 'profile' | 'yinyi' | 'voice' | 'queue' | 'settings'
@@ -61,6 +67,38 @@ export interface TrackProfileEvidence {
   scenes?: string[]
   source?: string
   score?: number
+}
+
+export interface SceneDefinition {
+  key: SceneKey
+  label: string
+  shortLabel: string
+  line: string
+  prompt: string
+  moods: string[]
+  scenes: string[]
+  energy: 'low' | 'medium' | 'high'
+  tempo: 'slow' | 'medium' | 'fast'
+  familiarity: 'safe' | 'explore' | 'balanced'
+}
+
+export interface ActiveScene extends SceneDefinition {
+  id: number
+  startedAt: string
+  expiresAt: string
+  endedAt?: string
+  status: 'active' | 'ended' | 'expired'
+}
+
+export interface SceneSessionSummary {
+  id: number
+  key: SceneKey
+  label: string
+  startedAt: string
+  endedAt?: string
+  expiresAt: string
+  status: 'active' | 'ended' | 'expired'
+  durationMinutes: number
 }
 
 export interface SemanticSummary {
@@ -323,6 +361,16 @@ export interface EchoApi {
     list(): Promise<Track[]>
     toggle(track: Track): Promise<{ favorited: boolean; favorites: Track[] }>
     isFavorite(track: Track): Promise<boolean>
+  }
+  feedback: {
+    record(track: Track, action: ExplicitTrackFeedbackAction, context?: string): Promise<{ ok: boolean; message: string }>
+  }
+  scene: {
+    definitions(): Promise<SceneDefinition[]>
+    getCurrent(): Promise<ActiveScene | null>
+    start(key: SceneKey): Promise<ActiveScene>
+    end(): Promise<ActiveScene | null>
+    today(): Promise<SceneSessionSummary[]>
   }
   semantics: {
     buildForImportedTracks(): Promise<{ tagged: number; skipped: number }>

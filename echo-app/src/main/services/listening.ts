@@ -11,6 +11,7 @@ import { readRootFile } from '../utils/paths'
 import { getMostRecentSeal } from './daySeal'
 import { getWeather } from '../weather/client'
 import { recordHealth } from './health'
+import { recommendFromNetease } from './recommendation'
 
 interface ListeningText {
   text?: string
@@ -135,12 +136,18 @@ function fallbackText(track: Track | null): string {
   return variants[Math.floor(Math.random() * variants.length)]
 }
 
-async function getCandidates(): Promise<Track[]> {
+async function getFallbackCandidates(): Promise<Track[]> {
   const imported = getAllImportedTracks()
   const fresh = imported.filter((track) => !recentTrackKeys.includes(trackKey(track)))
   const pool = fresh.length >= 8 ? fresh : imported
   const candidates = shuffled(pool).slice(0, 24)
   return filterPlayableTracks(candidates, 5)
+}
+
+async function getCandidates(): Promise<Track[]> {
+  const fromNetease = await recommendFromNetease('回声里随机给我一首适合现在听的歌', undefined, { ignoreScene: true }).catch(() => [])
+  if (fromNetease.length > 0) return fromNetease.filter((track) => !recentTrackKeys.includes(trackKey(track))).slice(0, 5)
+  return getFallbackCandidates()
 }
 
 function buildContext(input: {

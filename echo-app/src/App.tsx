@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { PlaybackState, Settings, TasteProfile, TasteQuestion, Track } from './types/ipc'
+import type { ActiveScene, PlaybackState, SceneDefinition, SceneKey, Settings, TasteProfile, TasteQuestion, Track } from './types/ipc'
 import { getEchoApi } from './renderer/api'
 import { ChatPage } from './renderer/pages/Chat'
 import { EchoProfilePage } from './renderer/pages/EchoProfile'
@@ -25,6 +25,8 @@ function App() {
   const [profile, setProfile] = useState<TasteProfile | null>(null)
   const [questions, setQuestions] = useState<TasteQuestion[]>([])
   const [queue, setQueue] = useState<Track[]>([])
+  const [sceneDefinitions, setSceneDefinitions] = useState<SceneDefinition[]>([])
+  const [currentScene, setCurrentScene] = useState<ActiveScene | null>(null)
   const [playbackNotice, setPlaybackNotice] = useState('')
   const [careMuteToast, setCareMuteToast] = useState(false)
   const [careMuteCountdown, setCareMuteCountdown] = useState(5)
@@ -56,16 +58,24 @@ function App() {
     return next
   }, [echo])
 
+  const refreshScene = useCallback(async (): Promise<ActiveScene | null> => {
+    const next = await echo.scene.getCurrent()
+    setCurrentScene(next)
+    return next
+  }, [echo])
+
   useEffect(() => {
     let alive = true
 
     async function boot() {
-      const [nextSettings, nextTaste, nextQueue, nextPlayback, nextYinyi] = await Promise.all([
+      const [nextSettings, nextTaste, nextQueue, nextPlayback, nextYinyi, nextScenes, nextScene] = await Promise.all([
         echo.settings.get(),
         echo.taste.getProfile(),
         echo.queue.get(),
         echo.playback.getState(),
         echo.yinyi.getRange(1).catch(() => []),
+        echo.scene.definitions(),
+        echo.scene.getCurrent(),
       ])
 
       if (!alive) return
@@ -75,6 +85,8 @@ function App() {
       setQueue(nextQueue)
       setPlaybackState(nextPlayback)
       setLatestYinyiDate(nextYinyi[0]?.date ?? '')
+      setSceneDefinitions(nextScenes)
+      setCurrentScene(nextScene)
       const isRealElectron = Boolean(window.echo)
       if (isRealElectron && (!nextSettings.llm.baseUrl || !nextSettings.llm.apiKey || !nextSettings.llm.model)) {
         setPage('settings')
@@ -88,6 +100,13 @@ function App() {
       alive = false
     }
   }, [echo])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      refreshScene().catch(() => undefined)
+    }, 60000)
+    return () => window.clearInterval(timer)
+  }, [refreshScene])
 
   useEffect(() => {
     return echo.playback.onStateChanged((next) => {
@@ -184,6 +203,17 @@ function App() {
   async function updateAutoPlayNext(value: boolean) {
     const next = await echo.settings.update('playback.autoPlayNext', value)
     setSettings(next)
+  }
+
+  async function startScene(key: SceneKey) {
+    const next = await echo.scene.start(key)
+    setCurrentScene(next)
+    return next
+  }
+
+  async function endScene() {
+    await echo.scene.end()
+    setCurrentScene(null)
   }
 
   async function closeWindow() {
@@ -292,6 +322,12 @@ function App() {
               profile={profile}
               refreshQueue={refreshQueue}
               restoreOnStart={Boolean(settings?.chat.restoreOnStart)}
+              scenes={sceneDefinitions}
+              currentScene={currentScene}
+              startScene={startScene}
+              endScene={endScene}
+              autoPlayNext={settings?.playback.autoPlayNext ?? true}
+              updateAutoPlayNext={updateAutoPlayNext}
             />
           </div>
           <div className="shell-page" style={{ display: page === 'yinyi' ? 'flex' : 'none' }}>
@@ -323,6 +359,8 @@ function App() {
               refreshQueue={refreshQueue}
               autoPlayNext={settings?.playback.autoPlayNext ?? true}
               updateAutoPlayNext={updateAutoPlayNext}
+              currentScene={currentScene}
+              endScene={endScene}
             />
           </div>
           {page === 'profile' && (

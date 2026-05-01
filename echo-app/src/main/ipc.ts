@@ -7,6 +7,7 @@ import { answerQuestion, applySignal, getProfileWithQuestions, regeneratePortrai
 import { generateYinyi, getByDate, getRandom, getRange } from './services/yinyi'
 import { clearQueueHistoryDates, getQueue, getQueueHistory, markQueueStatus } from './services/queue'
 import { isFavorite, listFavorites, toggleFavorite } from './services/favorites'
+import { recordFeedback } from './services/feedback'
 import {
   clearQueue,
   enqueue,
@@ -38,6 +39,7 @@ import type { PingType } from '../types/ipc'
 import { checkServiceHealth, getServiceHealth } from './services/health'
 import { buildForImportedTracks, getSummary as getSemanticSummary } from './services/semantics'
 import { recommendFromNetease } from './services/recommendation'
+import { endCurrentScene, getCurrentScene, listSceneDefinitions, listTodaySceneSessions, startScene } from './services/scene'
 
 function broadcast(channel: string, payload: unknown): void {
   for (const window of BrowserWindow.getAllWindows()) {
@@ -109,6 +111,12 @@ export function registerIpc(): void {
   ipcMain.handle('favorites:list', () => listFavorites())
   ipcMain.handle('favorites:toggle', (_event, track) => toggleFavorite(track))
   ipcMain.handle('favorites:isFavorite', (_event, track) => isFavorite(track))
+  ipcMain.handle('feedback:record', (_event, track, action, context) => recordFeedback(track, action, context))
+  ipcMain.handle('scene:definitions', () => listSceneDefinitions())
+  ipcMain.handle('scene:getCurrent', () => getCurrentScene())
+  ipcMain.handle('scene:start', (_event, key) => startScene(key))
+  ipcMain.handle('scene:end', () => endCurrentScene())
+  ipcMain.handle('scene:today', () => listTodaySceneSessions())
   ipcMain.handle('semantics:buildForImportedTracks', () => buildForImportedTracks())
   ipcMain.handle('semantics:getSummary', () => getSemanticSummary())
   ipcMain.handle('recommendation:recommendFromNetease', (_event, text: string) => recommendFromNetease(text))

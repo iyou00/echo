@@ -61,6 +61,16 @@ const echoApi: EchoApi = {
     toggle: (track) => ipcRenderer.invoke('favorites:toggle', track),
     isFavorite: (track) => ipcRenderer.invoke('favorites:isFavorite', track),
   },
+  feedback: {
+    record: (track, action, context) => ipcRenderer.invoke('feedback:record', track, action, context),
+  },
+  scene: {
+    definitions: () => ipcRenderer.invoke('scene:definitions'),
+    getCurrent: () => ipcRenderer.invoke('scene:getCurrent'),
+    start: (key) => ipcRenderer.invoke('scene:start', key),
+    end: () => ipcRenderer.invoke('scene:end'),
+    today: () => ipcRenderer.invoke('scene:today'),
+  },
   semantics: {
     buildForImportedTracks: () => ipcRenderer.invoke('semantics:buildForImportedTracks'),
     getSummary: () => ipcRenderer.invoke('semantics:getSummary'),

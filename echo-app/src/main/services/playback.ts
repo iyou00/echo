@@ -5,6 +5,7 @@ import { refreshPlayableUrl } from '../netease/music'
 import { applySignal, maybeRefreshStructuredProfile } from './taste'
 import { recordHealth } from './health'
 import { recordTrackFeedback } from '../db/feedback'
+import { endCurrentScene, getCurrentScene } from './scene'
 
 const state: PlaybackState = {
   current: null,
@@ -195,6 +196,7 @@ export async function next(): Promise<PlaybackState> {
   state.status = 'idle'
   state.queue = []
   state.error = lastError ? '下一首暂时播不出来' : undefined
+  if (getCurrentScene()) endCurrentScene()
   return emitState()
 }
 

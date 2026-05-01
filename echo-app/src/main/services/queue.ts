@@ -12,6 +12,7 @@ export function getQueue(limit = 30): Track[] {
   const queue: Track[] = []
 
   for (const track of tracks) {
+    if (track.queueStatus === 'skipped') continue
     const key = trackKey(track)
     if (seen.has(key)) continue
     seen.add(key)
