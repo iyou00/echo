@@ -75,6 +75,7 @@ export interface SceneDefinition {
   shortLabel: string
   line: string
   prompt: string
+  targetCount: number
   moods: string[]
   scenes: string[]
   energy: 'low' | 'medium' | 'high'

@@ -218,3 +218,21 @@ export function getFeedbackSignalCount(): number {
     .get() as { total: number } | undefined
   return Number(row?.total ?? 0)
 }
+
+export function getLatestFeedbackUpdatedAt(): string | null {
+  const row = getDb()
+    .prepare(`
+      SELECT MAX(updated_at) AS updated_at
+      FROM (
+        SELECT updated_at
+        FROM track_feedback
+        WHERE user_id = 1
+        UNION ALL
+        SELECT created_at AS updated_at
+        FROM track_feedback_events
+        WHERE user_id = 1
+      )
+    `)
+    .get() as { updated_at?: string | null } | undefined
+  return row?.updated_at ?? null
+}

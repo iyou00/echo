@@ -14,7 +14,7 @@ import {
 } from '../db/carePingSchedule'
 import { recordHealth } from './health'
 import { getTasteProfile } from '../db/taste'
-import { getFeedbackSignalCount } from '../db/feedback'
+import { getFeedbackSignalCount, getLatestFeedbackUpdatedAt } from '../db/feedback'
 import { refreshStructuredProfile, regeneratePortrait } from './taste'
 
 let yinyiTask: ScheduledTask | null = null
@@ -128,6 +128,13 @@ function scheduledDateForFixedTime(hour: number, minute: number): string {
   return localIsoDate(scheduled)
 }
 
+function toTime(value?: string | null): number {
+  if (!value) return 0
+  const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`
+  const time = new Date(normalized).getTime()
+  return Number.isNaN(time) ? 0 : time
+}
+
 function broadcastYinyiGenerated(date: string, status: string): void {
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send('yinyi:generated', { date, status })
@@ -177,7 +184,9 @@ function hasNewTasteSignalsSinceLastStructured(): boolean {
   const profile = getTasteProfile()
   if (!profile) return false
   const lastSignalCount = profile.profile_meta?.signalCount ?? 0
-  return getFeedbackSignalCount() > lastSignalCount
+  const latestFeedbackAt = getLatestFeedbackUpdatedAt()
+  const structuredUpdatedAt = profile.profile_meta?.structuredUpdatedAt
+  return getFeedbackSignalCount() > lastSignalCount || toTime(latestFeedbackAt) > toTime(structuredUpdatedAt)
 }
 
 function hasNewTasteSignalsSinceLastPortrait(date: string): boolean {
@@ -185,9 +194,10 @@ function hasNewTasteSignalsSinceLastPortrait(date: string): boolean {
   if (!profile) return false
   const updatedAt = profile.profile_meta?.updatedAt
   const lastPortraitSignalCount = profile.profile_meta?.portraitSignalCount ?? 0
+  const latestFeedbackAt = getLatestFeedbackUpdatedAt()
   if (!updatedAt) return true
   if (updatedAt.slice(0, 10) !== date) return true
-  return getFeedbackSignalCount() > lastPortraitSignalCount
+  return getFeedbackSignalCount() > lastPortraitSignalCount || toTime(latestFeedbackAt) > toTime(updatedAt)
 }
 
 async function runTasteStructuredJob(date: string): Promise<SchedulerCatchupResult> {

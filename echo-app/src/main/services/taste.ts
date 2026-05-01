@@ -2,7 +2,7 @@ import type { TasteProfile, Track } from '../../types/ipc'
 import { getDb } from '../db'
 import { getFeedbackSignalCount, listTrackFeedback, type TrackFeedback } from '../db/feedback'
 import { getAllImportedTracks } from '../db/playlists'
-import { getSemanticSummary, listSemantics, semanticTrackKey } from '../db/semantics'
+import { listSemantics, semanticTrackKey } from '../db/semantics'
 import { loadProfileTrackEvents, type ProfileTrackEvent } from '../db/tracks'
 import {
   addTasteQuestion,
@@ -15,6 +15,7 @@ import { getSettings } from '../db/settings'
 import { getYinyiRange } from '../db/yinyi'
 import { completeChat, LlmError, type LlmMessage } from '../llm/client'
 import { readRootFile } from '../utils/paths'
+import { inferTrackSemanticFallback } from './semantics'
 
 interface ArtistSeed {
   genre?: string[]
@@ -151,10 +152,10 @@ function buildProfileFromTracks(tracks: Track[]): TasteProfile {
   const artistSeed = readArtistSeed()
   const previous = getTasteProfile()
   const semanticTracks = listSemantics()
-  const semanticSummary = getSemanticSummary()
   const feedbackRows = listTrackFeedback()
   const profileEvents = loadProfileTrackEvents()
   const feedbackByKey = new Map(feedbackRows.map((item) => [item.trackKey, item]))
+  const semanticByKey = new Map(semanticTracks.map((track) => [trackKey(track), track.semantic]))
   const eventsByKey = new Map<string, ProfileTrackEvent[]>()
   for (const event of profileEvents) {
     const key = trackKey(event.track)
@@ -165,6 +166,10 @@ function buildProfileFromTracks(tracks: Track[]): TasteProfile {
   const eraCounts = new Map<string, number>()
   const genreArtists = new Map<string, Map<string, number>>()
   const artistStats = new Map<string, { imported: number; played: number; skipped: number; looped: number; favorited: number; scenes: string[]; score: number }>()
+
+  function semanticFor(track: Track) {
+    return semanticByKey.get(trackKey(track)) ?? track.semantic ?? inferTrackSemanticFallback(track)
+  }
 
   for (const track of tracks) {
     const seed = artistSeed[track.artist]
@@ -196,6 +201,8 @@ function buildProfileFromTracks(tracks: Track[]): TasteProfile {
 
   for (const feedback of feedbackRows) {
     const artist = feedback.track.artist
+    const semantic = semanticFor(feedback.track)
+    const positiveWeight = Math.max(0, Math.min(4, feedback.score))
     const stats = artistStats.get(artist) ?? { imported: 0, played: 0, skipped: 0, looped: 0, favorited: 0, scenes: [], score: 0 }
     stats.played += feedback.playCount
     stats.skipped += feedback.skipCount
@@ -203,15 +210,25 @@ function buildProfileFromTracks(tracks: Track[]): TasteProfile {
     stats.favorited += feedback.favoriteCount
     stats.score += feedback.playCount * 0.9 + feedback.loopCount * 2 + feedback.favoriteCount * 2.4 - feedback.skipCount * 1.2
     artistStats.set(artist, stats)
+    if (positiveWeight > 0) {
+      for (const rawGenre of semantic.genres) addWeighted(genreCounts, normalizedGenre(rawGenre, semantic.language), positiveWeight * 0.8)
+      for (const mood of semantic.moods) addWeighted(moodCounts, mood, positiveWeight)
+    }
   }
 
   for (const event of profileEvents) {
     const artist = event.track.artist
+    const semantic = semanticFor(event.track)
+    const eventWeight = event.queueStatus === 'completed' ? 0.85 : event.queueStatus === 'skipped' ? -0.25 : 0.25
     const stats = artistStats.get(artist) ?? { imported: 0, played: 0, skipped: 0, looped: 0, favorited: 0, scenes: [], score: 0 }
     stats.score += event.queueStatus === 'completed' ? 0.55 : event.queueStatus === 'skipped' ? -0.35 : 0.15
     stats.scenes.push(...(event.track.profileEvidence?.scenes ?? []))
     artistStats.set(artist, stats)
     for (const mood of event.track.profileEvidence?.moods ?? []) moodCounts.set(mood, (moodCounts.get(mood) ?? 0) + 0.7)
+    if (eventWeight > 0) {
+      for (const rawGenre of semantic.genres) addWeighted(genreCounts, normalizedGenre(rawGenre, semantic.language), eventWeight * 0.55)
+      for (const mood of semantic.moods) addWeighted(moodCounts, mood, eventWeight)
+    }
   }
 
   const maxGenre = Math.max(1, ...Array.from(genreCounts.values()))
@@ -245,13 +262,11 @@ function buildProfileFromTracks(tracks: Track[]): TasteProfile {
       topEntries(genreArtists.get(name) ?? new Map<string, number>(), 3).map(([artist]) => artist),
     ),
   }))
-  const moods = semanticSummary.total > 0
-    ? semanticSummary.moods
-    : topEntries(moodCounts, 8).map(([tag, count]) => ({
-        tag,
-        frequency: clamp(count / maxMood),
-        signature_artists: topArtists.slice(0, 3).map((artist) => artist.name),
-      }))
+  const moods = topEntries(moodCounts, 8).map(([tag, count]) => ({
+    tag,
+    frequency: clamp(count / maxMood),
+    signature_artists: topArtists.slice(0, 3).map((artist) => artist.name),
+  }))
   const candidateMap = new Map<string, Track>()
   for (const track of [...tracks, ...semanticTracks, ...feedbackRows.map((item) => item.track), ...profileEvents.map((event) => event.track)]) {
     if (track.title && track.artist && !track.title.includes('待补充')) candidateMap.set(trackKey(track), track)

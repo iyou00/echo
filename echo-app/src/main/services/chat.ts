@@ -46,11 +46,11 @@ function friendlyError(error: unknown): string {
  * - 语言/地区：国外 / 外国 / 英文 / 欧美 / 粤语 / 韩 / 日
  */
 function looksLikeMusicRelated(text: string): boolean {
-  return /推|推荐|来几首|听什么|听啥|值得听|适合听|想听|能听|放点|放首|来点|歌|曲|歌单|music|song|慢|快|安静|热闹|循环|舒缓|缓和|轻|燃|激昂|高昂|亢奋|振奋|热血|澎湃|带感|节奏感强|节奏强|动感|鼓点|有劲|提神|治愈|怀旧|累|困|疲|睡|烦|燥|低落|emo|想哭|难过|伤心|开心|兴奋|阳光|放松|发呆|下班|通勤|睡前|雨|加班|一个人|独处|国外|外国|外文|英文|欧美|英语|粤语|广东|韩|kpop|日语|日本/i.test(text)
+  return /推|推荐|来几首|听什么|听啥|值得听|适合听|想听|能听|放点|放首|来点|帮我|接\s*\d|首|歌|曲|歌单|music|song|慢|快|安静|热闹|循环|舒缓|缓和|轻|燃|激昂|高昂|亢奋|振奋|热血|澎湃|带感|节奏感强|节奏强|动感|鼓点|有劲|提神|治愈|怀旧|累|困|疲|睡|烦|燥|低落|emo|想哭|难过|伤心|开心|兴奋|阳光|工作|专注|放松|发呆|下班|通勤|睡前|雨|加班|一个人|独处|国外|外国|外文|英文|欧美|英语|粤语|广东|韩|kpop|日语|日本/i.test(text)
 }
 
 function looksLikeRecommendationRequest(text: string): boolean {
-  return /推|推荐|来几首|听什么|听啥|值得听|适合听|想听|能听|放点|放首|来点|歌|慢|快|安静|热闹|循环|激昂|高昂|亢奋|振奋|热血|澎湃|带感|节奏感强|节奏强|动感|鼓点|有劲|提神|歌单|music|song/i.test(text)
+  return /推|推荐|来几首|听什么|听啥|值得听|适合听|想听|能听|放点|放首|来点|帮我|接\s*\d|首|歌|慢|快|安静|热闹|循环|工作|专注|激昂|高昂|亢奋|振奋|热血|澎湃|带感|节奏感强|节奏强|动感|鼓点|有劲|提神|歌单|music|song/i.test(text)
 }
 
 function trackKey(track: Track): string {
@@ -252,10 +252,12 @@ async function fetchRecommendationCandidates(
   if (active.canceled) return { candidates: [], authRequired: false, canceled: true }
   if (!looksLikeMusicRelated(text)) return { candidates: [], authRequired: false }
 
-  const llmIntent = await inferIntentWithLlm(text, buildRecentDialogHint())
+  const currentScene = getCurrentScene()
+  const directSceneRequest = Boolean(currentScene && currentScene.prompt.trim() === text.trim())
+  const llmIntent = directSceneRequest ? null : await inferIntentWithLlm(text, buildRecentDialogHint())
   if (active.canceled) return { candidates: [], authRequired: false, canceled: true }
 
-  const wantsMusic = llmIntent ? Boolean(llmIntent.wantsMusic) : looksLikeRecommendationRequest(text)
+  const wantsMusic = directSceneRequest || (llmIntent ? Boolean(llmIntent.wantsMusic) : looksLikeRecommendationRequest(text))
   if (!wantsMusic) return { candidates: [], authRequired: false }
 
   try {

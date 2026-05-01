@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module'
-import type { RecommendationSource, Track, TrackSemantic } from '../../types/ipc'
+import type { RecommendationSource, SceneKey, Track, TrackSemantic } from '../../types/ipc'
 import { getAllImportedTracks } from '../db/playlists'
 import { getRecommendationCache, setRecommendationCache } from '../db/recommendationCache'
 import { getTrackSemantic, listSemantics, semanticTrackKey } from '../db/semantics'
@@ -42,6 +42,7 @@ export interface RecommendationIntent {
   intentConfidence?: number
   evidence?: string[]
   rejectIf?: IntentRejectIf
+  sceneKey?: SceneKey
   source: 'rules' | 'llm' | 'hybrid'
 }
 
@@ -62,6 +63,7 @@ export interface IntentOverride {
   intentConfidence?: number
   evidence?: string[]
   rejectIf?: IntentRejectIf
+  sceneKey?: SceneKey
 }
 
 export interface RecommendationOptions {
@@ -226,6 +228,10 @@ function normalizeIntentOverride(raw: unknown): IntentOverride | null {
   if (typeof value.intentConfidence === 'number' && Number.isFinite(value.intentConfidence)) {
     override.intentConfidence = Math.max(0, Math.min(1, value.intentConfidence))
   }
+  if (typeof value.sceneKey === 'string') {
+    const allowedSceneKeys = new Set<SceneKey>(['work', 'focus', 'sleepy', 'relax', 'rain', 'irritated', 'random'])
+    if (allowedSceneKeys.has(value.sceneKey as SceneKey)) override.sceneKey = value.sceneKey as SceneKey
+  }
   override.evidence = normalizeEvidence(value.evidence)
   override.rejectIf = normalizeRejectIf(value.rejectIf)
   return override
@@ -324,6 +330,9 @@ function mergeIntent(base: RecommendationIntent, override?: IntentOverride): Rec
   }
   if (typeof override.artistQuery === 'string' && override.artistQuery.trim()) {
     merged.artistQuery = override.artistQuery.trim()
+  }
+  if (override.sceneKey) {
+    merged.sceneKey = override.sceneKey
   }
   return merged
 }
@@ -531,6 +540,7 @@ function parseIntent(text: string): RecommendationIntent {
     artistQuery,
     evidence: unique([...highTerms, ...lowTerms]).slice(0, 6),
     rejectIf,
+    sceneKey: undefined,
     source: 'rules',
   }
 }
@@ -554,8 +564,30 @@ function buildCacheKey(intent: RecommendationIntent): string {
     artistQuery: intent.artistQuery,
     evidence: intent.evidence?.slice(0, 6).sort(),
     rejectIf: intent.rejectIf,
+    sceneKey: intent.sceneKey,
     query: queryFingerprint(intent.query),
   }))
+}
+
+function sceneKeyword(intent: RecommendationIntent): string {
+  switch (intent.sceneKey) {
+    case 'work':
+      return '工作 清醒 华语流行'
+    case 'focus':
+      return '专注 安静 轻音乐 舒缓'
+    case 'sleepy':
+      return '提神 节奏 轻快'
+    case 'relax':
+      return '放松 舒缓 治愈'
+    case 'rain':
+      return '雨天 慢歌 怀旧'
+    case 'irritated':
+      return '放松 降噪 舒缓'
+    case 'random':
+      return ''
+    default:
+      return ''
+  }
 }
 
 function withSource(track: Track | null, source: RecommendationSource): Track | null {
@@ -596,6 +628,7 @@ function extractPlaylistIds(response: ApiResponse): string[] {
 
 function keywordFromIntent(intent: RecommendationIntent): string {
   const parts = [
+    sceneKeyword(intent),
     intent.artistQuery ?? '',
     intent.language === '粤语' ? '粤语' : intent.language === '英语' ? '欧美' : intent.language === '韩语' ? 'Kpop' : '',
     intent.moods.includes('放松') || intent.tempo === 'slow' ? '慢歌' : '',
@@ -631,6 +664,7 @@ function hasExplicitSpecificRequest(text: string, intent: RecommendationIntent):
 }
 
 function isGenericDiscoveryRequest(text: string, intent: RecommendationIntent): boolean {
+  if (intent.sceneKey) return false
   if (!MUSIC_REQUEST_PATTERN.test(text)) return false
   if (!GENERIC_DISCOVERY_PATTERN.test(text)) return false
   return !hasExplicitSpecificRequest(text, intent)
@@ -1064,7 +1098,7 @@ export async function recommendFromNetease(text: string, override?: IntentOverri
   if (isGenericDiscoveryRequest(text, intent)) {
     return recommendGenericDiscovery(intent)
   }
-  const allowCooldownFallback = Boolean(intent.seedTitle || intent.artistQuery)
+  const allowCooldownFallback = Boolean(intent.seedTitle || intent.artistQuery || intent.sceneKey)
   const cacheKey = buildCacheKey(intent)
   const memory = buildDirectionMemory()
   const hardCooldownKeys = new Set(loadListenedTracksSince(24, 500).map(trackKey))
@@ -1076,7 +1110,7 @@ export async function recommendFromNetease(text: string, override?: IntentOverri
       .map((track) => ({ ...track, semantic: track.semantic ?? semanticForCandidate(track), playUrl: undefined, urlExpiresAt: undefined }))
       .filter((track) => matchesIntentFloor(track, intent))
     const playable = await filterPlayableTracks(cachedFresh, intent.targetCount)
-    if (playable.length) return playable
+    if (playable.length >= intent.targetCount) return playable
   }
 
   const candidates = await fetchCandidates(intent)
@@ -1108,7 +1142,7 @@ export async function recommendFromNetease(text: string, override?: IntentOverri
   const intentMatched = ranked.filter((track) => !hardCooldownKeys.has(trackKey(track)) && !recentKeys.has(trackKey(track)) && matchesIntentFloor(track, intent))
   const cooledPool = ranked.filter((track) => !hardCooldownKeys.has(trackKey(track)) && matchesIntentFloor(track, intent))
   const fallbackPool = allowCooldownFallback ? ranked.filter((track) => matchesIntentFloor(track, intent)) : []
-  const primaryPool = intentMatched.length >= intent.targetCount ? intentMatched : cooledPool.length ? cooledPool : fallbackPool
+  const primaryPool = intentMatched.length >= intent.targetCount ? intentMatched : cooledPool.length >= intent.targetCount ? cooledPool : fallbackPool
   const playablePool = await filterPlayableTracks(primaryPool, Math.max(20, intent.targetCount * 8))
   const finalTracks = await selectFinalTracks(text, playablePool, intent)
   const evidencedTracks = finalTracks.map((track) => ({
