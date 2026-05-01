@@ -3,7 +3,7 @@ import type { RecommendationSource, Track, TrackSemantic } from '../../types/ipc
 import { getAllImportedTracks } from '../db/playlists'
 import { getRecommendationCache, setRecommendationCache } from '../db/recommendationCache'
 import { getTrackSemantic, listSemantics, semanticTrackKey } from '../db/semantics'
-import { loadRecentRecommendedTracks } from '../db/tracks'
+import { loadListenedTracksSince, loadRecentRecommendedTracks } from '../db/tracks'
 import { getFeedbackScore } from '../db/feedback'
 import { getTasteProfile } from '../db/taste'
 import { getSettings } from '../db/settings'
@@ -79,10 +79,36 @@ export const OVER_LIMIT_RECOMMENDATION_LINE = '歌不在多，慢慢听。我先
 const HIGH_ENERGY_TERMS = ['激昂', '高昂', '亢奋', '振奋', '热血', '澎湃', '炸', '爆', '带感', '节奏感强', '节奏强', '有力量', '力量感', '鼓点', '动感', '燃', '提神', '清醒', '运动', '有劲']
 const LOW_ENERGY_TERMS = ['慢', '困', '睡', '安静', '放松', '发呆', '舒缓', '缓和', '轻柔', '松弛', '平静']
 const MUSIC_REQUEST_PATTERN = /推|推荐|来几首|来一首|听什么|听啥|值得听|适合听|想听|能听|放点|放首|来点|找首|找一首|给我.*歌|歌|曲|歌单|music|song/i
+const GENERIC_DISCOVERY_PATTERN = /这个时候|现在|此刻|随便|随机|听点啥|听什么|有什么.*听|值得听|来首歌|来一首歌|放首歌|推首歌|推荐一首|来点音乐|听会儿歌|听会歌/i
+const SPECIFIC_DISCOVERY_PATTERN = /《|》|像|类似|那种|那类|粤语|广东|英文|欧美|英语|english|外文|外语|国外|外国|韩语|韩国|韩文|kpop|k-pop|日语|日本|日文|j-pop|jpop|华语|中文|国语|激昂|高昂|亢奋|振奋|热血|澎湃|带感|节奏|鼓点|动感|燃|提神|清醒|欢快|开心|轻快|轻松|快歌|快的|快一点|快点|慢|困|累|睡|睡前|休息|安静|放松|舒缓|治愈|发呆|平静|emo|伤心|难过|孤独|想哭|r&b|说唱|rap|hip|摇滚|rock|民谣|folk|电子|edm/i
 const ARTIST_ALIASES: Record<string, string> = {
   魔力红: 'Maroon 5',
   maroon5: 'Maroon 5',
   maroon: 'Maroon 5',
+}
+
+const GENERIC_MOOD_KEYWORDS: Record<string, string[]> = {
+  放松: ['放松 华语', '舒缓 流行', '治愈 慢歌'],
+  松弛: ['松弛 流行', '慵懒 R&B', '舒服 华语'],
+  清醒: ['清醒 节奏', '提神 流行', '明亮 节奏'],
+  热烈: ['热烈 节奏', '热血 流行', '有力量 流行'],
+  轻快: ['轻快 流行', '清新 华语', '阳光 流行'],
+  治愈: ['治愈 华语', '温柔 流行', '暖心 慢歌'],
+  怀旧: ['怀旧 华语', '经典 流行', '老歌 流行'],
+  孤独: ['孤独 华语', '夜晚 慢歌', '安静 流行'],
+  陪伴: ['陪伴 华语', '温柔 流行', '日常 流行'],
+  发呆: ['发呆 华语', '慵懒 流行', '安静 R&B'],
+}
+
+const GENERIC_GENRE_KEYWORDS: Record<string, string[]> = {
+  流行: ['华语流行', '流行 新歌', '流行 歌单'],
+  'R&B': ['R&B', '华语 R&B', '慵懒 R&B'],
+  rnb: ['R&B', '华语 R&B', '慵懒 R&B'],
+  摇滚: ['摇滚', '华语摇滚'],
+  民谣: ['民谣', '华语民谣'],
+  电子: ['电子', '电子流行'],
+  说唱: ['说唱', '华语说唱'],
+  爵士: ['爵士', '爵士流行'],
 }
 
 export function parseRequestedTrackCount(text: string): { requestedCount: number; targetCount: number; overLimit: boolean; explicit: boolean } {
@@ -567,12 +593,146 @@ function keywordFromIntent(intent: RecommendationIntent): string {
 
 function styleTagId(intent: RecommendationIntent): number | null {
   const joined = `${intent.language ?? ''} ${intent.query}`.toLowerCase()
+  return styleTagIdFromText(joined)
+}
+
+function styleTagIdFromText(text: string): number | null {
+  const joined = text.toLowerCase()
   if (/r&b/.test(joined)) return 1002
   if (/说唱|rap|hip/.test(joined)) return 1001
   if (/摇滚|rock/.test(joined)) return 1000
   if (/民谣|folk/.test(joined)) return 1006
   if (/电子|edm/.test(joined)) return 1007
   return null
+}
+
+function hasExplicitSpecificRequest(text: string, intent: RecommendationIntent): boolean {
+  if (intent.artistQuery || intent.seedTitle || intent.language) return true
+  if (SPECIFIC_DISCOVERY_PATTERN.test(text)) return true
+  const evidence = intent.evidence ?? []
+  if (evidence.some((item) => SPECIFIC_DISCOVERY_PATTERN.test(item))) return true
+  return false
+}
+
+function isGenericDiscoveryRequest(text: string, intent: RecommendationIntent): boolean {
+  if (!MUSIC_REQUEST_PATTERN.test(text)) return false
+  if (!GENERIC_DISCOVERY_PATTERN.test(text)) return false
+  return !hasExplicitSpecificRequest(text, intent)
+}
+
+function pickWeightedKeywords(): string[] {
+  const profile = getTasteProfile()
+  const semanticTracks = listSemantics()
+  const weighted: string[] = []
+
+  for (const mood of profile?.moods ?? []) {
+    const keywords = GENERIC_MOOD_KEYWORDS[mood.tag] ?? [mood.tag]
+    const repeat = Math.max(1, Math.min(4, Math.round(mood.frequency * 4)))
+    for (let index = 0; index < repeat; index += 1) weighted.push(...keywords)
+  }
+
+  for (const genre of profile?.genres ?? []) {
+    const keywords = GENERIC_GENRE_KEYWORDS[genre.name] ?? [genre.name]
+    const repeat = Math.max(1, Math.min(4, Math.round(genre.weight * 4)))
+    for (let index = 0; index < repeat; index += 1) weighted.push(...keywords)
+  }
+
+  const semanticMoodCounts = new Map<string, number>()
+  const semanticGenreCounts = new Map<string, number>()
+  for (const track of semanticTracks) {
+    for (const mood of track.semantic.moods) semanticMoodCounts.set(mood, (semanticMoodCounts.get(mood) ?? 0) + 1)
+    for (const genre of track.semantic.genres) semanticGenreCounts.set(genre, (semanticGenreCounts.get(genre) ?? 0) + 1)
+  }
+
+  for (const [mood] of Array.from(semanticMoodCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5)) {
+    weighted.push(...(GENERIC_MOOD_KEYWORDS[mood] ?? [mood]))
+  }
+  for (const [genre] of Array.from(semanticGenreCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 4)) {
+    weighted.push(...(GENERIC_GENRE_KEYWORDS[genre] ?? [genre]))
+  }
+
+  return unique(shuffleItems(weighted))
+}
+
+function genericDiscoveryKeywords(): string[] {
+  const profileKeywords = pickWeightedKeywords().filter((keyword) => keyword.trim().length > 0)
+  const fallback = ['华语流行', '轻快 流行', '治愈 华语', '舒服 华语']
+  return unique([...profileKeywords, ...fallback]).slice(0, 8)
+}
+
+async function fetchGenericDiscoveryCandidates(intent: RecommendationIntent): Promise<Track[]> {
+  const cookie = readNeteaseCookie()
+  if (!cookie) throw new NeteaseAuthRequiredError()
+  const keywords = shuffleItems(genericDiscoveryKeywords()).slice(0, Math.max(3, Math.min(5, intent.targetCount + 3)))
+  const calls: Array<Promise<Track[]>> = []
+
+  for (const keyword of keywords) {
+    const offset = Math.floor(Math.random() * 4) * 10
+    calls.push(netCall(netease.cloudsearch({ keywords: keyword, type: 1, limit: 30, offset, cookie }), 'search'))
+    const tagId = styleTagIdFromText(keyword)
+    if (tagId) calls.push(netCall(netease.style_song({ tagId, size: 20, cursor: Math.floor(Math.random() * 3) * 20, cookie }), 'style'))
+  }
+
+  if (calls.length === 0) calls.push(netCall(netease.personalized_newsong({ limit: 30, cookie }), 'new_song'))
+
+  const groups = await Promise.all(calls)
+  return uniqueTracks(groups.flat()).slice(0, 160)
+}
+
+function genericDiscoveryScore(track: Track, recentSevenDayKeys: Set<string>): number {
+  const semantic = semanticForCandidate(track)
+  let score = Math.random() * 3
+  if (semantic.familiarity === 'explore') score += 0.6
+  if (track.recommendSource === 'style') score += 0.9
+  if (track.recommendSource === 'search') score += 0.4
+  if (recentSevenDayKeys.has(trackKey(track))) score -= 8
+  return score
+}
+
+function withGenericReason(track: Track, index: number): Track {
+  const notes = [
+    '按你常听的气质随手捞一首,今天先从它开始。',
+    '这首从你的风格偏好里长出来,放在后面刚好换口气。',
+    '这一首保留一点新鲜感,接着听会比较顺。',
+    '这首颜色轻一点,适合把这组歌铺开。',
+    '最后这首收得稳,留一点余味。',
+  ]
+  return { ...track, reason: track.reason ?? notes[index] ?? '这首从你的风格偏好里捞出来,现在听刚好。' }
+}
+
+async function recommendGenericDiscovery(intent: RecommendationIntent): Promise<Track[]> {
+  const candidates = await fetchGenericDiscoveryCandidates(intent)
+  const lastDayKeys = new Set(loadListenedTracksSince(24, 400).map(trackKey))
+  const lastSevenDayKeys = new Set(loadListenedTracksSince(24 * 7, 800).map(trackKey))
+  const enriched = uniqueTracks(candidates.map((track) => ({ ...track, semantic: semanticForCandidate(track) })))
+    .map((track) => ({ track, score: genericDiscoveryScore(track, lastSevenDayKeys) }))
+    .sort((a, b) => b.score - a.score)
+    .map((item) => item.track)
+
+  const stages = [
+    enriched.filter((track) => !lastDayKeys.has(trackKey(track)) && !lastSevenDayKeys.has(trackKey(track))),
+    enriched.filter((track) => !lastDayKeys.has(trackKey(track))),
+    enriched,
+  ]
+
+  for (const stage of stages) {
+    if (stage.length === 0) continue
+    const playable = await filterPlayableTracks(shuffleTracks(stage), Math.max(20, intent.targetCount * 8))
+    const picked = uniqueTracks(playable).slice(0, intent.targetCount).map(withGenericReason)
+    if (picked.length) {
+      return picked.map((track) => ({
+        ...track,
+        profileEvidence: {
+          moods: intent.moods,
+          scenes: intent.scenes,
+          source: track.recommendSource ?? 'search',
+          score: genericDiscoveryScore(track, lastSevenDayKeys),
+        },
+      }))
+    }
+  }
+
+  return []
 }
 
 function importedSeedTracks(intent: RecommendationIntent): Track[] {
@@ -628,6 +788,15 @@ function shuffleTracks(tracks: Track[]): Track[] {
     ;[items[index], items[swap]] = [items[swap], items[index]]
   }
   return items
+}
+
+function shuffleItems<T>(items: T[]): T[] {
+  const next = [...items]
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(Math.random() * (index + 1))
+    ;[next[index], next[swap]] = [next[swap], next[index]]
+  }
+  return next
 }
 
 async function fetchPlaylistCandidates(intent: RecommendationIntent, cookie: string): Promise<Track[]> {
@@ -813,6 +982,9 @@ ${list}`,
 export async function recommendFromNetease(text: string, override?: IntentOverride): Promise<Track[]> {
   if (!readNeteaseCookie()) throw new NeteaseAuthRequiredError()
   const intent = mergeIntent(parseIntent(text), validateIntentOverride(text, override ?? null) ?? undefined)
+  if (isGenericDiscoveryRequest(text, intent)) {
+    return recommendGenericDiscovery(intent)
+  }
   const cacheKey = buildCacheKey(intent)
   const recentKeys = new Set(loadRecentRecommendedTracks(80).map(trackKey))
   const cached = getRecommendationCache(cacheKey)

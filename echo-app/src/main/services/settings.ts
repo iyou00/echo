@@ -12,6 +12,43 @@ import { recordHealth } from './health'
 
 export { getSettings, updateSetting }
 
+const playlistImportTemplate = {
+  _说明: {
+    用途: '这是 Echo 通用歌单导入模板。你可以把网易云、QQ 音乐、Apple Music、Spotify 或手工整理的歌曲填到 tracks 里。',
+    必填字段: ['title', 'artist'],
+    选填字段: ['album', 'year', 'durationMs', 'platform', 'platformId', 'neteaseId', 'genres', 'moods', 'scenes', 'notes'],
+    提示: '没有的信息可以删掉。Echo 会先用 title + artist 识别歌曲，再用选填信息辅助建立你的品味画像。',
+  },
+  source: 'manual',
+  name: '我的常听歌单',
+  tracks: [
+    {
+      title: '一格格',
+      artist: '卫兰',
+      album: 'Love And Other Things',
+      year: 2017,
+      platform: 'netease',
+      platformId: '123456',
+      neteaseId: '123456',
+      genres: ['华语流行'],
+      moods: ['放松', '怀旧'],
+      scenes: ['夜晚', '独处'],
+      notes: '晚上常听，情绪比较稳。',
+    },
+    {
+      title: 'Cold',
+      artist: 'Maroon 5 / Future',
+      album: 'Red Pill Blues',
+      year: 2017,
+      platform: 'spotify',
+      platformId: '',
+      genres: ['Pop', 'R&B'],
+      moods: ['轻快', '清醒'],
+      notes: '适合走路或工作前半段。',
+    },
+  ],
+}
+
 export async function testLlm(): Promise<LlmTestResult> {
   const settings = getSettings()
   const started = Date.now()
@@ -37,8 +74,13 @@ export async function testLlm(): Promise<LlmTestResult> {
   }
 }
 
+function normalizeArtists(value: unknown): string {
+  if (Array.isArray(value)) return value.map(String).filter(Boolean).join(' / ')
+  return String(value ?? '')
+}
+
 function normalizePlaylist(payload: unknown): PlaylistPayload {
-  const parsed = payload as { name?: string; tracks?: unknown[] }
+  const parsed = payload as { name?: string; source?: string; tracks?: unknown[] }
   if (!parsed || typeof parsed !== 'object') {
     throw new Error('JSON 顶层需要是一个对象')
   }
@@ -47,15 +89,18 @@ function normalizePlaylist(payload: unknown): PlaylistPayload {
   }
   const tracks = (parsed.tracks ?? []).map((item) => {
     const track = item as Record<string, unknown>
+    const platform = String(track.platform ?? '').toLowerCase()
+    const platformId = track.platformId ? String(track.platformId) : undefined
+    const neteaseId = track.neteaseId ? String(track.neteaseId) : platform === 'netease' ? platformId : undefined
     return {
       id: track.id ? String(track.id) : undefined,
-      neteaseId: track.neteaseId ? String(track.neteaseId) : undefined,
+      neteaseId,
       title: String(track.title ?? track.name ?? ''),
-      artist: String(track.artist ?? track.artists ?? ''),
+      artist: normalizeArtists(track.artist ?? track.artists),
       album: track.album ? String(track.album) : undefined,
       year: track.year ? Number(track.year) : undefined,
       durationMs: track.durationMs ? Number(track.durationMs) : undefined,
-      source: 'imported',
+      source: parsed.source ? String(parsed.source) : 'imported',
     }
   }).filter((track) => track.title && track.artist)
   return {
@@ -99,6 +144,18 @@ export async function importPlaylistFromDialog(): Promise<ImportPlaylistResult> 
       message: error instanceof Error ? error.message : '导入失败，JSON 格式可能有问题',
     }
   }
+}
+
+export async function downloadPlaylistTemplate(): Promise<{ ok: boolean; path?: string; message: string }> {
+  const result = await dialog.showSaveDialog({
+    title: '下载 Echo 歌单模板',
+    defaultPath: 'echo-playlist-template.json',
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+  })
+  if (result.canceled || !result.filePath) return { ok: false, message: '已取消' }
+
+  fs.writeFileSync(result.filePath, `${JSON.stringify(playlistImportTemplate, null, 2)}\n`, 'utf8')
+  return { ok: true, path: result.filePath, message: '模板已保存' }
 }
 
 export async function exportData(): Promise<{ ok: boolean; path?: string; message: string }> {

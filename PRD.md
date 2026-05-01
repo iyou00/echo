@@ -4,7 +4,7 @@
 
 ## 一句话
 
-Echo不是"AI 工具",是一个**懂你音乐品味的老朋友**。它住在你电脑里,会聊天、会播歌、会讲音乐故事,每晚给自己写一篇"音忆"——关于今天你的观察日记。
+Echo不是"AI 工具",是一个**懂你音乐品味的老朋友**。它住在你电脑里,会聊天、会播歌、会讲音乐故事,每晚给自己写一篇"风信"——关于今天你的观察日记。
 
 ## 产品定位
 
@@ -17,7 +17,7 @@ Echo不是"AI 工具",是一个**懂你音乐品味的老朋友**。它住在你
 1. **对话为主,播放为辅**。主界面是你和Echo的对话,歌曲作为卡片嵌在消息里。
 2. **它懂你**。初次导入网易云歌单后,它会主动和你确认它对你的理解,之后持续演化。
 3. **场景化表达**。点击语音按钮,它会用 100 字以内的一段文案朗读当前时刻的场景(时间 + 心情 + 推荐理由)。
-4. **音忆日记**。每天 22:00 它自动写一篇"对话型日记",像给自己的信,观察今天的你。
+4. **风信日记**。每天 22:00 它自动写一篇"对话型日记",像给自己的信,观察今天的你。
 5. **主动 + 被动兼具**。早晨问好、深夜陪聊由定时任务触发;你打开它,它根据当下上下文回应。
 
 ## 关键决策(已拍板)
@@ -46,16 +46,16 @@ Echo不是"AI 工具",是一个**懂你音乐品味的老朋友**。它住在你
 5. `features/` — 每个功能一份文档
    - `features/chat.md` — 对话
    - `features/recommendation.md` — 推荐引擎
-   - `features/settings.md` — 设置(LLM 配置 + 音忆偏好 + 数据管理)
+   - `features/settings.md` — 设置(LLM 配置 + 风信偏好 + 数据管理)
    - `features/voice-mode.md` — 语音模式
-   - `features/yinyi.md` — 音忆日记
+   - `features/yinyi.md` — 风信日记
    - `features/taste-profile.md` — 品味档案 + Echo 主页
    - `features/playback.md` — 播放器
 6. `specs/roadmap.md` — v0.1 / v0.2 / v0.3 切分
 7. `tasks/v0.1-week1.md` — **v0.1 开工任务清单**(给开发 AI 看)
 8. `design/` — 高保真 HTML 原型 + 视觉 tokens
 9. `prompts/` — Echo 的 system prompt + 各场景模板
-10. `samples/` — 歌单样例 / 艺人种子 / 音忆范文
+10. `samples/` — 歌单样例 / 艺人种子 / 风信范文
 
 ## 当前进度
 
@@ -68,11 +68,11 @@ Echo不是"AI 工具",是一个**懂你音乐品味的老朋友**。它住在你
 - [x] 主界面 HTML 原型落地
 - [x] 语音模式 HTML 原型落地
 - [x] `system prompt` v0.2
-- [x] `音忆` prompt 初稿
+- [x] `风信` prompt 初稿
 - [x] `场景化语音` prompt 初稿
 - [ ] Echo 主页 mockup + HTML ← 下一步 B
-- [ ] 音忆页 mockup + HTML ← 下一步 B
-- [ ] 列表页 mockup + HTML ← 下一步 B
+- [ ] 风信页 mockup + HTML ← 下一步 B
+- [ ] 拾音页 mockup + HTML ← 下一步 B
 - [x] `features/chat.md` 完成
 - [x] `features/settings.md` 完成
 - [x] `features/recommendation.md` 完成

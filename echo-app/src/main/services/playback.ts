@@ -17,6 +17,11 @@ const state: PlaybackState = {
 }
 const loopCounts = new Map<string, { count: number; firstAt: number }>()
 
+type InternalPlaybackPlayOptions = PlaybackPlayOptions & {
+  pushHistory?: boolean
+  preserveQueue?: boolean
+}
+
 function trackKey(track?: Track | null): string {
   if (!track) return ''
   return `${track.id ?? track.neteaseId ?? ''}:${track.title.trim().toLowerCase()}:${track.artist.trim().toLowerCase()}`
@@ -44,17 +49,45 @@ function isUrlStale(track: Track): boolean {
   return new Date(track.urlExpiresAt).getTime() <= Date.now() + 60_000
 }
 
-function playableQueue(exclude?: Track | null): Track[] {
+function playableQueue(exclude?: Track | null, options: { includeCompleted?: boolean } = {}): Track[] {
   const excluded = trackKey(exclude)
   const seen = new Set<string>()
   return getQueue()
-    .filter((track) => track.playUrl && track.queueStatus !== 'completed' && track.queueStatus !== 'skipped')
+    .filter((track) => track.queueStatus !== 'skipped')
+    .filter((track) => options.includeCompleted || track.queueStatus !== 'completed')
     .filter((track) => {
       const key = trackKey(track)
       if (!key || key === excluded || seen.has(key)) return false
       seen.add(key)
       return true
     })
+}
+
+function nextCandidates(exclude?: Track | null): Track[] {
+  const excluded = trackKey(exclude)
+  const seen = new Set<string>()
+  const candidates = [...state.queue, ...playableQueue(exclude)]
+  const next: Track[] = []
+  for (const track of candidates) {
+    const key = trackKey(track)
+    if (!key || key === excluded || seen.has(key)) continue
+    seen.add(key)
+    next.push(track)
+  }
+  return next
+}
+
+function mergeQueue(primary: Track[], secondary: Track[], exclude?: Track | null): Track[] {
+  const excluded = trackKey(exclude)
+  const seen = new Set<string>()
+  const next: Track[] = []
+  for (const track of [...primary, ...secondary]) {
+    const key = trackKey(track)
+    if (!key || key === excluded || seen.has(key)) continue
+    seen.add(key)
+    next.push(track)
+  }
+  return next
 }
 
 function replaceTrackInState(track: Track): void {
@@ -102,8 +135,9 @@ async function ensurePlayable(track: Track): Promise<Track> {
   return refreshed
 }
 
-export async function play(track: Track, options: PlaybackPlayOptions & { pushHistory?: boolean } = {}): Promise<PlaybackState> {
+export async function play(track: Track, options: InternalPlaybackPlayOptions = {}): Promise<PlaybackState> {
   const pushHistory = options.pushHistory ?? true
+  const previousQueue = state.queue
   const playable = await ensurePlayable(track)
   const currentKey = trackKey(state.current)
   const nextKey = trackKey(playable)
@@ -121,7 +155,9 @@ export async function play(track: Track, options: PlaybackPlayOptions & { pushHi
   }
   state.error = undefined
   markQueueStatus(playable, 'playing')
-  state.queue = playableQueue(playable)
+  state.queue = options.preserveQueue
+    ? mergeQueue(previousQueue.filter((item) => trackKey(item) !== nextKey), playableQueue(playable), playable)
+    : playableQueue(playable, { includeCompleted: true })
   return emitState()
 }
 
@@ -142,17 +178,41 @@ export async function next(): Promise<PlaybackState> {
     await applyPlaybackFeedback(finished, completionRate)
     markQueueStatus(finished, completionRate < 0.3 ? 'skipped' : 'completed')
   }
-  const queue = playableQueue(finished)
-  const target = state.queue[0] ?? queue[0]
-  if (!target) {
-    state.current = null
-    state.position = 0
-    state.duration = 0
-    state.status = 'idle'
-    state.queue = []
-    return emitState()
+  let lastError: unknown
+  for (const target of nextCandidates(finished)) {
+    try {
+      return await play(target, { pushHistory: Boolean(finished), preserveQueue: true })
+    } catch (error) {
+      lastError = error
+      markQueueStatus(target, 'skipped')
+      const failedKey = trackKey(target)
+      state.queue = state.queue.filter((track) => trackKey(track) !== failedKey)
+    }
   }
-  return play(target, { pushHistory: Boolean(finished) })
+  state.current = null
+  state.position = 0
+  state.duration = 0
+  state.status = 'idle'
+  state.queue = []
+  state.error = lastError ? '下一首暂时播不出来' : undefined
+  return emitState()
+}
+
+export async function finishCurrent(): Promise<PlaybackState> {
+  const finished = state.current
+  if (finished) {
+    const completionRate = state.position > 0 && state.duration > 0 ? state.position / state.duration : 1
+    await applyPlaybackFeedback(finished, completionRate)
+    markQueueStatus(finished, completionRate < 0.3 ? 'skipped' : 'completed')
+    state.history = [finished, ...state.history].slice(0, 20)
+  }
+  state.current = null
+  state.position = 0
+  state.duration = 0
+  state.status = 'idle'
+  state.error = undefined
+  state.queue = playableQueue()
+  return emitState()
 }
 
 export async function prev(): Promise<PlaybackState> {

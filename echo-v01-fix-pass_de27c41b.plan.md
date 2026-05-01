@@ -1,6 +1,6 @@
 ---
 name: echo-v01-fix-pass
-overview: 分三阶段修复 Echo v0.1 的 13 项问题：第一阶段解决 release 硬伤（打包资源、假加密、推荐绕过 LLM、错过提醒静默丢失），第二阶段补体验缺口（未登录引导、播放抖动、缓存、Tab 切换闪屏），第三阶段做产品打磨（进度反馈、全屏检测、TTS 可配、优雅退出、音忆红点）。每阶段独立可发布。
+overview: 分三阶段修复 Echo v0.1 的 13 项问题：第一阶段解决 release 硬伤（打包资源、假加密、推荐绕过 LLM、错过提醒静默丢失），第二阶段补体验缺口（未登录引导、播放抖动、缓存、Tab 切换闪屏），第三阶段做产品打磨（进度反馈、全屏检测、TTS 可配、优雅退出、风信红点）。每阶段独立可发布。
 todos:
   - id: a1_pack_resources
     content: A-1 把 prompts/、samples/ 通过 build.extraResources 打进 nsis，paths.ts findRepoRoot 加 process.resourcesPath 候选
@@ -69,7 +69,7 @@ flowchart LR
 - [echo-app/package.json](echo-app/package.json) 加 `build.extraResources`：
   - 把仓库根的 `prompts`、`samples` 拷到 `resources/`（`design/` 仅 dev 时浏览器看，不打包）
 - [echo-app/src/main/utils/paths.ts](echo-app/src/main/utils/paths.ts) `findRepoRoot()` 在候选列表头部加 `process.resourcesPath`，并把判定文件改成 `prompts/system.md`（已经是了，保留）
-- 打一次 `npm run dist` 自验：装出来的 nsis 应用聊天能正常出回复、音忆能写、carePing 文案不空
+- 打一次 `npm run dist` 自验：装出来的 nsis 应用聊天能正常出回复、风信能写、carePing 文案不空
 
 ### A-2. `safeStorage` 假加密降级
 
@@ -189,9 +189,9 @@ sequenceDiagram
 - `archiveDaySeal()` 内部加 `Promise.race([generateSeal(...), wait(5000)])`
 - 超时直接走 `fallbackSeal`，保证关闭流畅
 
-### C-13. 音忆未读小红点
+### C-13. 风信未读小红点
 
-每天 22:00 自动生成的音忆用户经常错过。
+每天 22:00 自动生成的风信用户经常错过。
 
 - [echo-app/src/main/db/settings.ts](echo-app/src/main/db/settings.ts) 新增 `meta.lastViewedYinyiAt` 字段
 - [echo-app/src/renderer/pages/Yinyi.tsx](echo-app/src/renderer/pages/Yinyi.tsx) 进入页面时调一次 `settings.update('meta.lastViewedYinyiAt', latestDate)`
@@ -212,7 +212,7 @@ sequenceDiagram
 
 每个阶段我会列一个具体可手动验证的清单，比如 Phase A：
 
-- [ ] `npm run dist` 出 nsis 包，装到一台干净的 Windows 上，跑完整次"导入歌单 → 聊一次 → 写音忆"流程不出空文案
+- [ ] `npm run dist` 出 nsis 包，装到一台干净的 Windows 上，跑完整次"导入歌单 → 聊一次 → 写风信"流程不出空文案
 - [ ] 临时 mock `safeStorage.isEncryptionAvailable() === false`，验证 API key 写入被拒绝且 UI 红色提示出现
 - [ ] 对话发"今天适合听什么"，得到的回复必须含 Echo 语气（"我猜"/"我先"/"你这会儿"），且歌曲卡片正常嵌入并可播
 - [ ] 把 App 关掉一天，第二天上午 11 点开机，应当收到一条合并的"我今天本来想找你"通知（而不是静默）

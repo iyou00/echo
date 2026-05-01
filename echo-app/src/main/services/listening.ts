@@ -129,7 +129,7 @@ function fallbackText(track: Track | null): string {
   if (!track) return `${time}这个点,我先陪你安静一会儿。我现在还没摸清你的歌单,所以先不硬推歌。等你导入更多歌以后,我会把这一刻接到一首真的合适的歌上。`
   const variants = [
     `${time}这个点,我猜你可能只是想让旁边有点声音。我也没打算讲大道理,就给你接一首${track.artist}的《${track.title}》。它不会太抢,先垫着,你手上的事可以慢慢做。`,
-    `我刚刚在想,你这会儿点听音,大概不是想听我分析什么,就是想有个人先开个头。那我给你放${track.artist}的《${track.title}》,旋律先进来,你跟着缓一会儿。`,
+    `我刚刚在想,你这会儿点回声,大概不是想听我分析什么,就是想有个人先开个头。那我给你放${track.artist}的《${track.title}》,旋律先进来,你跟着缓一会儿。`,
     `现在这个点挺适合换一口气。你不用马上进入什么状态,先听${track.artist}的《${track.title}》。这首入口轻,能把刚才那点绷着的感觉慢慢放下来。`,
   ]
   return variants[Math.floor(Math.random() * variants.length)]
@@ -244,7 +244,7 @@ export async function generateListeningSegment(): Promise<{ text: string; track:
   if (track) {
     appendRecommendedTracks([{
       ...track,
-      reason: track.reason ?? '听音里 Echo 给你接上的这首。',
+      reason: track.reason ?? '回声里 Echo 给你接上的这首。',
     }])
   }
   if (audio.ok && audio.audioUrl) {

@@ -77,10 +77,16 @@ export interface ImportProgressPayload {
 
 export interface SchedulerCatchupResult {
   ok: boolean
-  job: 'yinyi_daily'
+  job: 'yinyi_daily' | 'taste_profile_structured' | 'taste_profile_portrait'
   date?: string
   status: 'completed' | 'failed' | 'skipped'
   message: string
+}
+
+export interface SchedulerCatchupReport {
+  ok: boolean
+  results: SchedulerCatchupResult[]
+  primary: SchedulerCatchupResult
 }
 
 export interface AppNavigatePayload {
@@ -138,6 +144,7 @@ export interface TasteProfile {
     structuredUpdatedAt?: string
     refreshReason?: string
     signalCount?: number
+    portraitSignalCount?: number
   }
 }
 
@@ -147,6 +154,7 @@ export interface TasteQuestion {
   content: string
   status: 'pending' | 'answered' | 'skipped' | 'expired'
   answered_content?: string
+  context?: Record<string, unknown>
 }
 
 export interface Settings {
@@ -168,6 +176,9 @@ export interface Settings {
   }
   chat: {
     restoreOnStart: boolean
+  }
+  playback: {
+    autoPlayNext: boolean
   }
   ui: {
     theme?: 'light' | 'dark' | 'system'
@@ -271,6 +282,7 @@ export interface EchoApi {
     update(path: string, value: unknown): Promise<Settings>
     testLlm(): Promise<LlmTestResult>
     importPlaylist(): Promise<ImportPlaylistResult>
+    downloadPlaylistTemplate(): Promise<{ ok: boolean; path?: string; message: string }>
     exportData(): Promise<{ ok: boolean; path?: string; message: string }>
     resetData(): Promise<{ ok: boolean }>
   }
@@ -279,7 +291,7 @@ export interface EchoApi {
     check(): Promise<ServiceHealth[]>
   }
   scheduler: {
-    runCatchup(): Promise<SchedulerCatchupResult>
+    runCatchup(): Promise<SchedulerCatchupReport>
   }
   chat: {
     send(text: string): Promise<SendChatResult>
@@ -326,6 +338,7 @@ export interface EchoApi {
     play(track: Track, options?: PlaybackPlayOptions): Promise<PlaybackState>
     enqueue(track: Track): Promise<PlaybackState>
     next(): Promise<PlaybackState>
+    finishCurrent(): Promise<PlaybackState>
     prev(): Promise<PlaybackState>
     pause(): Promise<PlaybackState>
     resume(): Promise<PlaybackState>

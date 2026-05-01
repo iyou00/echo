@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react'
+import { useState } from 'react'
 import { Play, RefreshCw, Settings } from 'lucide-react'
 import type { EchoApi, PlaybackState, TasteProfile, TasteQuestion, Track } from '../../types/ipc'
 import type { AppPageProps } from '../../App'
@@ -23,27 +23,23 @@ function displayDate(value?: string) {
 }
 
 export function EchoProfilePage({ echo, navigate, profile, questions, setPlaybackState, refreshQueue, refreshProfile }: EchoProfileProps) {
-  const [answering, setAnswering] = useState<Record<number, string>>({})
   const [busy, setBusy] = useState(false)
   const [playingKey, setPlayingKey] = useState('')
+  const [status, setStatus] = useState('')
+  void questions
 
   async function regenerate() {
     setBusy(true)
+    setStatus('')
     try {
       await echo.taste.regeneratePortrait()
       await refreshProfile()
+      setStatus('画像已刷新')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '画像刷新失败')
     } finally {
       setBusy(false)
     }
-  }
-
-  async function answerQuestion(event: FormEvent, question: TasteQuestion) {
-    event.preventDefault()
-    const answer = answering[question.id]?.trim()
-    if (!answer) return
-    await echo.taste.answerQuestion(question.id, answer)
-    setAnswering((items) => ({ ...items, [question.id]: '' }))
-    await refreshProfile()
   }
 
   async function playSignature(track: Track) {
@@ -88,6 +84,7 @@ export function EchoProfilePage({ echo, navigate, profile, questions, setPlaybac
               <BrandLogo className="avatar-big" size={56} />
               <p className="portrait-text">{profile.echo_portrait}</p>
               <div className="portrait-sign">— Echo · 写于 {new Date().toLocaleDateString('zh-CN')}</div>
+              {status && <div className="quiet-line">{status}</div>}
             </Section>
 
             <Section label="S I G N A T U R E · 7">
@@ -154,30 +151,6 @@ export function EchoProfilePage({ echo, navigate, profile, questions, setPlaybac
                     {mood.tag}
                   </span>
                 ))}
-              </div>
-            </Section>
-
-            <Section>
-              <div className="questions">
-                <div className="section-label">E C H O 问 你</div>
-                <p>这几处我还没有判断准，你随手补一句就行。</p>
-                {questions.filter((question) => question.status === 'pending').map((question) => (
-                  <form className="question-item" key={question.id} onSubmit={(event) => answerQuestion(event, question)}>
-                    <div className="q-mark">Q</div>
-                    <div className="q-body">
-                      <div className="q-text">{question.content}</div>
-                      <div className="q-actions">
-                        <input
-                          value={answering[question.id] ?? ''}
-                          onChange={(event) => setAnswering((items) => ({ ...items, [question.id]: event.target.value }))}
-                          placeholder="你的答案"
-                        />
-                        <button className="q-btn" type="submit">回答</button>
-                      </div>
-                    </div>
-                  </form>
-                ))}
-                {questions.every((question) => question.status !== 'pending') && <div className="quiet-line">今天的问题已经回答完了。</div>}
               </div>
             </Section>
 

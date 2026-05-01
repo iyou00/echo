@@ -1,5 +1,5 @@
 import type { LlmMessage } from './client'
-import type { Track } from '../../types/ipc'
+import type { TasteQuestion, Track } from '../../types/ipc'
 import { loadTodayConversations } from '../db/conversations'
 import { loadActiveEvents } from '../db/events'
 import { getTasteProfile } from '../db/taste'
@@ -12,6 +12,7 @@ import { getMostRecentSeal } from '../services/daySeal'
 export interface ChatContextOptions {
   recommendationCandidates?: Track[]
   neteaseAuthRequired?: boolean
+  followUpQuestion?: TasteQuestion | null
 }
 
 function formatCandidates(tracks: Track[]): string {
@@ -30,6 +31,7 @@ export function buildChatContext(userText: string, options: ChatContextOptions =
   const history = loadTodayConversations(12)
   const recentSeal = getMostRecentSeal()
   const candidates = options.recommendationCandidates ?? []
+  const followUpQuestion = options.followUpQuestion
   const candidatesBlock = candidates.length > 0
     ? `
 
@@ -44,6 +46,14 @@ ${formatCandidates(candidates)}
 未登录或登录已过期。在没有登录之前，你拿不到任何可播放的歌。请用 Echo 的语气告诉 Ta：现在还没接上网易云，去设置页扫一下码就能开始挑歌。不要硬编候选歌名。
 </netease_status>`
     : ''
+  const followUpBlock = followUpQuestion
+    ? `
+
+<taste_followup_question>
+这轮可以自然追问一次，问题是：${followUpQuestion.content}
+要求：先完整回应用户当前需求；问题只能放在末尾，像朋友顺手问一句；不要说“系统/画像/pending/问题池”；不要连续追问多个问题。
+</taste_followup_question>`
+    : ''
 
   const messages: LlmMessage[] = [
     {
@@ -56,7 +66,7 @@ ${profile?.echo_portrait ?? '用户还没有导入歌单，Echo 对 Ta 的品味
 
 <current_context>
 - 当前时间:${new Date().toLocaleString('zh-CN', { hour12: false })}
-</current_context>${candidatesBlock}${authBlock}
+</current_context>${candidatesBlock}${authBlock}${followUpBlock}
 ${recentSeal ? `
 <recent_day_seal>
 ${recentSeal}
@@ -126,11 +136,11 @@ ${recentYinyi.length > 0 ? recentYinyi.map((entry) => `${entry.date}: ${entry.co
 
 <meta>
 - 你已经陪 Ta ${daysSinceFirstUse} 天了
-- 这是第 ${getYinyiRange(500).length + 1} 篇音忆
+- 这是第 ${getYinyiRange(500).length + 1} 篇风信
 </meta>
 
 <output_contract>
-只输出音忆正文。2-4 段,自然分段即可。
+只输出风信正文。2-4 段,自然分段即可。
 可以使用“· · ·”做留白,但不要强制每段都用它分隔。
 不要标题,不要 bullet,不要 Markdown,不要解释。
 每篇至少有一句“我看到 / 我听到 / 我注意到 / 我看你...”。

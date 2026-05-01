@@ -26,7 +26,7 @@
     │                  │    │                  │      │                  │
     │  - 品味档案      │    │  原生 fetch 调用 │      │  通过非官方 SDK  │
     │  - 对话历史      │    │  OpenAI 兼容协议 │      │  直接 import     │
-    │  - 音忆 / 听歌   │    │  端点可配置      │      │  - 搜歌/播放/歌单│
+    │  - 风信 / 听歌   │    │  端点可配置      │      │  - 搜歌/播放/歌单│
     │  - cookie(加密)│    │  (DeepSeek 等) │      │  - 用户听歌历史  │
     └──────────────────┘    └──────────────────┘      └──────────────────┘
 ```
@@ -44,8 +44,8 @@ Electron 天生是**双进程**:
 
 **Echo的"常驻感"来自主进程:**
 - 你关掉主窗口,主进程默认还活着(我们设置成这样)
-- 定时任务在主进程跑 → 到了晚上 22:00 即使窗口关着,音忆也能生成
-- 下次打开窗口,读库显示今天的音忆
+- 定时任务在主进程跑 → 到了晚上 22:00 即使窗口关着,风信也能生成
+- 下次打开窗口,读库显示今天的风信
 
 **渲染进程只负责 UI,不直接干重活:**
 - 用户点"推荐一首歌" → IPC 发消息给主进程
@@ -64,7 +64,7 @@ main/
 │   ├─ taste.ts         # TasteProfile 读写
 │   ├─ conversations.ts # 对话历史读写
 │   ├─ events.ts        # 中期事件记忆
-│   └─ yinyi.ts         # 音忆历史
+│   └─ yinyi.ts         # 风信历史
 │
 ├─ llm/                 # LLM 调用层
 │   ├─ client.ts        # LLM HTTP 客户端封装(原生 fetch + OpenAI 兼容)
@@ -74,7 +74,7 @@ main/
 ├─ services/            # 业务层
 │   ├─ chat.ts          # 聊天主逻辑
 │   ├─ recommender.ts   # 推歌:决定推什么 + 为什么
-│   ├─ yinyi.ts         # 音忆生成
+│   ├─ yinyi.ts         # 风信生成
 │   ├─ taste.ts         # 品味档案演化(从行为推断)
 │   ├─ scenario.ts      # 语音模式的 100 字文案生成
 │   └─ settings.ts      # 设置读写 + apiKey 加密 + 测试 LLM 连接
@@ -84,17 +84,17 @@ main/
 │   └─ music.ts         # searchTrack / getPlayUrl / getPlaylist / getUserHistory
 │                       # ↑ 业务封装,屏蔽 SDK 细节,方便日后切换音乐源
 │
-└─ scheduler.ts         # node-cron:音忆(从 settings.yinyi.generateAt 读时间)、主动推送
+└─ scheduler.ts         # node-cron:风信(从 settings.yinyi.generateAt 读时间)、主动推送
 ```
 
 ## 渲染进程的页面划分
 
 ```
 renderer/pages/
-├─ Chat.tsx          # 主对话(对应 design/main-view.html)
+├─ Chat.tsx          # 絮语(对应 design/main-view.html)
 ├─ Voice.tsx         # 语音模式(对应 design/voice-mode.html)
 ├─ EchoProfile.tsx   # Echo 主页 ≈ 品味档案(点头像进入,对应 design/profile.html)
-├─ Yinyi.tsx         # 音忆日记(对应 design/yinyi.html)
+├─ Yinyi.tsx         # 风信日记(对应 design/yinyi.html)
 ├─ Queue.tsx         # 列表(对应 design/queue.html)
 └─ Settings.tsx      # 设置(从 EchoProfile 右上角齿轮进入,对应 design/settings.html)
 ```
@@ -129,7 +129,7 @@ renderer/pages/
    - 用户点播放 → audio 播放 → 底部音浪更新
 ```
 
-### 场景 2:每晚 22:00 生成音忆
+### 场景 2:每晚 22:00 生成风信
 
 ```
 1. scheduler.ts 到点,调 services/yinyi.ts
@@ -138,7 +138,7 @@ renderer/pages/
    b. 组装 prompt:prompts/yinyi-writer.md + 今日数据
    c. 调 LLM,生成一段对话型日记
    d. 存入 yinyi 表
-   e. 通过 IPC 发给渲染进程(如果开着窗口):弹通知"今日音忆已出"
+   e. 通过 IPC 发给渲染进程(如果开着窗口):弹通知"今日风信已出"
 ```
 
 ### 场景 3:用户点顶部头像进主页

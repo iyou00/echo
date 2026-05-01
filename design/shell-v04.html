@@ -245,7 +245,7 @@
   /* ------- 内容区 ------- */
   .content { background: var(--bg-2); min-height: 240px; }
 
-  /* === 对话页内容 === */
+  /* === 絮语页内容 === */
   .convo { padding: 14px 14px 12px; }
   .msg-echo { display: flex; flex-direction: column; align-items: flex-start; margin-bottom: 12px; }
   .msg-user { display: flex; flex-direction: column; align-items: flex-end; margin-bottom: 12px; }
@@ -384,7 +384,7 @@
   .seg span { flex: 1; height: 2px; background: rgba(0,0,0,0.06); border-radius: 1px; }
   .seg span.on { background: var(--ayin-600); }
 
-  /* === 音忆页内容 === */
+  /* === 风信页内容 === */
   .paper {
     background: var(--paper);
     background-image: radial-gradient(circle at 1px 1px, rgba(99, 80, 40, 0.04) 0.5px, transparent 0);
@@ -424,7 +424,7 @@
     margin: 4px 0 12px;
   }
 
-  /* === 听音页内容 === */
+  /* === 回声页内容 === */
   .voice-bg {
     background: linear-gradient(180deg, var(--ayin-100) 0%, var(--ayin-300) 100%);
     padding: 32px 24px;
@@ -475,7 +475,7 @@
     border-radius: 1px;
   }
 
-  /* === 列表页内容 === */
+  /* === 拾音页内容 === */
   .q-subtabs {
     display: flex;
     gap: 4px;
@@ -648,7 +648,7 @@
 <div class="case">
   <div class="case-head">
     <div class="case-num">① 对 话 · D E F A U L T</div>
-    <div class="case-title">主对话页 · 启动默认入口</div>
+    <div class="case-title">絮语页 · 启动默认入口</div>
     <div class="case-desc">无工具栏 · 内容区直接接对话气泡 · 输入栏 + 底部播放器全部保留</div>
   </div>
 
@@ -657,8 +657,8 @@
       <div class="av">E</div>
       <nav class="tabs">
         <div class="tab active">对 话</div>
-        <div class="tab">音 忆</div>
-        <div class="tab">听 音</div>
+        <div class="tab">风 信</div>
+        <div class="tab">回 声</div>
         <div class="tab">列 表</div>
       </nav>
       <div class="ctrls">
@@ -714,11 +714,11 @@
   </div>
 </div>
 
-<!-- ============== 页面 2 · 音忆 ============== -->
+<!-- ============== 页面 2 · 风信 ============== -->
 <div class="case">
   <div class="case-head">
-    <div class="case-num">② 音 忆 · Y I N Y I</div>
-    <div class="case-title">音忆页 · Echo 的日记</div>
+    <div class="case-num">② 风 信 · F E N G X I N</div>
+    <div class="case-title">风信页 · Echo 的日记</div>
     <div class="case-desc">工具栏左侧:第 N 篇 · 已陪伴 N 天 · 右侧:日期跳转 / 随手翻 / 今日</div>
   </div>
 
@@ -727,8 +727,8 @@
       <div class="av">E</div>
       <nav class="tabs">
         <div class="tab">对 话</div>
-        <div class="tab active">音 忆</div>
-        <div class="tab">听 音</div>
+        <div class="tab active">风 信</div>
+        <div class="tab">回 声</div>
         <div class="tab">列 表</div>
       </nav>
       <div class="ctrls">
@@ -762,11 +762,11 @@
   </div>
 </div>
 
-<!-- ============== 页面 3 · 听音 ============== -->
+<!-- ============== 页面 3 · 回声 ============== -->
 <div class="case">
   <div class="case-head">
-    <div class="case-num">③ 听 音 · T I N G Y I N</div>
-    <div class="case-title">听音页 · Echo 开口说话</div>
+    <div class="case-num">③ 回 声 · H U I S H E N G</div>
+    <div class="case-title">回声页 · Echo 开口说话</div>
     <div class="case-desc">工具栏左侧:E C H O · 状态 · 右侧:再说一段。内容区抹茶绿渐变</div>
   </div>
 
@@ -775,8 +775,8 @@
       <div class="av">E</div>
       <nav class="tabs">
         <div class="tab">对 话</div>
-        <div class="tab">音 忆</div>
-        <div class="tab active">听 音</div>
+        <div class="tab">风 信</div>
+        <div class="tab active">回 声</div>
         <div class="tab">列 表</div>
       </nav>
       <div class="ctrls">
@@ -813,7 +813,7 @@
 <div class="case">
   <div class="case-head">
     <div class="case-num">④ 列 表 · Q U E U E</div>
-    <div class="case-title">列表页 · 今日推荐流</div>
+    <div class="case-title">拾音页 · 今日推荐流</div>
     <div class="case-desc">工具栏左侧:今日 8 首 · 总长 33 分钟 · 子 Tab 用胶囊药丸</div>
   </div>
 
@@ -822,8 +822,8 @@
       <div class="av">E</div>
       <nav class="tabs">
         <div class="tab">对 话</div>
-        <div class="tab">音 忆</div>
-        <div class="tab">听 音</div>
+        <div class="tab">风 信</div>
+        <div class="tab">回 声</div>
         <div class="tab active">列 表</div>
       </nav>
       <div class="ctrls">
@@ -956,7 +956,7 @@
     <li>右侧:<code>圆形操作按钮 + 胶囊文字按钮</code>混用</li>
     <li>圆形按钮 <code>22px</code> · 边框 <code>0.5px rgba(0,0,0,0.1)</code></li>
     <li>胶囊按钮 <code>11px 圆角</code> · 内边距 <code>0 10px</code></li>
-    <li>对话页**没有**工具栏(因为对话本身没有元数据要展示)</li>
+    <li>絮语页**没有**工具栏(因为对话本身没有元数据要展示)</li>
   </ul>
 </div>
 
@@ -983,7 +983,7 @@
 <div class="specs">
   <div class="specs-h">N A V &nbsp; · &nbsp; 导航关系</div>
   <ul>
-    <li><b>对话 / 音忆 / 听音 / 列表</b> 是 Tab · 直接切换 · 无返回按钮</li>
+    <li><b>絮语 / 风信 / 回声 / 拾音</b> 是 Tab · 直接切换 · 无返回按钮</li>
     <li><b>Echo 主页</b>:点头像进入 · 顶栏头像变成"◁ 返回"按钮 · 工具栏齿轮 → 设置页</li>
     <li><b>设置页</b>:从主页齿轮进入 · 顶栏左侧"◁ 返回"回到主页</li>
     <li>Echo 主页和设置页**不在 Tab 里** · 因为它们是"关于 Echo 自己"的页面</li>

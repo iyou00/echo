@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { EchoApi, YinyiEntry } from '../../types/ipc'
 import type { AppPageProps } from '../../App'
 import { BrandLogo, EmptyState } from '../components'
+import { pageLabels } from '../labels'
 
 interface YinyiPageProps extends AppPageProps {
   echo: EchoApi
@@ -89,7 +90,7 @@ export function YinyiPage({ echo, isActive, openWithRandom }: YinyiPageProps) {
       return (
         <EmptyState
           icon="…"
-          title="那天的音忆我没写好——可能是我那时候走神了。要不你让我重写一次?"
+          title={`那天的${pageLabels.yinyi}我没写好——可能是我那时候走神了。要不你让我重写一次?`}
           body={entry.meta.error}
           action={<button className="primary-button empty-cta" onClick={generate}>重 新 生 成</button>}
           sign="— E C H O"
@@ -122,7 +123,7 @@ export function YinyiPage({ echo, isActive, openWithRandom }: YinyiPageProps) {
       return (
         <EmptyState
           icon={<BrandLogo className="empty-logo" size={56} />}
-          title="我还没给你写过音忆。每天 22 点我会坐下来记录关于你的一些小观察——今晚见面。"
+          title={`我还没给你写过${pageLabels.yinyi}。每天 22 点我会坐下来记录关于你的一些小观察——今晚见面。`}
           body="(在设置里可以改时间)"
           sign="— E C H O"
         />

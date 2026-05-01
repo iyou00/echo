@@ -115,6 +115,24 @@ export function loadRecentRecommendedTracks(limit = 80): Track[] {
     })
 }
 
+export function loadListenedTracksSince(hours: number, limit = 300): Track[] {
+  const safeHours = Math.max(1, Math.floor(hours))
+  return getDb()
+    .prepare(`
+      SELECT title, artist, album, source, meta_json
+      FROM tracks_listened
+      WHERE user_id = 1
+        AND listened_at >= datetime('now', ?)
+      ORDER BY listened_at DESC, id DESC
+      LIMIT ?
+    `)
+    .all(`-${safeHours} hours`, limit)
+    .map((row) => {
+      const typed = row as { title: string; artist: string; album?: string; source?: string; meta_json?: string }
+      return parseTrack(typed)
+    })
+}
+
 export function loadTodayTrackEvents(limit = 60): TodayTrackEvent[] {
   return getDb()
     .prepare(`
@@ -148,6 +166,7 @@ export function loadRecommendedTrackHistory(limitDays = 7): QueueHistoryDay[] {
       FROM tracks_listened
       WHERE user_id = 1
         AND source = 'recommended_by_echo'
+        AND date(listened_at, 'localtime') < date('now', 'localtime')
         AND date(listened_at, 'localtime') NOT IN (
           SELECT date FROM queue_history_hidden_dates WHERE user_id = 1
         )

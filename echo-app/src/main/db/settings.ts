@@ -28,6 +28,9 @@ const defaultSettings: Settings = {
   chat: {
     restoreOnStart: true,
   },
+  playback: {
+    autoPlayNext: true,
+  },
   ui: {
     theme: 'system',
     closeBehavior: 'ask',
@@ -59,6 +62,7 @@ function mergeDefaults(value: Partial<Settings>): Settings {
     yinyi: { ...defaultSettings.yinyi, ...(value.yinyi ?? {}) },
     carePings: { ...defaultSettings.carePings, ...(value.carePings ?? {}) },
     chat: { ...defaultSettings.chat, ...(value.chat ?? {}) },
+    playback: { ...defaultSettings.playback, ...(value.playback ?? {}) },
     ui: { ...defaultSettings.ui, ...(value.ui ?? {}) },
     window: { ...defaultSettings.window, ...(value.window ?? {}) },
     user: { ...defaultSettings.user, ...(value.user ?? {}) },

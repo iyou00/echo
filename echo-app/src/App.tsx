@@ -9,6 +9,7 @@ import { VoicePage } from './renderer/pages/Voice'
 import { YinyiPage } from './renderer/pages/Yinyi'
 import { Player } from './renderer/components/Player'
 import { HeaderAvatar, WindowControls } from './renderer/components'
+import { pageLabels } from './renderer/labels'
 
 export type PageKey = 'chat' | 'profile' | 'yinyi' | 'voice' | 'queue' | 'settings'
 
@@ -180,6 +181,11 @@ function App() {
     setCareMuteToast(false)
   }
 
+  async function updateAutoPlayNext(value: boolean) {
+    const next = await echo.settings.update('playback.autoPlayNext', value)
+    setSettings(next)
+  }
+
   async function closeWindow() {
     if (settings?.ui.closeBehavior === 'minimize') {
       await echo.app.minimizeToTray()
@@ -189,10 +195,10 @@ function App() {
   }
 
   const tabItems: Array<{ key: PageKey; label: string }> = [
-    { key: 'chat', label: '对话' },
-    { key: 'yinyi', label: '音忆' },
-    { key: 'voice', label: '听音' },
-    { key: 'queue', label: '列表' },
+    { key: 'chat', label: pageLabels.chat },
+    { key: 'yinyi', label: pageLabels.yinyi },
+    { key: 'voice', label: pageLabels.voice },
+    { key: 'queue', label: pageLabels.queue },
   ]
   const isMainTab = page === 'chat' || page === 'yinyi' || page === 'voice' || page === 'queue'
 
@@ -212,7 +218,7 @@ function App() {
                 onClick={() => setPage(item.key)}
               >
                 {item.label}
-                {item.key === 'yinyi' && yinyiUnread && <span className="tab-unread" aria-label="今日新音忆" />}
+                {item.key === 'yinyi' && yinyiUnread && <span className="tab-unread" aria-label={`今日新${pageLabels.yinyi}`} />}
               </button>
             ))}
           </nav>
@@ -315,6 +321,8 @@ function App() {
               playbackState={playbackState}
               setPlaybackState={setPlaybackState}
               refreshQueue={refreshQueue}
+              autoPlayNext={settings?.playback.autoPlayNext ?? true}
+              updateAutoPlayNext={updateAutoPlayNext}
             />
           </div>
           {page === 'profile' && (
@@ -341,7 +349,13 @@ function App() {
           )}
         </section>
         <div className={page === 'voice' ? 'voice-mode-active' : ''}>
-          <Player echo={echo} state={playbackState} setState={setPlaybackState} refreshQueue={refreshQueue} />
+          <Player
+            echo={echo}
+            state={playbackState}
+            setState={setPlaybackState}
+            refreshQueue={refreshQueue}
+            autoPlayNext={settings?.playback.autoPlayNext ?? true}
+          />
         </div>
         {closeDialogOpen && (
           <div className="close-dialog-layer" role="presentation">

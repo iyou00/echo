@@ -15,7 +15,7 @@
 | 后台(主进程) | **Node.js**(Electron 主进程) | 常驻跑定时任务、调 LLM、操作 SQLite |
 | LLM 调用 | **原生 `fetch`** + **OpenAI 兼容协议** | 不用 SDK · 自己写薄客户端(~200 行)· 端点在设置里随时改 |
 | 本地存储 | **SQLite** (`better-sqlite3`) | 零配置;备份 = copy 一个文件;关系型适合品味档案 |
-| 定时任务 | **node-cron** | 跑音忆日记生成、主动推送 |
+| 定时任务 | **node-cron** | 跑风信日记生成、主动推送 |
 | 音乐数据 | **`@neteasecloudmusicapienhanced/api`** · Node.js 包,**直接 import 到主进程**,不启额外服务 | 社区维护的 Binaryify NeteaseCloudMusicApi 接力版 · 接口最全 + TS ready + 内置解灰 |
 | 播放 | **HTML5 `<audio>` 标签** | Electron 内置支持;v0.1 够用 |
 | TTS(v0.3+) | 待定,候选:微软 Edge TTS(免费)/ ElevenLabs(收费好听) | |
@@ -110,7 +110,7 @@ echo-app/
 │   │   ├─ services/
 │   │   │   ├─ chat.ts         # 聊天主逻辑
 │   │   │   ├─ recommender.ts  # 推荐引擎
-│   │   │   ├─ yinyi.ts        # 音忆生成
+│   │   │   ├─ yinyi.ts        # 风信生成
 │   │   │   └─ taste.ts        # 品味档案演化
 │   │   └─ scheduler.ts        # node-cron 定时任务
 │   ├─ preload/                # Electron preload(桥接)
@@ -118,11 +118,11 @@ echo-app/
 │       ├─ App.tsx
 │       ├─ components/
 │       ├─ pages/
-│       │   ├─ Chat.tsx        # 主对话界面
+│       │   ├─ Chat.tsx        # 絮语界面
 │       │   ├─ Voice.tsx       # 语音模式
 │       │   ├─ EchoProfile.tsx # Echo 主页
-│       │   ├─ Yinyi.tsx       # 音忆日记
-│       │   └─ Queue.tsx       # 列表页(队列 + Echo 备选)
+│       │   ├─ Yinyi.tsx       # 风信日记
+│       │   └─ Queue.tsx       # 拾音页(队列 + Echo 备选)
 │       └─ styles/tokens.css   # 视觉 tokens(从 design/tokens.md 同步)
 ├─ prompts/                    # System prompt 等(可改不重编译)
 │   ├─ system.md

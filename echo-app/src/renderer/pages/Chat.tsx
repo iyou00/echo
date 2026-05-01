@@ -250,6 +250,7 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
       if (nextTrack) {
         const nextState = await echo.playback.play(nextTrack)
         setPlaybackState(nextState)
+        await primePlaybackQueue(returnedTracks, nextTrack)
       }
       await refreshQueue()
     } catch (error) {
@@ -366,7 +367,28 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
     setSending(false)
   }
 
-  async function handleTrackAction(track: Track) {
+  async function primePlaybackQueue(tracks: Track[], currentTrack: Track) {
+    const current = trackKey(currentTrack)
+    const currentIndex = tracks.findIndex((track) => trackKey(track) === current)
+    const ordered = currentIndex >= 0
+      ? [...tracks.slice(currentIndex + 1), ...tracks.slice(0, currentIndex)]
+      : tracks
+    let latestState: PlaybackState | null = null
+    const queued = new Set<string>()
+    for (const track of ordered) {
+      const key = trackKey(track)
+      if (!track.playUrl || !key || key === current || queued.has(key)) continue
+      queued.add(key)
+      try {
+        latestState = await echo.playback.enqueue(track)
+      } catch {
+        // 单首续期失败不影响后面的自动连播候选。
+      }
+    }
+    if (latestState) setPlaybackState(latestState)
+  }
+
+  async function handleTrackAction(track: Track, contextTracks: Track[] = []) {
     if (!track.playUrl) return
     const isCurrent = trackKey(track) === activeTrackKey
     const nextState = isCurrent && playbackState.status === 'playing'
@@ -375,6 +397,7 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
         ? await echo.playback.resume()
         : await echo.playback.play(track)
     setPlaybackState(nextState)
+    if (!isCurrent) await primePlaybackQueue(contextTracks, track)
     await refreshQueue()
   }
 
@@ -454,7 +477,7 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
                     <TrackCard
                       key={`${message.id}-${track.title}`}
                       track={track}
-                      onPlay={handleTrackAction}
+                      onPlay={(track) => handleTrackAction(track, message.tracks ?? [])}
                       onToggleFavorite={toggleFavorite}
                       isCurrent={trackKey(track) === activeTrackKey}
                       playbackStatus={playbackState.status}

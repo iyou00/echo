@@ -1,5 +1,5 @@
 import type { WebContents } from 'electron'
-import type { ChatMessage, SendChatResult, Track } from '../../types/ipc'
+import type { ChatMessage, SendChatResult, TasteQuestion, Track } from '../../types/ipc'
 import { appendConversation, loadTodayConversations } from '../db/conversations'
 import { appendRecommendedTracks } from '../db/tracks'
 import { getSettings } from '../db/settings'
@@ -9,6 +9,13 @@ import { applySignal } from './taste'
 import { resolvePlayableTrack } from '../netease/music'
 import { recordHealth } from './health'
 import { MAX_RECOMMENDATION_COUNT, OVER_LIMIT_RECOMMENDATION_LINE, inferIntentWithLlm, NeteaseAuthRequiredError, parseRequestedTrackCount, recommendFromNetease } from './recommendation'
+import {
+  appendFollowUpQuestion,
+  capturePendingQuestionAnswer,
+  generateDynamicTasteQuestions,
+  pickTasteFollowUpQuestion,
+  recordFollowUpQuestionAsked,
+} from './tasteQuestionScheduler'
 
 interface ActiveChat {
   canceled: boolean
@@ -256,6 +263,7 @@ export async function send(text: string, sender?: WebContents): Promise<SendChat
 
   appendConversation('user', trimmed)
   await inferTasteSignal(trimmed)
+  const answeredFollowUpThisTurn = await capturePendingQuestionAnswer(trimmed)
 
   const active: ActiveChat = { canceled: false }
   activeChats.add(active)
@@ -271,11 +279,15 @@ export async function send(text: string, sender?: WebContents): Promise<SendChat
   const tracks: Track[] = []
   const started = Date.now()
   let content = ''
+  let followUpQuestion: TasteQuestion | null = null
 
   try {
+    generateDynamicTasteQuestions(trimmed, candidates)
+    followUpQuestion = answeredFollowUpThisTurn ? null : pickTasteFollowUpQuestion(trimmed, candidates)
     const messages = buildChatContext(trimmed, {
       recommendationCandidates: candidates,
       neteaseAuthRequired: authRequired,
+      followUpQuestion,
     })
     for await (const chunk of streamChat(settings, messages)) {
       if (active.canceled) break
@@ -307,7 +319,9 @@ export async function send(text: string, sender?: WebContents): Promise<SendChat
     if (requested.overLimit && tracks.length > 0 && !content.includes(OVER_LIMIT_RECOMMENDATION_LINE)) {
       content = `${OVER_LIMIT_RECOMMENDATION_LINE}${content ? ` ${content}` : ''}`
     }
+    if (!authRequired) content = appendFollowUpQuestion(content, followUpQuestion)
   } catch (error) {
+    followUpQuestion = null
     if (error instanceof LlmError) {
       recordHealth('llm', error.kind === 'auth' || error.kind === 'config' ? 'error' : 'degraded', 'Echo 连不上模型。去设置里检查 API key。', error.message)
     }
@@ -324,6 +338,7 @@ export async function send(text: string, sender?: WebContents): Promise<SendChat
 
   appendRecommendedTracks(tracks)
   const message = appendConversation('assistant', content.trim(), tracks)
+  recordFollowUpQuestionAsked(followUpQuestion, message.id)
   const hints = authRequired ? { neteaseAuthRequired: true } : undefined
   sender?.send('chat:stream:end', { message, tracks, durationMs: Date.now() - started, hints })
 

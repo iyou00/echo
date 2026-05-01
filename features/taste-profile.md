@@ -1,7 +1,7 @@
 # Feature · 品味档案(Taste Profile)
 
 > **核心理念**:Echo 对 Ta 的理解,由 Echo 自己慢慢"观察"出来,不靠问卷。
-> 档案是 Echo 主页的数据源,也是每次对话 / 推荐 / 音忆的**基础输入**。
+> 档案是 Echo 主页的数据源,也是每次对话 / 推荐 / 风信的**基础输入**。
 >
 > **对应 UI**:`design/profile.html`(展示)、`design/settings.html`(编辑入口)
 > **对应代码模块**:`src/main/services/taste.ts`、`src/main/db/taste.ts`、`src/renderer/pages/EchoProfile.tsx`
@@ -42,7 +42,7 @@
 [设置页填 LLM + 测试通过]
      │
      ▼
-[设置页 / 主对话引导页显示]"给我看看你的歌单吧"
+[设置页 / 絮语引导页显示]"给我看看你的歌单吧"
      │
      ┌──────┴───────┐
      │              │
@@ -178,8 +178,8 @@ for (const artist of taste.artists) {
 ### 6.2 显示规则
 
 - 一次最多显示 **3 个**问题
-- 用户点"回答" → 打开一个简化的对话弹窗(不是跳到主对话页,避免打断)
-- 用户回答后,答案以 `user` 消息注入到主对话历史 + 触发 `update_taste`
+- 用户点"回答" → 打开一个简化的对话弹窗(不是跳到絮语页,避免打断)
+- 用户回答后,答案以 `user` 消息注入到絮语历史 + 触发 `update_taste`
 - 用户点"跳过" → 当前问题 7 天内不再显示(避免骚扰)
 
 ### 6.3 问题存储
@@ -297,7 +297,7 @@ Day 0 · 用户首次导入歌单(320 首)
   signature_tracks: [top 7 播放次数]
   echo_portrait: (LLM 生成)
   
-触发 Echo 在主对话里说:
+触发 Echo 在絮语里说:
   "我粗看了你的歌单。你听得挺杂——林俊杰、海洋Bo、一点 Pink 和 Bieber,
    不偏冷门。有几个艺人我还不太熟,改天聊聊。K-pop 你喜欢哪个组合?
    BLACKPINK、TWICE 还是别的?"

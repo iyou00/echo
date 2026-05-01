@@ -7,7 +7,6 @@ import { upgradeLegacyNeteaseSecret } from '../src/main/netease/auth'
 import { registerIpc } from '../src/main/ipc'
 import { registerScheduler, runStartupCatchup, stopScheduler } from '../src/main/services/scheduler'
 import { archiveDaySeal } from '../src/main/services/daySeal'
-import { maybeRefreshStructuredProfile } from '../src/main/services/taste'
 import { checkSecureStorage } from '../src/main/utils/secureStorage'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -158,7 +157,6 @@ app.whenReady().then(() => {
   registerIpc()
   registerScheduler()
   runStartupCatchup().catch(() => undefined)
-  maybeRefreshStructuredProfile('startup')
   createWindow()
   createTray()
 })

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { EchoApi, PlaybackState, Track } from '../../types/ipc'
 import type { AppPageProps } from '../../App'
 import { getVoiceLongAbsence, markVoiceSeen, pickVoiceIdleGreeting } from '../../data/voice-idle-greetings'
+import { pageLabels } from '../labels'
 
 interface VoicePageProps extends AppPageProps {
   echo: EchoApi
@@ -254,7 +255,7 @@ export function VoicePage({ echo, navigate, playbackState, setPlaybackState, ref
         setStatus('text-only-done')
       }), 80)
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : '听音生成失败')
+      setNotice(error instanceof Error ? error.message : `${pageLabels.voice}生成失败`)
       setStatus('error')
     }
   }
@@ -307,7 +308,14 @@ export function VoicePage({ echo, navigate, playbackState, setPlaybackState, ref
                   <div className="voice-greet-primary">{greet.primary}</div>
                   {greet.secondary && <div className="voice-greet-secondary">{greet.secondary}</div>}
                 </div>
-                <button className="voice-primary" type="button" onClick={speak}>让 Echo 说话</button>
+                <button className="voice-orb-button" type="button" onClick={speak} aria-label="听 Echo 说几句">
+                  <span className="voice-orb" aria-hidden="true">
+                    <span className="voice-orb-ring ring-one" />
+                    <span className="voice-orb-ring ring-two" />
+                    <span className="voice-orb-core" />
+                  </span>
+                  <span className="voice-primary">听 Echo 说几句</span>
+                </button>
               </div>
             )
           })()

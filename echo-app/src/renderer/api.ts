@@ -49,6 +49,9 @@ const mockSettings: Settings = {
   chat: {
     restoreOnStart: true,
   },
+  playback: {
+    autoPlayNext: true,
+  },
   ui: {
     theme: 'system',
     closeBehavior: 'ask',
@@ -184,7 +187,10 @@ function setNestedSetting(path: string, value: unknown): Settings {
 function todayIso(offset = 0) {
   const d = new Date()
   d.setDate(d.getDate() + offset)
-  return d.toISOString().slice(0, 10)
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 function mockTrackKey(track?: Track | null) {
@@ -246,6 +252,9 @@ const mockEcho: EchoApi = {
       profileState = structuredClone(mockProfile)
       queueState = structuredClone(mockTracks)
       return { imported: true, count: mockTracks.length, name: 'Echo mock playlist', profile: structuredClone(mockProfile), message: `已导入 ${mockTracks.length} 首` }
+    },
+    async downloadPlaylistTemplate() {
+      return { ok: true, path: 'mock://echo-playlist-template.json', message: '模板已保存' }
     },
     async exportData() {
       return { ok: true, path: 'mock://echo-export.json', message: '已准备导出包' }
@@ -309,7 +318,8 @@ const mockEcho: EchoApi = {
   },
   scheduler: {
     async runCatchup() {
-      return { ok: true, job: 'yinyi_daily', date: todayIso(), status: 'skipped', message: '这一天已经有音忆了。' }
+      const primary = { ok: true, job: 'yinyi_daily' as const, date: todayIso(), status: 'skipped' as const, message: '这一天已经有音忆了。' }
+      return { ok: true, primary, results: [primary] }
     },
   },
   chat: {
@@ -488,10 +498,18 @@ const mockEcho: EchoApi = {
       if (!target) {
         playbackState.current = null
         playbackState.position = 0
+        playbackState.duration = 0
         playbackState.status = 'idle'
         return emitPlayback()
       }
       return this.play(target)
+    },
+    async finishCurrent() {
+      playbackState.current = null
+      playbackState.position = 0
+      playbackState.duration = 0
+      playbackState.status = 'idle'
+      return emitPlayback()
     },
     async prev() {
       const target = playbackState.history[0]

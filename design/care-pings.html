@@ -562,7 +562,7 @@
 <div class="h-sub">v 0 . 5 &nbsp; · &nbsp; H I G H - F I D E L I T Y &nbsp; M O C K U P</div>
 <div class="intro">
   Echo 在合适时机发系统通知 · 不弹气泡 · 不发声(可选)<br>
-  三种类型轮换:推歌 / 寒暄 / 邀请听音 · 文案永远走 LLM
+  三种类型轮换:推歌 / 寒暄 / 邀请回声 · 文案永远走 LLM
 </div>
 
 <!-- ============================================ -->
@@ -599,7 +599,7 @@
 
 <div class="annot">
   <span class="num">①</span>
-  <span><b>点击行为</b>:用户点"点开听"或通知主体 → Echo 主程序自动打开 → 切到对话 tab → 那首歌开始播放 → Echo 在对话里说一句简短的话(例:"来了。")。整个链路<b>用户感知到的就是"通知 → 听到歌"</b>,中间的 find_tracks / LLM 写文案对用户隐藏。</span>
+  <span><b>点击行为</b>:用户点"点开听"或通知主体 → Echo 主程序自动打开 → 切到絮语 tab → 那首歌开始播放 → Echo 在对话里说一句简短的话(例:"来了。")。整个链路<b>用户感知到的就是"通知 → 听到歌"</b>,中间的 find_tracks / LLM 写文案对用户隐藏。</span>
 </div>
 
 <!-- ============================================ -->
@@ -636,13 +636,13 @@
 
 <div class="annot">
   <span class="num">②</span>
-  <span><b>点击行为</b>:点"回复"或通知主体 → Echo 主程序打开 → 对话 tab → Echo 把通知文案"重复"作为对话开场,等待用户回复。这样 Echo 不"白发一句",留出对话空间。</span>
+  <span><b>点击行为</b>:点"回复"或通知主体 → Echo 主程序打开 → 絮语 tab → Echo 把通知文案"重复"作为对话开场,等待用户回复。这样 Echo 不"白发一句",留出对话空间。</span>
 </div>
 
 <!-- ============================================ -->
-<!-- 类型 3 · 邀请听音 · Windows -->
+<!-- 类型 3 · 邀请回声 · Windows -->
 <!-- ============================================ -->
-<div class="section-title">类 型 3 · 邀 请 听 音 · 30%</div>
+<div class="section-title">类 型 3 · 邀 请 回 声 · 30%</div>
 
 <div class="case">
   <div class="case-head">
@@ -660,7 +660,7 @@
       </div>
       <div class="notif-win-body">下午这会儿,我有点话想跟你聊。</div>
       <div class="notif-win-foot">
-        <span>邀 请 听 音 · 19:03</span>
+        <span>邀 请 回 声 · 19:03</span>
         <a>今天别再提醒</a>
       </div>
     </div>
@@ -669,7 +669,7 @@
 
 <div class="annot">
   <span class="num">③</span>
-  <span><b>点击行为</b>:点击通知 → Echo 主程序打开 → 听音 tab → 自动开始 LLM 文案生成 + TTS,等同于用户自己在听音 tab 点了"让 Echo 说一段"按钮。<br><b>Windows 限制</b>:Win10/11 通知不支持 action 按钮(只有 macOS 才支持),所以"今天别再提醒"做成通知底部的小链接。</span>
+  <span><b>点击行为</b>:点击通知 → Echo 主程序打开 → 回声 tab → 自动开始 LLM 文案生成 + TTS,等同于用户自己在回声 tab 点了"让 Echo 说一段"按钮。<br><b>Windows 限制</b>:Win10/11 通知不支持 action 按钮(只有 macOS 才支持),所以"今天别再提醒"做成通知底部的小链接。</span>
 </div>
 
 <!-- ============================================ -->
@@ -726,7 +726,7 @@
   <div class="flow-step">
     <div class="flow-num">6</div>
     <div class="flow-text">
-      <b>用户点击 → 显示主窗口 → 切对话 tab → 自动播放</b>
+      <b>用户点击 → 显示主窗口 → 切絮语 tab → 自动播放</b>
       <small>整个链路用户感知到的就是"通知 → 听到歌"</small>
     </div>
   </div>
@@ -751,7 +751,7 @@
     <div class="case-card-text">"犯困点了。海洋Bo《向云端》给你垫一下,不抢戏。"</div>
   </div>
   <div class="case-card">
-    <div class="case-card-label">傍 晚 16:30 · 邀 请 听 音</div>
+    <div class="case-card-label">傍 晚 16:30 · 邀 请 回 声</div>
     <div class="case-card-text">"今天有点想跟你说说话,你方便吗?"</div>
   </div>
   <div class="case-card">
@@ -776,7 +776,7 @@
 
 <div class="case">
   <div class="case-head">
-    <div class="case-title">在设置页"听音"段下方新增 Care Pings 段</div>
+    <div class="case-title">在设置页"回声"段下方新增 Care Pings 段</div>
     <div class="case-desc">极简三个选项:开关 / 频率 / 全屏不打扰</div>
   </div>
 

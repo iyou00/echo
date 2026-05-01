@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import type { Settings } from '../types/ipc'
-import { getSettings, importPlaylistFromDialog, testLlm, updateSetting, exportData, resetAllData } from './services/settings'
+import { getSettings, importPlaylistFromDialog, testLlm, updateSetting, downloadPlaylistTemplate, exportData, resetAllData } from './services/settings'
 import { StorageUnavailableError } from './utils/secureStorage'
 import { cancel, loadRecent, send } from './services/chat'
 import { answerQuestion, applySignal, getProfileWithQuestions, regeneratePortrait } from './services/taste'
@@ -10,6 +10,7 @@ import { isFavorite, listFavorites, toggleFavorite } from './services/favorites'
 import {
   clearQueue,
   enqueue,
+  finishCurrent,
   getState as getPlaybackState,
   getVolume,
   heartbeat,
@@ -59,10 +60,10 @@ export function registerIpc(): void {
   ipcMain.handle('settings:update', (_event, path: string, value: unknown) => {
     if (path === 'llm.apiKey' && value === '••••••') return maskSettings(getSettings())
     try {
-      const settings = updateSetting(path, value)
-      if (path.startsWith('yinyi.')) rescheduleYinyi()
-      if (path.startsWith('carePings.')) rescheduleCarePings()
-      broadcast('settings:changed', { path, value })
+    const settings = updateSetting(path, value)
+    if (path.startsWith('yinyi.')) rescheduleYinyi()
+    if (path.startsWith('carePings.')) rescheduleCarePings()
+    broadcast('settings:changed', { path, value })
       return maskSettings(settings)
     } catch (error) {
       if (error instanceof StorageUnavailableError) {
@@ -73,6 +74,7 @@ export function registerIpc(): void {
   })
   ipcMain.handle('settings:testLlm', () => testLlm())
   ipcMain.handle('settings:importPlaylist', () => importPlaylistFromDialog())
+  ipcMain.handle('settings:downloadPlaylistTemplate', () => downloadPlaylistTemplate())
   ipcMain.handle('settings:exportData', () => exportData())
   ipcMain.handle('settings:resetData', () => {
     const result = resetAllData()
@@ -114,6 +116,7 @@ export function registerIpc(): void {
   ipcMain.handle('playback:play', (_event, track, options) => play(track, options))
   ipcMain.handle('playback:enqueue', (_event, track) => enqueue(track))
   ipcMain.handle('playback:next', () => next())
+  ipcMain.handle('playback:finishCurrent', () => finishCurrent())
   ipcMain.handle('playback:prev', () => prev())
   ipcMain.handle('playback:pause', () => pause())
   ipcMain.handle('playback:resume', () => resume())

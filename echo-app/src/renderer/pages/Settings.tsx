@@ -1,8 +1,9 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
-import { Upload } from 'lucide-react'
+import { Download, Upload } from 'lucide-react'
 import type { CareFrequency, EchoApi, ImportProgressPayload, NeteaseLoginState, NeteasePlaylistSummary, NeteaseQrLogin, ServiceHealth, Settings, Track } from '../../types/ipc'
 import type { AppPageProps } from '../../App'
 import { EmptyState, Section } from '../components'
+import { pageLabels } from '../labels'
 
 interface SettingsPageProps extends AppPageProps {
   echo: EchoApi
@@ -73,6 +74,8 @@ export function SettingsPage({
   const [importStatus, setImportStatus] = useState('')
   const [importState, setImportState] = useState<'idle' | 'importing' | 'ok' | 'fail'>('idle')
   const [importProgress, setImportProgress] = useState<ImportProgressPayload | null>(null)
+  const [templateStatus, setTemplateStatus] = useState('')
+  const [templateState, setTemplateState] = useState<'idle' | 'working' | 'ok' | 'fail'>('idle')
   const [neteaseState, setNeteaseState] = useState<NeteaseLoginState>({ loggedIn: false, message: '正在检查网易云状态...' })
   const [neteaseQr, setNeteaseQr] = useState<NeteaseQrLogin | null>(null)
   const [neteaseQrStatus, setNeteaseQrStatus] = useState('')
@@ -270,7 +273,7 @@ export function SettingsPage({
   async function importPlaylist() {
     setBusy(true)
     setImportState('importing')
-    setImportStatus('正在读取 JSON、写入本地数据库，并生成你的初始画像...')
+    setImportStatus('正在读取通用歌单 JSON、写入本地数据库，并生成你的初始画像...')
     setImportProgress(null)
     try {
       const result = await echo.settings.importPlaylist()
@@ -284,6 +287,19 @@ export function SettingsPage({
       setImportStatus(error instanceof Error ? error.message : '导入失败')
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function downloadTemplate() {
+    setTemplateState('working')
+    setTemplateStatus('正在准备模板...')
+    try {
+      const result = await echo.settings.downloadPlaylistTemplate()
+      setTemplateState(result.ok ? 'ok' : 'idle')
+      setTemplateStatus(result.message)
+    } catch (error) {
+      setTemplateState('fail')
+      setTemplateStatus(error instanceof Error ? error.message : '模板保存失败')
     }
   }
 
@@ -613,10 +629,10 @@ export function SettingsPage({
             )}
           </Section>
 
-          <Section label="音 忆">
+          <Section label="风 信">
             <label className="field">
               <div>
-                <div className="field-label">每天什么时候写音忆</div>
+                <div className="field-label">每天什么时候写{pageLabels.yinyi}</div>
                 <div className="field-hint">Echo 在这个时间点回顾今天的你。</div>
               </div>
               <input className="time-input" type="time" value={generateAt} onChange={(event) => updateYinyiGenerateAt(event.target.value)} />
@@ -624,7 +640,7 @@ export function SettingsPage({
 
             <label className="toggle-row">
               <div className="toggle-text">
-                <div className="t1">打开音忆时随机翻一篇过去</div>
+                <div className="t1">打开{pageLabels.yinyi}时随机翻一篇过去</div>
                 <div className="t2">像偶然翻到旧日记本的某一页。</div>
               </div>
               <input type="checkbox" checked={openWithRandom} onChange={(event) => updateYinyiOpenWithRandom(event.target.checked)} />
@@ -637,10 +653,10 @@ export function SettingsPage({
             )}
           </Section>
 
-          <Section label="对 话 与 品 味">
+          <Section label="絮 语 与 品 味">
             <label className="toggle-row">
               <div className="toggle-text">
-                <div className="t1">启动时恢复上次对话</div>
+                <div className="t1">启动时恢复上次{pageLabels.chat}</div>
                 <div className="t2">影响下次真正启动；最小化到托盘会保留当前界面。</div>
               </div>
               <input type="checkbox" checked={restoreOnStart} onChange={(event) => updateRestoreOnStart(event.target.checked)} />
@@ -654,14 +670,26 @@ export function SettingsPage({
 
             <div className="data-line">
               <div>
-                导入歌单
-                <small>从网易云导出的 JSON 文件。</small>
+                从文件导入
+                <small>适合其他音乐平台或手工整理的通用歌单 JSON。</small>
               </div>
-              <button className="btn sec" type="button" onClick={importPlaylist} disabled={busy}>
-                <Upload size={15} />
-                {importState === 'importing' ? '导入中...' : '选择文件'}
-              </button>
+              <div className="inline-actions">
+                <button className="btn sec" type="button" onClick={downloadTemplate} disabled={templateState === 'working'}>
+                  <Download size={15} />
+                  {templateState === 'working' ? '保存中...' : '下载模板'}
+                </button>
+                <button className="btn sec" type="button" onClick={importPlaylist} disabled={busy}>
+                  <Upload size={15} />
+                  {importState === 'importing' ? '导入中...' : '选择文件'}
+                </button>
+              </div>
             </div>
+            {templateStatus && (
+              <div className={`status-ind ${templateState === 'ok' ? 'ok' : templateState === 'fail' ? 'err' : 'idle'}`}>
+                <span className="status-dot" />
+                {templateStatus}
+              </div>
+            )}
             {importStatus && (
               <div className={`status-ind ${importState === 'ok' ? 'ok' : importState === 'fail' ? 'err' : 'idle'}`}>
                 <span className="status-dot" />
@@ -754,7 +782,7 @@ export function SettingsPage({
             )}
           </Section>
 
-          <Section label="听 音 · v 0 . 3">
+          <Section label="回 声 · v 0 . 3">
             <label className="field">
               <div className="field-label">所在城市</div>
               <div className="field-hint">用于天气开场。留空时 Echo 会跳过天气。</div>
@@ -878,7 +906,7 @@ export function SettingsPage({
               </div>
             </div>
 
-            <p className="care-copy">Echo 会在合适的时候轻轻出现一下。你点开后，它会带你回到对话、播放推荐，或进入听音。</p>
+            <p className="care-copy">Echo 会在合适的时候轻轻出现一下。你点开后，它会带你回到{pageLabels.chat}、播放推荐，或进入{pageLabels.voice}。</p>
             <button className="btn sec care-test-btn" type="button" onClick={testCarePing} disabled={busy}>
               立刻测试一条
             </button>
@@ -915,7 +943,7 @@ export function SettingsPage({
           <div className="close-dialog settings-reset-dialog">
             <div className="close-dialog-kicker">E C H O · R E S E T</div>
             <h2 id="settings-reset-title">要把 Echo 清空吗？</h2>
-            <p>这会清掉本地对话、音忆、画像、收藏、导入歌单和网易云登录状态。清空后，Echo 会回到第一次打开时的样子。</p>
+            <p>这会清掉本地{pageLabels.chat}、{pageLabels.yinyi}、画像、收藏、导入歌单和网易云登录状态。清空后，Echo 会回到第一次打开时的样子。</p>
             <label className="close-dialog-check">
               <input
                 type="checkbox"

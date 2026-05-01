@@ -31,12 +31,12 @@
 
 预设只是方便点击填入,用户也可手动填任何模型名。
 
-### 2.2 音忆
+### 2.2 风信
 
 | 字段 | 类型 | 默认 | 说明 |
 |---|---|---|---|
-| `yinyi.generateAt` | string `"HH:mm"` | `"22:00"` | 音忆生成时间 |
-| `yinyi.openWithRandom` | boolean | `false` | 打开音忆页时:false = 看今天;true = 看随机过去一篇 |
+| `yinyi.generateAt` | string `"HH:mm"` | `"22:00"` | 风信生成时间 |
+| `yinyi.openWithRandom` | boolean | `false` | 打开风信页时:false = 看今天;true = 看随机过去一篇 |
 
 ### 2.3 对话与品味
 
@@ -53,7 +53,7 @@
 >
 > 用户对自己品味档案有**完整控制权**。三个修改路径,从轻到重:
 >
-> 1. **自然演化(推荐)** —— 在主对话里告诉 Echo:"我最近不太爱 X 了 / 新喜欢上 Y"。Echo 后台调用 `taste.ts:applyUserCorrection()` 更新对应字段。**这是最自然的方式,Echo 在角色里**。
+> 1. **自然演化(推荐)** —— 在絮语里告诉 Echo:"我最近不太爱 X 了 / 新喜欢上 Y"。Echo 后台调用 `taste.ts:applyUserCorrection()` 更新对应字段。**这是最自然的方式,Echo 在角色里**。
 > 2. **回答 Echo 主页的提问** —— 「Echo 问你」区每个问题点回答后,直接写回档案。
 > 3. **手动编辑文件** —— 高级用户可直接编辑 `data/artist-genre-map.json` 或者通过"导出 → 改 → 导入"修改完整 TasteProfile JSON。
 > 4. **核选项** —— "重新初始化",清空一切重来。
@@ -159,7 +159,7 @@ async function testLlmConnection(): Promise<TestResult> {
 
 ## 7 · 状态机 · 首次启动引导
 
-新用户首次打开 app,`settings.llm.*` 都为空 → **不能直接进主对话**。
+新用户首次打开 app,`settings.llm.*` 都为空 → **不能直接进絮语**。
 
 引导流程:
 ```
@@ -211,7 +211,7 @@ settings.importPlaylist(filePath): Promise<{ trackCount: number }>
 
 ### v0.1 必须:
 - [x] LLM 配置 + 测试连接
-- [x] 音忆生成时间
+- [x] 风信生成时间
 - [x] 启动恢复对话开关
 - [x] 重新初始化品味
 - [x] 导入歌单(JSON)
@@ -220,7 +220,7 @@ settings.importPlaylist(filePath): Promise<{ trackCount: number }>
 
 ### v0.2:
 - [ ] 网易云登录 / 退出
-- [ ] 音忆"打开时随机翻一页"开关
+- [ ] 风信"打开时随机翻一页"开关
 
 ### v0.3+:
 - [ ] 主题切换(light / dark / system)
@@ -234,9 +234,9 @@ settings.importPlaylist(filePath): Promise<{ trackCount: number }>
 |---|---|
 | 全新安装,启动 | 引导页要求填 LLM |
 | 填错 baseUrl 后测试 | 红色错误,不阻止保存,不进主页 |
-| 测试通过后返回主页 | 主对话可用 |
-| 改音忆时间从 22:00 → 08:00,等到第二天早上 8 点 | 音忆按时生成 |
-| 把开关"打开时随机翻一页"打开,进音忆 | 看到的不是今天 |
+| 测试通过后返回主页 | 絮语可用 |
+| 改风信时间从 22:00 → 08:00,等到第二天早上 8 点 | 风信按时生成 |
+| 把开关"打开时随机翻一页"打开,进风信 | 看到的不是今天 |
 | 点"清空所有数据" → 三次确认 | 数据库清空 + 重启回到引导页 |
 | 改 model 后没测试连接 | 下次发对话失败,Echo 说"我连不上自己脑子" |
 

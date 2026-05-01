@@ -8,7 +8,11 @@ import { completeChat, LlmError } from '../llm/client'
 import { recordHealth } from './health'
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10)
+  const date = new Date()
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 function countWords(content: string): number {
@@ -50,7 +54,7 @@ function absentEntry(date: string): YinyiEntry {
 function failedEntry(date: string, message: string): YinyiEntry {
   return {
     date,
-    content: '那天的音忆我没写好。你想看的时候,我可以重新写一次。',
+    content: '那天的风信我没写好。你想看的时候,我可以重新写一次。',
     style: 'dialogue',
     meta: { status: 'failed', error: message, tracks: [] },
   }
@@ -74,7 +78,7 @@ export async function generateYinyi(date = todayIso()): Promise<YinyiEntry> {
         ...messages,
         {
           role: 'user',
-          content: '上一版没有通过 v4 checklist。请重写:必须有“我看到/我听到/我注意到/我看你”,必须有“我不知道/我说不准/我猜不到/我没问”,必须有“我想到/我意识到/我才发现/这让我想到”。自然分段即可,不用强制“· · ·”。只输出音忆正文。',
+          content: '上一版没有通过 v4 checklist。请重写:必须有“我看到/我听到/我注意到/我看你”,必须有“我不知道/我说不准/我猜不到/我没问”,必须有“我想到/我意识到/我才发现/这让我想到”。自然分段即可,不用强制“· · ·”。只输出风信正文。',
         },
       ], { temperature: 0.85 }))
       if (retry) content = retry
@@ -95,7 +99,7 @@ export async function generateYinyi(date = todayIso()): Promise<YinyiEntry> {
       } as YinyiEntry['meta'],
     })
   } catch (error) {
-    const message = error instanceof LlmError ? error.message : '音忆生成失败'
+    const message = error instanceof LlmError ? error.message : '风信生成失败'
     if (error instanceof LlmError) {
       recordHealth('llm', error.kind === 'auth' || error.kind === 'config' ? 'error' : 'degraded', 'Echo 连不上模型。去设置里检查 API key。', error.message)
     }

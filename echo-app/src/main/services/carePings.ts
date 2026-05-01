@@ -91,6 +91,14 @@ const UNSAFE_BODY_PATTERNS = [
   /我会整理/,
   /最终可用/,
   /以下是/,
+  /合并补偿/,
+  /可发送版本/,
+  /通知对象/,
+  /通知内容/,
+  /最简模板/,
+  /通知格式/,
+  /核心信息/,
+  /关键信息/,
   /#+\s*/,
   /---/,
   /\[[^\]]+\]/,
@@ -101,6 +109,20 @@ function isUnsafeBody(body: string): boolean {
   if (!normalized) return true
   if (normalized.length > 110) return true
   return UNSAFE_BODY_PATTERNS.some((pattern) => pattern.test(normalized))
+}
+
+function fallbackPingBody(type: PingType, track?: Track): string {
+  const hour = new Date().getHours()
+  if (type === 'recommend_track' && track) {
+    return `这会儿我想起${track.artist}的《${track.title}》。点开吧，我放给你听。`
+  }
+  if (type === 'voice_invite') {
+    return '我在回声里留了几句话。你空下来点开，我慢慢说给你听。'
+  }
+  if (hour < 11) return '早上这会儿先慢慢来。事情可以一件件做，我在这儿陪你。'
+  if (hour < 16) return '这个点容易散神。先歇一小会儿，让自己缓过来。'
+  if (hour < 20) return '一天快收尾了。先把肩膀放下来，剩下的慢慢处理。'
+  return '晚上安静下来了。今天到这里也可以，别把自己绷太久。'
 }
 
 async function buildPromptContext(track?: Track) {
@@ -149,25 +171,30 @@ async function writePingBody(type: PingType, track?: Track): Promise<string> {
       : 'prompts/care-ping-casual.md'
   const context = await buildPromptContext(track)
   const user = fillPrompt(readRootFile(promptFile), context)
-  const body = cleanBody(await completeChat(settings, [
-    {
-      role: 'system',
-      content: [
-        '你是 Echo，只写 Windows 系统通知正文。',
-        '这段文字会直接弹到用户桌面上。',
-        '只输出通知正文这一句话或两句短句。',
-        '严禁写成模板、公告、客服回复、写作建议。',
-      ].join('\n'),
-    },
-    { role: 'user', content: `${user}\n\n最近 7 条已经发过的通知，避免重复:\n${context.recentNotifications}\n\n现在输出最终通知正文。` },
-  ], { temperature: 0.86 }), type === 'recommend_track' ? 96 : 72)
-  if (!body || isUnsafeBody(body)) throw new Error('主动通知文案跑偏，已跳过这次发送。')
-  if (track && (!body.includes(track.title) || !body.includes(track.artist))) {
-    const withTrack = `${body} ${track.artist}的《${track.title}》。`
-    if (isUnsafeBody(withTrack)) throw new Error('推歌通知文案跑偏，已跳过这次发送。')
-    return withTrack
+  const fallback = fallbackPingBody(type, track)
+  try {
+    const body = cleanBody(await completeChat(settings, [
+      {
+        role: 'system',
+        content: [
+          '你是 Echo，只写 Windows 系统通知正文。',
+          '这段文字会直接弹到用户桌面上。',
+          '只输出通知正文这一句话或两句短句。',
+          '严禁写成模板、公告、客服回复、写作建议。',
+          '严禁出现“通知”“模板”“请把信息发给我”“可直接发”等办公写作口吻。',
+        ].join('\n'),
+      },
+      { role: 'user', content: `${user}\n\n最近 7 条已经发过的通知，避免重复:\n${context.recentNotifications}\n\n现在输出最终通知正文。` },
+    ], { temperature: 0.86 }), type === 'recommend_track' ? 96 : 72)
+    if (!body || isUnsafeBody(body)) return fallback
+    if (track && (!body.includes(track.title) || !body.includes(track.artist))) {
+      const withTrack = `${body} ${track.artist}的《${track.title}》。`
+      return isUnsafeBody(withTrack) ? fallback : withTrack
+    }
+    return body
+  } catch {
+    return fallback
   }
-  return body
 }
 
 async function pickCareTrack(): Promise<Track | null> {

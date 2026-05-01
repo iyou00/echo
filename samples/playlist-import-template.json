@@ -1,0 +1,36 @@
+{
+  "_说明": {
+    "用途": "这是 Echo 通用歌单导入模板。你可以把网易云、QQ、汽水等音乐、通过https://music.unmeta.cn/，获取歌曲信息，然后在让AI 帮你按照这个模板生成最终json文件。",
+    "必填字段": ["title", "artist"],
+    "选填字段": ["album", "year", "durationMs", "platform", "platformId", "neteaseId", "genres", "moods", "scenes", "notes"],
+    "提示": "没有的信息可以删掉。Echo 会先用 title + artist 识别歌曲，再用选填信息辅助建立你的品味画像。"
+  },
+  "source": "manual",
+  "name": "我的常听歌单",
+  "tracks": [
+    {
+      "title": "一格格",
+      "artist": "卫兰",
+      "album": "Love And Other Things",
+      "year": 2017,
+      "platform": "netease",
+      "platformId": "123456",
+      "neteaseId": "123456",
+      "genres": ["华语流行"],
+      "moods": ["放松", "怀旧"],
+      "scenes": ["夜晚", "独处"],
+      "notes": "晚上常听，情绪比较稳。"
+    },
+    {
+      "title": "Cold",
+      "artist": "Maroon 5 / Future",
+      "album": "Red Pill Blues",
+      "year": 2017,
+      "platform": "spotify",
+      "platformId": "",
+      "genres": ["Pop", "R&B"],
+      "moods": ["轻快", "清醒"],
+      "notes": "适合走路或工作前半段。"
+    }
+  ]
+}

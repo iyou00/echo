@@ -147,7 +147,7 @@ CREATE TABLE conversation_summaries (
 );
 ```
 
-### 表:`yinyi`(音忆日记)
+### 表:`yinyi`(风信日记)
 
 ```sql
 CREATE TABLE yinyi (
@@ -246,7 +246,7 @@ interface Settings {
     lastTestedOk?: boolean;
   };
 
-  // === 音忆 ===
+  // === 风信 ===
   yinyi: {
     generateAt: string;       // "HH:mm" 格式,默认 "22:00"
     openWithRandom: boolean;  // 默认 false:打开看今天;true:看随机过去一篇
@@ -259,10 +259,10 @@ interface Settings {
 
   // === 用户上下文 ===
   user: {
-    city: string;             // 默认空,听音天气开场使用
+    city: string;             // 默认空,回声天气开场使用
   };
 
-  // === 听音 TTS ===
+  // === 回声 TTS ===
   tts: {
     baseUrl: string;          // 默认 "https://tts.wangwangit.com"
     voice: string;            // 默认 "zh-CN-XiaochenNeural"

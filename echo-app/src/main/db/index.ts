@@ -238,6 +238,17 @@ export function initializeDatabase(database = getDb()): void {
     );
     CREATE INDEX IF NOT EXISTS idx_tq_pending ON taste_questions(user_id, status, created_at DESC);
 
+    CREATE TABLE IF NOT EXISTS taste_question_prompts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL DEFAULT 1,
+      question_id INTEGER NOT NULL,
+      conversation_id INTEGER,
+      asked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (question_id) REFERENCES taste_questions(id),
+      FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_tq_prompts_recent ON taste_question_prompts(user_id, asked_at DESC);
+
     CREATE TABLE IF NOT EXISTS settings (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       data_json TEXT NOT NULL,
@@ -261,6 +272,7 @@ export function resetDatabase(): void {
   const database = getDb()
   database.exec(`
     DELETE FROM taste_questions;
+    DELETE FROM taste_question_prompts;
     DELETE FROM playlists_imported;
     DELETE FROM recommendation_cache;
     DELETE FROM track_semantics;

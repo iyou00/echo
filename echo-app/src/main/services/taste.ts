@@ -29,6 +29,18 @@ interface PortraitResponse {
   suggested_questions?: Array<{ kind?: string; content?: string; context?: Record<string, unknown> }>
 }
 
+export class PortraitRegenerationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'PortraitRegenerationError'
+  }
+}
+
+interface RegeneratePortraitOptions {
+  refreshStructured?: boolean
+  fallbackOnError?: boolean
+}
+
 function clamp(value: number): number {
   return Math.max(0, Math.min(1, Number(value.toFixed(2))))
 }
@@ -441,6 +453,11 @@ export async function buildInitialProfile(tracks: Track[]): Promise<TasteProfile
 }
 
 export function refreshStructuredProfile(reason = 'manual'): TasteProfile | null {
+  const next = buildStructuredProfileDraft(reason)
+  return next ? saveTasteProfile(next, next.echo_portrait) : null
+}
+
+function buildStructuredProfileDraft(reason = 'manual'): TasteProfile | null {
   const tracks = getAllImportedTracks()
   const current = getTasteProfile()
   if (!current && tracks.length === 0) return null
@@ -453,20 +470,12 @@ export function refreshStructuredProfile(reason = 'manual'): TasteProfile | null
     refreshReason: reason,
     signalCount: getFeedbackSignalCount(),
   }
-  return saveTasteProfile(next, next.echo_portrait)
+  return next
 }
 
 export function maybeRefreshStructuredProfile(reason = 'signal'): TasteProfile | null {
   const profile = getTasteProfile()
-  const today = new Date().toISOString().slice(0, 10)
-  const lastStructured = profile?.profile_meta?.structuredUpdatedAt?.slice(0, 10)
-  const lastSignalCount = profile?.profile_meta?.signalCount ?? 0
-  const currentSignalCount = getFeedbackSignalCount()
-
   if (!profile) return refreshStructuredProfile(reason)
-  if (lastStructured !== today) return refreshStructuredProfile('daily')
-  if (reason === 'favorited' || reason === 'looped') return refreshStructuredProfile(reason)
-  if (currentSignalCount - lastSignalCount >= 5) return refreshStructuredProfile(reason)
   return profile
 }
 
@@ -477,8 +486,9 @@ export function getProfileWithQuestions(): { profile: TasteProfile | null; quest
   }
 }
 
-export async function regeneratePortrait(): Promise<TasteProfile | null> {
-  const profile = refreshStructuredProfile('portrait') ?? getTasteProfile()
+export async function regeneratePortrait(options: RegeneratePortraitOptions = {}): Promise<TasteProfile | null> {
+  const refreshStructured = options.refreshStructured ?? true
+  const profile = (refreshStructured ? buildStructuredProfileDraft('portrait') : null) ?? getTasteProfile()
   if (!profile) return null
 
   const prompt = readPortraitPrompt()
@@ -503,7 +513,7 @@ export async function regeneratePortrait(): Promise<TasteProfile | null> {
       ])
       parsed = parseJsonObject<PortraitResponse>(retryResponse) ?? parsed
     }
-    if (!parsed?.portrait) return profile
+    if (!parsed?.portrait) throw new PortraitRegenerationError('画像文案生成失败：模型没有返回 portrait。')
 
     const next: TasteProfile = {
       ...profile,
@@ -511,6 +521,8 @@ export async function regeneratePortrait(): Promise<TasteProfile | null> {
       profile_meta: {
         ...(profile.profile_meta ?? {}),
         updatedAt: new Date().toISOString(),
+        structuredUpdatedAt: profile.profile_meta?.structuredUpdatedAt ?? new Date().toISOString(),
+        portraitSignalCount: getFeedbackSignalCount(),
       },
     }
     saveTasteProfile(next, parsed.summary ?? parsed.portrait)
@@ -519,8 +531,12 @@ export async function regeneratePortrait(): Promise<TasteProfile | null> {
     }
     return next
   } catch (error) {
-    if (error instanceof LlmError && error.kind === 'config') return profile
-    return profile
+    if (options.fallbackOnError) return profile
+    if (error instanceof LlmError && error.kind === 'config') {
+      throw new PortraitRegenerationError('模型配置还没准备好，画像文案没有刷新。')
+    }
+    if (error instanceof Error) throw error
+    throw new PortraitRegenerationError('画像文案刷新失败。')
   }
 }
 

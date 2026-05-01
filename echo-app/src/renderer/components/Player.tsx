@@ -2,12 +2,14 @@ import { MouseEvent, PointerEvent, useEffect, useMemo, useRef, useState } from '
 import { Pause, Play } from 'lucide-react'
 import type { EchoApi, PlaybackState, PlaybackStatus, Track } from '../../types/ipc'
 import { WaveBars } from '../components'
+import { pageLabels } from '../labels'
 
 interface PlayerProps {
   echo: EchoApi
   state: PlaybackState
   setState: (state: PlaybackState) => void
   refreshQueue: () => Promise<Track[]>
+  autoPlayNext: boolean
 }
 
 function formatClock(seconds: number) {
@@ -25,10 +27,12 @@ function trackId(track?: Track | null): string {
 // 避免与正在进行的拖拽、或拖拽完瞬间收到的旧心跳互相打架，造成听感上的来回跳。
 const USER_SEEK_QUIET_MS = 1000
 
-export function Player({ echo, state, setState, refreshQueue }: PlayerProps) {
+export function Player({ echo, state, setState, refreshQueue, autoPlayNext }: PlayerProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const loadedTrackRef = useRef('')
   const applyingSeekRef = useRef(false)
+  const endingRef = useRef(false)
+  const completingRef = useRef(false)
   const lastHeartbeatRef = useRef(0)
   const draggingSeekRef = useRef(false)
   const lastUserSeekAtRef = useRef(0)
@@ -42,6 +46,31 @@ export function Player({ echo, state, setState, refreshQueue }: PlayerProps) {
   const activeSegments = Math.round(progressRatio * 30)
   const canPlayPrevious = state.history.length > 0
   const canPlayNext = state.queue.length > 0
+
+  function isNearEnd(audio: HTMLAudioElement | null) {
+    if (!audio || !current) return false
+    const mediaDuration = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : displayDuration
+    if (!mediaDuration || mediaDuration <= 0) return false
+    return audio.ended || audio.currentTime >= mediaDuration - 0.2
+  }
+
+  async function completePlayback() {
+    if (completingRef.current) return
+    completingRef.current = true
+    endingRef.current = true
+    setLocalPlaying(false)
+    try {
+      await sendHeartbeat(true, 'playing')
+      const next = autoPlayNext ? await echo.playback.next() : await echo.playback.finishCurrent()
+      setState(next)
+      await refreshQueue()
+    } finally {
+      window.setTimeout(() => {
+        endingRef.current = false
+        completingRef.current = false
+      }, 300)
+    }
+  }
 
   useEffect(() => {
     if (!window.echo) return undefined
@@ -73,6 +102,8 @@ export function Player({ echo, state, setState, refreshQueue }: PlayerProps) {
       audio.load()
       audio.src = current.playUrl
       audio.load()
+      completingRef.current = false
+      endingRef.current = false
     }
 
     if (state.status === 'loading' || state.status === 'playing') {
@@ -214,26 +245,29 @@ export function Player({ echo, state, setState, refreshQueue }: PlayerProps) {
         }}
         onPause={() => {
           setLocalPlaying(false)
+          if (isNearEnd(audioRef.current)) {
+            completePlayback().catch(() => undefined)
+            return
+          }
+          if (endingRef.current || audioRef.current?.ended) return
           sendHeartbeat(true, 'paused')
         }}
-        onEnded={async () => {
-          setLocalPlaying(false)
-          await sendHeartbeat(true, 'playing')
-          const next = await echo.playback.next()
-          setState(next)
-          await refreshQueue()
-        }}
+        onEnded={() => completePlayback().catch(() => undefined)}
         onError={recoverUrl}
         onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || (current?.durationMs ? current.durationMs / 1000 : 0))}
         onTimeUpdate={(event) => {
           setCurrentTime(event.currentTarget.currentTime)
+          if (isNearEnd(event.currentTarget)) {
+            completePlayback().catch(() => undefined)
+            return
+          }
           sendHeartbeat()
         }}
       />
       <WaveBars active={localPlaying} />
       <div className="player-row">
         <div className="player-copy">
-          <div className="player-title">{current?.title ?? '还没有播放列表'}</div>
+          <div className="player-title">{current?.title ?? `还没有${pageLabels.queue}`}</div>
           <div className="player-artist">{current?.artist ?? '让 Echo 推荐后，这里开始播放'}</div>
         </div>
         <div className="player-controls">

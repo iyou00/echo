@@ -1,6 +1,6 @@
-# Feature · 主对话(Chat)
+# Feature · 絮语(Chat)
 
-> **核心地位**:Echo 的"聊天"是整个产品的中枢神经——它把**人格、记忆、推荐、播放**四件事串起来。其他 feature(音忆、品味档案、语音模式)都是它的延伸。
+> **核心地位**:Echo 的"聊天"是整个产品的中枢神经——它把**人格、记忆、推荐、播放**四件事串起来。其他 feature(风信、品味档案、语音模式)都是它的延伸。
 >
 > **对应 UI**:`design/main-view.html`
 > **对应代码模块**:`src/main/services/chat.ts`、`src/main/llm/*`、`src/main/db/conversations.ts`、`src/renderer/pages/Chat.tsx`
