@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
 import { Send, Square } from 'lucide-react'
-import type { ActiveScene, ChatMessage, EchoApi, PlaybackState, SceneDefinition, SceneKey, TasteProfile, Track } from '../../types/ipc'
+import type { ActiveScene, ChatMessage, EchoApi, PlaybackState, SceneDefinition, SceneKey, ScenePlaybackResult, TasteProfile, Track } from '../../types/ipc'
 import type { AppPageProps } from '../../App'
 import { BrandLogo, EmptyState, SceneRail, TrackCard } from '../components'
 
@@ -16,6 +16,7 @@ interface ChatPageProps extends AppPageProps {
   scenes: SceneDefinition[]
   currentScene: ActiveScene | null
   startScene: (key: SceneKey) => Promise<ActiveScene>
+  playScene: (key: SceneKey) => Promise<ScenePlaybackResult>
   endScene: () => Promise<void>
   autoPlayNext: boolean
   updateAutoPlayNext: (value: boolean) => Promise<void>
@@ -117,7 +118,7 @@ function friendlyChatError(error: unknown) {
   return message || 'Echo 这会儿接不上模型。先去设置里看一眼。'
 }
 
-export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasLlmConfig, profile, refreshQueue, restoreOnStart, scenes, currentScene, startScene, endScene, autoPlayNext, updateAutoPlayNext }: ChatPageProps) {
+export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasLlmConfig, profile, refreshQueue, restoreOnStart, scenes, currentScene, startScene, playScene, endScene, autoPlayNext, updateAutoPlayNext }: ChatPageProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
@@ -419,15 +420,20 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
 
   async function enterScene(key: SceneKey) {
     if (sending || !hasLlmConfig) return
-    const scene = await startScene(key)
     if (!autoPlayNext) await updateAutoPlayNext(true)
-    if (scene.key === 'random') {
+    if (key === 'random') {
+      const scene = await startScene(key)
       setDraft(scene.prompt)
       return
     }
     setDraft('')
-    await echo.playback.clearQueue().then(setPlaybackState).catch(() => undefined)
-    await submitText(scene.prompt)
+    const result = await playScene(key)
+    const sceneMessage = result.message
+    if (sceneMessage) {
+      setMessages((items) => items.some((item) => item.id === sceneMessage.id) ? items : [...items, sceneMessage])
+    }
+    setPlaybackState(result.state)
+    await refreshQueue()
   }
 
   async function recordTrackFeedback(track: Track, action: 'more_like_this' | 'not_right') {

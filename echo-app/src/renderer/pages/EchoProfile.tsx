@@ -27,6 +27,7 @@ export function EchoProfilePage({ echo, navigate, profile, questions, setPlaybac
   const [playingKey, setPlayingKey] = useState('')
   const [status, setStatus] = useState('')
   void questions
+  const portraitUpdatedAt = profile?.profile_meta?.updatedAt ?? profile?.profile_meta?.structuredUpdatedAt
 
   async function regenerate() {
     setBusy(true)
@@ -83,7 +84,7 @@ export function EchoProfilePage({ echo, navigate, profile, questions, setPlaybac
             <Section className="portrait-section">
               <BrandLogo className="avatar-big" size={56} />
               <p className="portrait-text">{profile.echo_portrait}</p>
-              <div className="portrait-sign">— Echo · 写于 {new Date().toLocaleDateString('zh-CN')}</div>
+              <div className="portrait-sign">— Echo · 写于 {displayDate(portraitUpdatedAt)}</div>
               {status && <div className="quiet-line">{status}</div>}
             </Section>
 
@@ -155,7 +156,7 @@ export function EchoProfilePage({ echo, navigate, profile, questions, setPlaybac
             </Section>
 
             <footer className="page-foot">
-              画像上次更新 · {displayDate(profile.profile_meta?.updatedAt ?? profile.profile_meta?.structuredUpdatedAt)} · 结构刷新 {displayDate(profile.profile_meta?.structuredUpdatedAt)}
+              画像上次更新 · {displayDate(portraitUpdatedAt)} · 结构刷新 {displayDate(profile.profile_meta?.structuredUpdatedAt)}
             </footer>
           </>
         )}

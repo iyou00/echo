@@ -23,6 +23,7 @@ export interface Track {
   sceneLabel?: string
   sceneLine?: string
   sceneSessionId?: number
+  sourceContext?: 'chat' | 'voice' | 'scene' | 'queue' | 'favorite' | 'history' | 'care'
 }
 
 export type PlaybackStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'error'
@@ -100,6 +101,17 @@ export interface SceneSessionSummary {
   expiresAt: string
   status: 'active' | 'ended' | 'expired'
   durationMinutes: number
+}
+
+export interface ScenePlaybackResult {
+  scene: ActiveScene
+  tracks: Track[]
+  state: PlaybackState
+  message?: ChatMessage
+}
+
+export interface ScenePlaybackOptions {
+  appendChatMessage?: boolean
 }
 
 export interface SemanticSummary {
@@ -370,6 +382,7 @@ export interface EchoApi {
     definitions(): Promise<SceneDefinition[]>
     getCurrent(): Promise<ActiveScene | null>
     start(key: SceneKey): Promise<ActiveScene>
+    play(key: SceneKey, options?: ScenePlaybackOptions): Promise<ScenePlaybackResult>
     end(): Promise<ActiveScene | null>
     today(): Promise<SceneSessionSummary[]>
   }

@@ -3,6 +3,7 @@ import type { IntentOverride } from './recommendation'
 import { getDb } from '../db'
 
 const SCENE_TTL_MS = 2 * 60 * 60 * 1000
+const sceneListeners = new Set<(scene: ActiveScene | null) => void>()
 
 export const sceneDefinitions: SceneDefinition[] = [
   {
@@ -150,6 +151,15 @@ function rowToScene(row: {
   }
 }
 
+function emitScene(scene: ActiveScene | null): void {
+  for (const listener of Array.from(sceneListeners)) listener(scene)
+}
+
+export function onSceneChanged(listener: (scene: ActiveScene | null) => void): () => void {
+  sceneListeners.add(listener)
+  return () => sceneListeners.delete(listener)
+}
+
 function expireOverdueScenes(): void {
   cleanupLegacyScenes()
   getDb()
@@ -208,7 +218,9 @@ export function startScene(key: SceneKey): ActiveScene {
       WHERE id = ?
     `)
     .get(Number(result.lastInsertRowid)) as Parameters<typeof rowToScene>[0]
-  return rowToScene(row)
+  const scene = rowToScene(row)
+  emitScene(scene)
+  return scene
 }
 
 export function endCurrentScene(): ActiveScene | null {
@@ -223,7 +235,9 @@ export function endCurrentScene(): ActiveScene | null {
       WHERE id = ?
     `)
     .run(current.id)
-  return { ...current, status: 'ended', endedAt: new Date().toISOString() }
+  const ended = { ...current, status: 'ended' as const, endedAt: new Date().toISOString() }
+  emitScene(null)
+  return ended
 }
 
 function durationMinutes(startedAt: string, endedAt?: string, expiresAt?: string): number {

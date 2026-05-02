@@ -68,6 +68,7 @@ const echoApi: EchoApi = {
     definitions: () => ipcRenderer.invoke('scene:definitions'),
     getCurrent: () => ipcRenderer.invoke('scene:getCurrent'),
     start: (key) => ipcRenderer.invoke('scene:start', key),
+    play: (key, options) => ipcRenderer.invoke('scene:play', key, options),
     end: () => ipcRenderer.invoke('scene:end'),
     today: () => ipcRenderer.invoke('scene:today'),
   },

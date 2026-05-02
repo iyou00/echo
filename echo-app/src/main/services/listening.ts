@@ -1,6 +1,6 @@
 import type { Track } from '../../types/ipc'
 import { loadRecentConversations } from '../db/conversations'
-import { appendRecommendedTracks } from '../db/tracks'
+import { appendRecommendedTracks, loadListenedTracksSince, loadRecentRecommendedTracks } from '../db/tracks'
 import { getAllImportedTracks } from '../db/playlists'
 import { getTasteProfile } from '../db/taste'
 import { getSettings } from '../db/settings'
@@ -25,12 +25,48 @@ function trackKey(track: Track): string {
   return String(track.neteaseId ?? track.id ?? `${track.title}::${track.artist}`).toLowerCase()
 }
 
+function nameTrackKey(track: Track): string {
+  return `name:${compactText(track.title)}::${compactText(track.artist)}`
+}
+
+function trackIdentityKeys(track: Track): string[] {
+  const keys = new Set<string>()
+  const neteaseId = String(track.neteaseId ?? '').trim()
+  const id = String(track.id ?? '').trim()
+  if (neteaseId) keys.add(`netease:${neteaseId}`)
+  if (id) keys.add(`id:${id}`)
+  keys.add(nameTrackKey(track))
+  keys.add(trackKey(track))
+  return Array.from(keys).filter(Boolean)
+}
+
+function trackIdentitySet(tracks: Track[]): Set<string> {
+  const keys = new Set<string>()
+  for (const track of tracks) {
+    for (const key of trackIdentityKeys(track)) keys.add(key)
+  }
+  return keys
+}
+
+function hasTrackIdentity(keys: Set<string>, track: Track): boolean {
+  return trackIdentityKeys(track).some((key) => keys.has(key))
+}
+
+function recentBlockedKeys(): Set<string> {
+  const keys = trackIdentitySet([
+    ...loadRecentRecommendedTracks(120),
+    ...loadListenedTracksSince(24, 500),
+  ])
+  for (const key of recentTrackKeys) keys.add(key)
+  return keys
+}
+
 function rememberScenario(text: string, track: Track | null) {
   recentScenarios.unshift(text)
   recentScenarios.splice(8)
   if (track) {
-    recentTrackKeys.unshift(trackKey(track))
-    recentTrackKeys.splice(12)
+    recentTrackKeys.unshift(...trackIdentityKeys(track))
+    recentTrackKeys.splice(36)
   }
 }
 
@@ -138,15 +174,18 @@ function fallbackText(track: Track | null): string {
 
 async function getFallbackCandidates(): Promise<Track[]> {
   const imported = getAllImportedTracks()
-  const fresh = imported.filter((track) => !recentTrackKeys.includes(trackKey(track)))
-  const pool = fresh.length >= 8 ? fresh : imported
+  const blocked = recentBlockedKeys()
+  const fresh = imported.filter((track) => !hasTrackIdentity(blocked, track))
+  const pool = fresh.length > 0 ? fresh : imported
   const candidates = shuffled(pool).slice(0, 24)
   return filterPlayableTracks(candidates, 5)
 }
 
 async function getCandidates(): Promise<Track[]> {
+  const blocked = recentBlockedKeys()
   const fromNetease = await recommendFromNetease('回声里随机给我一首适合现在听的歌', undefined, { ignoreScene: true }).catch(() => [])
-  if (fromNetease.length > 0) return fromNetease.filter((track) => !recentTrackKeys.includes(trackKey(track))).slice(0, 5)
+  const fresh = fromNetease.filter((track) => !hasTrackIdentity(blocked, track))
+  if (fresh.length > 0) return fresh.slice(0, 5)
   return getFallbackCandidates()
 }
 
@@ -249,10 +288,12 @@ export async function generateListeningSegment(): Promise<{ text: string; track:
   const audio = await synthesize(text)
   rememberScenario(text, track)
   if (track) {
-    appendRecommendedTracks([{
+    track = {
       ...track,
+      sourceContext: 'voice',
       reason: track.reason ?? '回声里 Echo 给你接上的这首。',
-    }])
+    }
+    appendRecommendedTracks([track])
   }
   if (audio.ok && audio.audioUrl) {
     return { text, track, audioUrl: audio.audioUrl, generatedAt }

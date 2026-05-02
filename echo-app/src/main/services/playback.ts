@@ -17,6 +17,7 @@ const state: PlaybackState = {
   history: [],
 }
 const loopCounts = new Map<string, { count: number; firstAt: number }>()
+const stateListeners = new Set<(state: PlaybackState) => void>()
 
 type InternalPlaybackPlayOptions = PlaybackPlayOptions & {
   pushHistory?: boolean
@@ -41,7 +42,13 @@ function broadcast(channel: string, payload: unknown): void {
 function emitState(): PlaybackState {
   const next = cloneState()
   broadcast('playback:state-changed', next)
+  for (const listener of Array.from(stateListeners)) listener(next)
   return next
+}
+
+export function onPlaybackStateChanged(listener: (state: PlaybackState) => void): () => void {
+  stateListeners.add(listener)
+  return () => stateListeners.delete(listener)
 }
 
 function isUrlStale(track: Track): boolean {

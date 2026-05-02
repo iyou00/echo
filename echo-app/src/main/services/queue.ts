@@ -36,7 +36,7 @@ export function markQueueStatus(track: Track, status: NonNullable<Track['queueSt
   if (status === 'playing') {
     for (const item of getQueue()) {
       if (item.queueStatus === 'playing' && trackKey(item) !== trackKey(track)) {
-        updateRecommendedTrackStatus(item, 'skipped')
+        updateRecommendedTrackStatus(item, 'pending')
       }
     }
   }

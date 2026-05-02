@@ -40,6 +40,7 @@ import { checkServiceHealth, getServiceHealth } from './services/health'
 import { buildForImportedTracks, getSummary as getSemanticSummary } from './services/semantics'
 import { recommendFromNetease } from './services/recommendation'
 import { endCurrentScene, getCurrentScene, listSceneDefinitions, listTodaySceneSessions, startScene } from './services/scene'
+import { startScenePlayback } from './services/scenePlayback'
 
 function broadcast(channel: string, payload: unknown): void {
   for (const window of BrowserWindow.getAllWindows()) {
@@ -115,6 +116,7 @@ export function registerIpc(): void {
   ipcMain.handle('scene:definitions', () => listSceneDefinitions())
   ipcMain.handle('scene:getCurrent', () => getCurrentScene())
   ipcMain.handle('scene:start', (_event, key) => startScene(key))
+  ipcMain.handle('scene:play', (_event, key, options) => startScenePlayback(key, options))
   ipcMain.handle('scene:end', () => endCurrentScene())
   ipcMain.handle('scene:today', () => listTodaySceneSessions())
   ipcMain.handle('semantics:buildForImportedTracks', () => buildForImportedTracks())

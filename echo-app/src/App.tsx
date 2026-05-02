@@ -31,6 +31,7 @@ function App() {
   const [careMuteToast, setCareMuteToast] = useState(false)
   const [careMuteCountdown, setCareMuteCountdown] = useState(5)
   const [voiceAutoStartToken, setVoiceAutoStartToken] = useState(0)
+  const [voiceContinuous, setVoiceContinuousState] = useState(() => localStorage.getItem('echo:voiceContinuous') === '1')
   const [closeDialogOpen, setCloseDialogOpen] = useState(false)
   const [rememberCloseChoice, setRememberCloseChoice] = useState(false)
   const [latestYinyiDate, setLatestYinyiDate] = useState('')
@@ -205,10 +206,23 @@ function App() {
     setSettings(next)
   }
 
+  function setVoiceContinuous(value: boolean) {
+    setVoiceContinuousState(value)
+    localStorage.setItem('echo:voiceContinuous', value ? '1' : '0')
+  }
+
   async function startScene(key: SceneKey) {
     const next = await echo.scene.start(key)
     setCurrentScene(next)
     return next
+  }
+
+  async function playScene(key: SceneKey) {
+    const result = await echo.scene.play(key, { appendChatMessage: true })
+    setCurrentScene(result.scene)
+    setPlaybackState(result.state)
+    await refreshQueue()
+    return result
   }
 
   async function endScene() {
@@ -325,6 +339,7 @@ function App() {
               scenes={sceneDefinitions}
               currentScene={currentScene}
               startScene={startScene}
+              playScene={playScene}
               endScene={endScene}
               autoPlayNext={settings?.playback.autoPlayNext ?? true}
               updateAutoPlayNext={updateAutoPlayNext}
@@ -347,6 +362,8 @@ function App() {
               refreshQueue={refreshQueue}
               autoStartToken={voiceAutoStartToken}
               isActive={page === 'voice'}
+              voiceContinuous={voiceContinuous}
+              setVoiceContinuous={setVoiceContinuous}
             />
           </div>
           <div className="shell-page" style={{ display: page === 'queue' ? 'flex' : 'none' }}>
@@ -393,6 +410,11 @@ function App() {
             setState={setPlaybackState}
             refreshQueue={refreshQueue}
             autoPlayNext={settings?.playback.autoPlayNext ?? true}
+            voiceContinuous={voiceContinuous}
+            onVoiceTrackEnded={() => {
+              setPage('voice')
+              setVoiceAutoStartToken((value) => value + 1)
+            }}
           />
         </div>
         {closeDialogOpen && (

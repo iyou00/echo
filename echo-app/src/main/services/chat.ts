@@ -14,6 +14,7 @@ import {
   appendFollowUpQuestion,
   capturePendingQuestionAnswer,
   generateDynamicTasteQuestions,
+  type PendingQuestionReplyCapture,
   pickTasteFollowUpQuestion,
   recordFollowUpQuestionAsked,
 } from './tasteQuestionScheduler'
@@ -225,6 +226,65 @@ async function inferTasteSignal(text: string): Promise<void> {
   }
 }
 
+function pendingAnswerFallback(capture: PendingQuestionReplyCapture): string {
+  const title = typeof capture.question?.context?.title === 'string' ? capture.question.context.title.trim() : ''
+  const artist = typeof capture.question?.context?.artist === 'string' ? capture.question.context.artist.trim() : ''
+  const song = title ? `《${title}》` : '刚才那首'
+  const focus = capture.focus || '整体感觉'
+  if (capture.polarity === 'negative') {
+    return `懂了，${song}这次没贴住你要的${focus}。我会把这个方向收一收，下次别再沿着它硬走。`
+  }
+  if (capture.polarity === 'mixed') {
+    return `懂了，${song}${artist ? `这版${artist}` : ''}有一部分是对的，主要落在${focus}上。我先把这个细节记住。`
+  }
+  return `懂了，${song}${artist ? `这首${artist}` : ''}算挑对了，打中的是${focus}。我会把这个方向记住，先让它继续放着。`
+}
+
+async function streamPendingAnswerReply(
+  userText: string,
+  capture: PendingQuestionReplyCapture,
+  active: ActiveChat,
+  settings: ReturnType<typeof getSettings>,
+  sender?: WebContents,
+): Promise<string> {
+  const fallback = pendingAnswerFallback(capture)
+  let content = ''
+  try {
+    const title = typeof capture.question?.context?.title === 'string' ? capture.question.context.title.trim() : ''
+    const artist = typeof capture.question?.context?.artist === 'string' ? capture.question.context.artist.trim() : ''
+    for await (const chunk of streamChat(settings, [
+      {
+        role: 'system',
+        content: `你是 Echo。用户正在回答你刚才的追问。
+
+你要做的事:
+1. 只回应这次偏好确认。
+2. 不推荐新歌,不换歌,不输出歌曲卡片。
+3. 把用户说的偏好自然接住,语气像朋友。
+4. 40-90 个中文字。
+
+刚才追问:${capture.question?.content ?? ''}
+关联歌曲:${artist || '未知艺人'} / ${title || '刚才那首'}
+判断:${capture.polarity ?? 'neutral'}
+焦点:${capture.focus || '未明确'}`,
+      },
+      { role: 'user', content: userText },
+    ])) {
+      if (active.canceled) break
+      content += chunk.content
+      sender?.send('chat:stream:chunk', chunk.content)
+    }
+    return content.trim() || fallback
+  } catch (error) {
+    if (error instanceof LlmError) {
+      recordHealth('llm', error.kind === 'auth' || error.kind === 'config' ? 'error' : 'degraded', 'Echo 连不上模型。去设置里检查 API key。', error.message)
+    }
+    if (content.trim()) return content.trim()
+    sender?.send('chat:stream:chunk', fallback)
+    return fallback
+  }
+}
+
 /**
  * 取最近两轮对话拼成短上下文，给意图解析参考（"我累了"等延续性表达用得上）。
  */
@@ -280,13 +340,25 @@ export async function send(text: string, sender?: WebContents): Promise<SendChat
 
   appendConversation('user', trimmed)
   await inferTasteSignal(trimmed)
-  const answeredFollowUpThisTurn = await capturePendingQuestionAnswer(trimmed)
+  const pendingReply = await capturePendingQuestionAnswer(trimmed)
 
   const active: ActiveChat = { canceled: false }
   activeChats.add(active)
   const settings = getSettings()
+  if (pendingReply.action === 'answer_only') {
+    const started = Date.now()
+    const content = await streamPendingAnswerReply(trimmed, pendingReply, active, settings, sender)
+    activeChats.delete(active)
+    const message = appendConversation('assistant', content.trim(), [])
+    sender?.send('chat:stream:end', { message, tracks: [], durationMs: Date.now() - started })
+    return { message, tracks: [] }
+  }
+
+  const recommendationQuery = pendingReply.action === 'extend_recommendation' && pendingReply.recommendationText
+    ? pendingReply.recommendationText
+    : trimmed
   const requested = parseRequestedTrackCount(trimmed)
-  const { candidates, authRequired, canceled: candidatesCanceled } = await fetchRecommendationCandidates(trimmed, active)
+  const { candidates, authRequired, canceled: candidatesCanceled } = await fetchRecommendationCandidates(recommendationQuery, active)
   if (candidatesCanceled || active.canceled) {
     activeChats.delete(active)
     const message = appendConversation('assistant', '行,我先停在这里。')
@@ -300,7 +372,7 @@ export async function send(text: string, sender?: WebContents): Promise<SendChat
 
   try {
     generateDynamicTasteQuestions(trimmed, candidates)
-    followUpQuestion = answeredFollowUpThisTurn ? null : pickTasteFollowUpQuestion(trimmed, candidates)
+    followUpQuestion = pendingReply.action !== 'none' ? null : pickTasteFollowUpQuestion(trimmed, candidates)
     const messages = buildChatContext(trimmed, {
       recommendationCandidates: candidates,
       neteaseAuthRequired: authRequired,

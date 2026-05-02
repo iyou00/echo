@@ -10,6 +10,8 @@ interface PlayerProps {
   setState: (state: PlaybackState) => void
   refreshQueue: () => Promise<Track[]>
   autoPlayNext: boolean
+  voiceContinuous?: boolean
+  onVoiceTrackEnded?: () => void
 }
 
 function formatClock(seconds: number) {
@@ -27,7 +29,7 @@ function trackId(track?: Track | null): string {
 // 避免与正在进行的拖拽、或拖拽完瞬间收到的旧心跳互相打架，造成听感上的来回跳。
 const USER_SEEK_QUIET_MS = 1000
 
-export function Player({ echo, state, setState, refreshQueue, autoPlayNext }: PlayerProps) {
+export function Player({ echo, state, setState, refreshQueue, autoPlayNext, voiceContinuous = false, onVoiceTrackEnded }: PlayerProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const loadedTrackRef = useRef('')
   const applyingSeekRef = useRef(false)
@@ -56,14 +58,16 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext }: Pl
 
   async function completePlayback() {
     if (completingRef.current) return
+    const shouldContinueVoice = Boolean(autoPlayNext && voiceContinuous && current?.sourceContext === 'voice')
     completingRef.current = true
     endingRef.current = true
     setLocalPlaying(false)
     try {
       await sendHeartbeat(true, 'playing')
-      const next = autoPlayNext ? await echo.playback.next() : await echo.playback.finishCurrent()
+      const next = shouldContinueVoice ? await echo.playback.finishCurrent() : autoPlayNext ? await echo.playback.next() : await echo.playback.finishCurrent()
       setState(next)
       await refreshQueue()
+      if (shouldContinueVoice) onVoiceTrackEnded?.()
     } finally {
       window.setTimeout(() => {
         endingRef.current = false

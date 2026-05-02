@@ -473,6 +473,31 @@ function trackKey(track: Track): string {
   return semanticTrackKey(track)
 }
 
+function trackIdentityKeys(track: Track): string[] {
+  const keys = new Set<string>()
+  const neteaseId = String(track.neteaseId ?? '').trim()
+  const id = String(track.id ?? '').trim()
+  const title = normalizeText(track.title)
+  const artist = normalizeText(track.artist)
+  if (neteaseId) keys.add(`netease:${neteaseId}`)
+  if (id) keys.add(`id:${id}`)
+  if (title && artist) keys.add(`name:${title}::${artist}`)
+  keys.add(trackKey(track))
+  return Array.from(keys)
+}
+
+function trackIdentitySet(tracks: Track[]): Set<string> {
+  const keys = new Set<string>()
+  for (const track of tracks) {
+    for (const key of trackIdentityKeys(track)) keys.add(key)
+  }
+  return keys
+}
+
+function hasTrackIdentity(keys: Set<string>, track: Track): boolean {
+  return trackIdentityKeys(track).some((key) => keys.has(key))
+}
+
 function uniqueTracks(tracks: Track[]): Track[] {
   const seen = new Set<string>()
   const result: Track[] = []
@@ -736,7 +761,7 @@ function genericDiscoveryScore(track: Track, recentSevenDayKeys: Set<string>, me
   if (track.recommendSource === 'style') score += 0.9
   if (track.recommendSource === 'search') score += 0.4
   score += directionMemoryScore(track, semantic, memory)
-  if (recentSevenDayKeys.has(trackKey(track))) score -= 8
+  if (hasTrackIdentity(recentSevenDayKeys, track)) score -= 8
   return score
 }
 
@@ -754,16 +779,16 @@ function withGenericReason(track: Track, index: number): Track {
 async function recommendGenericDiscovery(intent: RecommendationIntent): Promise<Track[]> {
   const candidates = await fetchGenericDiscoveryCandidates(intent)
   const memory = buildDirectionMemory()
-  const lastDayKeys = new Set(loadListenedTracksSince(24, 400).map(trackKey))
-  const lastSevenDayKeys = new Set(loadListenedTracksSince(24 * 7, 800).map(trackKey))
+  const lastDayKeys = trackIdentitySet(loadListenedTracksSince(24, 400))
+  const lastSevenDayKeys = trackIdentitySet(loadListenedTracksSince(24 * 7, 800))
   const enriched = uniqueTracks(candidates.map((track) => ({ ...track, semantic: semanticForCandidate(track) })))
     .map((track) => ({ track, score: genericDiscoveryScore(track, lastSevenDayKeys, memory) }))
     .sort((a, b) => b.score - a.score)
     .map((item) => item.track)
 
   const stages = [
-    enriched.filter((track) => !lastDayKeys.has(trackKey(track)) && !lastSevenDayKeys.has(trackKey(track))),
-    enriched.filter((track) => !lastDayKeys.has(trackKey(track))),
+    enriched.filter((track) => !hasTrackIdentity(lastDayKeys, track) && !hasTrackIdentity(lastSevenDayKeys, track)),
+    enriched.filter((track) => !hasTrackIdentity(lastDayKeys, track)),
   ]
 
   for (const stage of stages) {
@@ -1008,7 +1033,7 @@ function scoreCandidate(track: Track, intent: RecommendationIntent, recentKeys: 
   if (track.recommendSource === 'daily' || track.recommendSource === 'fm') score += 0.8
   score += Math.max(-5, Math.min(5, getFeedbackScore(track)))
   score += directionMemoryScore(track, semantic, memory)
-  if (recentKeys.has(trackKey(track))) score -= 12
+  if (hasTrackIdentity(recentKeys, track)) score -= 12
   return score
 }
 
@@ -1101,12 +1126,12 @@ export async function recommendFromNetease(text: string, override?: IntentOverri
   const allowCooldownFallback = Boolean(intent.seedTitle || intent.artistQuery || intent.sceneKey)
   const cacheKey = buildCacheKey(intent)
   const memory = buildDirectionMemory()
-  const hardCooldownKeys = new Set(loadListenedTracksSince(24, 500).map(trackKey))
-  const recentKeys = new Set([...loadRecentRecommendedTracks(120), ...loadListenedTracksSince(24 * 7, 900)].map(trackKey))
+  const hardCooldownKeys = trackIdentitySet(loadListenedTracksSince(24, 500))
+  const recentKeys = trackIdentitySet([...loadRecentRecommendedTracks(120), ...loadListenedTracksSince(24 * 7, 900)])
   const cached = getRecommendationCache(cacheKey)
   if (cached?.tracks.length) {
     const cachedFresh = cached.tracks
-      .filter((track) => !hardCooldownKeys.has(trackKey(track)) && !recentKeys.has(trackKey(track)))
+      .filter((track) => !hasTrackIdentity(hardCooldownKeys, track) && !hasTrackIdentity(recentKeys, track))
       .map((track) => ({ ...track, semantic: track.semantic ?? semanticForCandidate(track), playUrl: undefined, urlExpiresAt: undefined }))
       .filter((track) => matchesIntentFloor(track, intent))
     const playable = await filterPlayableTracks(cachedFresh, intent.targetCount)
@@ -1116,11 +1141,11 @@ export async function recommendFromNetease(text: string, override?: IntentOverri
   const candidates = await fetchCandidates(intent)
   if (isArtistFocusedIntent(intent)) {
     const artistCandidates = candidates
-      .filter((track) => !hardCooldownKeys.has(trackKey(track)))
-      .filter((track) => !recentKeys.has(trackKey(track)))
+      .filter((track) => !hasTrackIdentity(hardCooldownKeys, track))
+      .filter((track) => !hasTrackIdentity(recentKeys, track))
       .filter((track) => intent.artistQuery ? normalizeText(track.artist).includes(normalizeText(intent.artistQuery)) : true)
     const fallbackArtistCandidates = candidates
-      .filter((track) => !hardCooldownKeys.has(trackKey(track)))
+      .filter((track) => !hasTrackIdentity(hardCooldownKeys, track))
       .filter((track) => intent.artistQuery ? normalizeText(track.artist).includes(normalizeText(intent.artistQuery)) : true)
     const lastResortArtistCandidates = allowCooldownFallback
       ? candidates.filter((track) => intent.artistQuery ? normalizeText(track.artist).includes(normalizeText(intent.artistQuery)) : true)
@@ -1139,8 +1164,8 @@ export async function recommendFromNetease(text: string, override?: IntentOverri
     .map((track) => ({ track: { ...track, semantic: semanticForCandidate(track) }, score: scoreCandidate(track, intent, recentKeys, memory) }))
     .sort((a, b) => b.score - a.score)
     .map((item) => item.track)
-  const intentMatched = ranked.filter((track) => !hardCooldownKeys.has(trackKey(track)) && !recentKeys.has(trackKey(track)) && matchesIntentFloor(track, intent))
-  const cooledPool = ranked.filter((track) => !hardCooldownKeys.has(trackKey(track)) && matchesIntentFloor(track, intent))
+  const intentMatched = ranked.filter((track) => !hasTrackIdentity(hardCooldownKeys, track) && !hasTrackIdentity(recentKeys, track) && matchesIntentFloor(track, intent))
+  const cooledPool = ranked.filter((track) => !hasTrackIdentity(hardCooldownKeys, track) && matchesIntentFloor(track, intent))
   const fallbackPool = allowCooldownFallback ? ranked.filter((track) => matchesIntentFloor(track, intent)) : []
   const primaryPool = intentMatched.length >= intent.targetCount ? intentMatched : cooledPool.length >= intent.targetCount ? cooledPool : fallbackPool
   const playablePool = await filterPlayableTracks(primaryPool, Math.max(20, intent.targetCount * 8))

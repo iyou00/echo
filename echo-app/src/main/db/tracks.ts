@@ -80,6 +80,31 @@ export function appendRecommendedTracks(tracks: Track[]): void {
   write(tracks)
 }
 
+export function skipTodayRecommendedTracks(): void {
+  const rows = getDb()
+    .prepare(`
+      SELECT id, meta_json
+      FROM tracks_listened
+      WHERE user_id = 1
+        AND source = 'recommended_by_echo'
+        AND date(listened_at, 'localtime') = date('now', 'localtime')
+    `)
+    .all() as Array<{ id: number; meta_json?: string }>
+  const update = getDb().prepare('UPDATE tracks_listened SET meta_json = ? WHERE id = ?')
+  const write = getDb().transaction((items: Array<{ id: number; meta_json?: string }>) => {
+    for (const row of items) {
+      if (!row.meta_json) continue
+      try {
+        const parsed = JSON.parse(row.meta_json) as Track
+        update.run(JSON.stringify({ ...parsed, queueStatus: 'skipped' }), row.id)
+      } catch {
+        continue
+      }
+    }
+  })
+  write(rows)
+}
+
 export function loadRecentTracks(limit = 20): Track[] {
   return getDb()
     .prepare(`

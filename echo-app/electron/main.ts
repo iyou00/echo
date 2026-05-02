@@ -1,6 +1,8 @@
-import { app, BrowserWindow, Menu, nativeImage, Tray } from 'electron'
+import { app, BrowserWindow, Menu, nativeImage, Notification, Tray } from 'electron'
+import type { MenuItemConstructorOptions } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import type { AppNavigatePayload, AppPageKey, SceneKey } from '../src/types/ipc'
 import { closeDb } from '../src/main/db'
 import { getSettings, upgradeLegacySettingsSecrets } from '../src/main/db/settings'
 import { upgradeLegacyNeteaseSecret } from '../src/main/netease/auth'
@@ -8,6 +10,10 @@ import { registerIpc } from '../src/main/ipc'
 import { registerScheduler, runStartupCatchup, stopScheduler } from '../src/main/services/scheduler'
 import { archiveDaySeal } from '../src/main/services/daySeal'
 import { checkSecureStorage } from '../src/main/utils/secureStorage'
+import { getState as getPlaybackState, onPlaybackStateChanged, pause, resume } from '../src/main/services/playback'
+import { getCurrentScene, listSceneDefinitions, onSceneChanged } from '../src/main/services/scene'
+import { NeteaseAuthRequiredError } from '../src/main/services/recommendation'
+import { startScenePlayback } from '../src/main/services/scenePlayback'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -37,6 +43,9 @@ let win: BrowserWindow | null
 let isQuitting = false
 let cleanupStarted = false
 let tray: Tray | null = null
+let traySceneRunning: SceneKey | null = null
+
+const TRAY_SCENE_KEYS: SceneKey[] = ['work', 'focus', 'sleepy', 'relax', 'rain', 'irritated']
 
 function createAppIcon() {
   const publicDir = process.env.VITE_PUBLIC ?? path.join(process.env.APP_ROOT ?? process.cwd(), 'public')
@@ -93,18 +102,88 @@ function createWindow() {
   }
 }
 
-function createTray() {
-  if (tray) return
-  tray = new Tray(createAppIcon())
-  tray.setToolTip('Echo')
-  tray.setContextMenu(Menu.buildFromTemplate([
+function sendNavigate(target: BrowserWindow, payload: AppNavigatePayload): void {
+  const send = () => {
+    if (!target.isDestroyed()) target.webContents.send('app:navigate', payload)
+  }
+  if (target.webContents.isLoading()) {
+    target.webContents.once('did-finish-load', send)
+  } else {
+    send()
+  }
+}
+
+function showWindow(page?: AppPageKey, action?: AppNavigatePayload['action']): void {
+  if (!win || win.isDestroyed()) createWindow()
+  if (!win) return
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
+  if (process.platform === 'win32') {
+    win.setAlwaysOnTop(true)
+    win.setAlwaysOnTop(false)
+  }
+  if (page) sendNavigate(win, { page, action, canMuteToday: false })
+}
+
+function showTrayNotification(body: string): void {
+  if (!Notification.isSupported()) return
+  new Notification({
+    title: 'Echo',
+    body,
+    icon: createAppIcon(),
+  }).show()
+}
+
+function trayActionErrorMessage(error: unknown): string {
+  if (error instanceof NeteaseAuthRequiredError) return '先登录网易云，Echo 才能在后台给你放歌。'
+  if (error instanceof Error && error.message.trim()) return error.message
+  return 'Echo 这次没接上，稍后再试。'
+}
+
+function buildTrayMenuTemplate(): MenuItemConstructorOptions[] {
+  const playback = getPlaybackState()
+  const currentScene = getCurrentScene()
+  const sceneDefinitions = new Map(listSceneDefinitions().map((scene) => [scene.key, scene]))
+  const playbackControlLabel = playback.status === 'paused' ? '继续播放' : '暂停播放'
+
+  const sceneItems: MenuItemConstructorOptions[] = TRAY_SCENE_KEYS.map((key) => {
+    const scene = sceneDefinitions.get(key)
+    return {
+      label: scene?.label ?? key,
+      type: 'checkbox',
+      checked: currentScene?.key === key,
+      enabled: traySceneRunning === null || traySceneRunning === key,
+      click: () => {
+        void runTrayScene(key)
+      },
+    }
+  })
+
+  return [
     {
       label: '显示 Echo',
+      click: () => showWindow(),
+    },
+    {
+      label: '回声一下',
+      click: () => showWindow('voice', 'start_listening'),
+    },
+    { type: 'separator' },
+    ...sceneItems,
+    { type: 'separator' },
+    {
+      label: playbackControlLabel,
+      enabled: Boolean(playback.current),
       click: () => {
-        win?.show()
-        win?.focus()
+        const state = getPlaybackState()
+        if (!state.current) return
+        if (state.status === 'paused') resume()
+        else pause()
+        rebuildTrayMenu()
       },
     },
+    { type: 'separator' },
     {
       label: '退出 Echo',
       click: () => {
@@ -112,11 +191,40 @@ function createTray() {
         app.quit()
       },
     },
-  ]))
+  ]
+}
+
+function rebuildTrayMenu(): void {
+  if (!tray) return
+  tray.setContextMenu(Menu.buildFromTemplate(buildTrayMenuTemplate()))
+}
+
+async function runTrayScene(key: SceneKey): Promise<void> {
+  if (traySceneRunning) return
+  traySceneRunning = key
+  rebuildTrayMenu()
+  try {
+    const result = await startScenePlayback(key)
+    const first = result.tracks[0]
+    const trackLine = first ? `先放《${first.title}》。` : ''
+    showTrayNotification(`Echo 已进入${result.scene.label}场景。${trackLine}`)
+  } catch (error) {
+    showTrayNotification(trayActionErrorMessage(error))
+  } finally {
+    traySceneRunning = null
+    rebuildTrayMenu()
+  }
+}
+
+function createTray() {
+  if (tray) return
+  tray = new Tray(createAppIcon())
+  tray.setToolTip('Echo')
+  rebuildTrayMenu()
   tray.on('click', () => {
-    win?.show()
-    win?.focus()
+    showWindow()
   })
+  tray.on('right-click', () => rebuildTrayMenu())
 }
 
 // Quit when all windows are closed, except on macOS. There, it's common
@@ -156,6 +264,8 @@ app.whenReady().then(() => {
   upgradeLegacyNeteaseSecret()
   registerIpc()
   registerScheduler()
+  onPlaybackStateChanged(() => rebuildTrayMenu())
+  onSceneChanged(() => rebuildTrayMenu())
   runStartupCatchup().catch(() => undefined)
   createWindow()
   createTray()

@@ -11,6 +11,8 @@ interface VoicePageProps extends AppPageProps {
   refreshQueue: () => Promise<Track[]>
   autoStartToken?: number
   isActive?: boolean
+  voiceContinuous: boolean
+  setVoiceContinuous: (value: boolean) => void
 }
 
 type VoiceStatus = 'idle' | 'generating' | 'speaking' | 'done' | 'text-only-done' | 'error'
@@ -66,6 +68,13 @@ function isSameTrack(left: Track | null | undefined, right: Track | null | undef
   return left.title === right.title && left.artist === right.artist
 }
 
+function trackIdentity(track: Track | null | undefined) {
+  if (!track) return ''
+  const id = track.neteaseId ?? track.id
+  if (id) return `id:${id}`
+  return `meta:${track.title}::${track.artist}`
+}
+
 async function fadeVolume(
   echo: EchoApi,
   from: number,
@@ -84,7 +93,17 @@ async function fadeVolume(
   }
 }
 
-export function VoicePage({ echo, navigate, playbackState, setPlaybackState, refreshQueue, autoStartToken = 0, isActive = false }: VoicePageProps) {
+export function VoicePage({
+  echo,
+  navigate,
+  playbackState,
+  setPlaybackState,
+  refreshQueue,
+  autoStartToken = 0,
+  isActive = false,
+  voiceContinuous,
+  setVoiceContinuous,
+}: VoicePageProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
@@ -95,14 +114,16 @@ export function VoicePage({ echo, navigate, playbackState, setPlaybackState, ref
   const musicStartedRef = useRef(false)
   const trackRef = useRef<Track | null>(null)
   const fadeRunRef = useRef(0)
+  const voiceBaselinePlaybackKeyRef = useRef('')
   const playbackStateRef = useRef(playbackState)
   const statusRef = useRef<VoiceStatus>('idle')
-  const speakRef = useRef<() => Promise<void>>()
+  const speakRef = useRef<(automatic?: boolean) => Promise<void>>()
+  const autoFailureCountRef = useRef(0)
+  const lastAutoStartTokenRef = useRef(0)
   const [status, setStatus] = useState<VoiceStatus>('idle')
   const [text, setText] = useState('让我说一段?')
   const [idleGreeting, setIdleGreeting] = useState(() => pickVoiceIdleGreeting({ playbackState }))
   const [audioUrl, setAudioUrl] = useState('')
-  const [track, setTrack] = useState<Track | null>(null)
   const [progress, setProgress] = useState(0)
   const [waveLevels, setWaveLevels] = useState(idleWave)
   const [notice, setNotice] = useState('')
@@ -135,6 +156,32 @@ export function VoicePage({ echo, navigate, playbackState, setPlaybackState, ref
       alive = false
     }
   }, [echo, isActive])
+
+  useEffect(() => {
+    const current = playbackState.current
+    if (!current || current.sourceContext === 'voice') return
+    const baselineKey = voiceBaselinePlaybackKeyRef.current
+    const isBaselineMusic = Boolean(baselineKey && trackIdentity(current) === baselineKey)
+    if (isBaselineMusic && statusRef.current !== 'idle') return
+    if (statusRef.current === 'idle' && !voiceContinuous) return
+
+    voiceBaselinePlaybackKeyRef.current = ''
+    if (voiceContinuous) setVoiceContinuous(false)
+    fadeRunRef.current += 1
+    if (musicTimerRef.current) {
+      window.clearTimeout(musicTimerRef.current)
+      musicTimerRef.current = null
+    }
+    stopTtsWave(true)
+    audioRef.current?.pause()
+    musicStartedRef.current = false
+    trackRef.current = null
+    setAudioUrl('')
+    setProgress(0)
+    setNotice('')
+    setStatus('idle')
+    echo.playback.setVolume(restoreVolumeRef.current).then(setPlaybackState).catch(() => undefined)
+  }, [echo, playbackState, setPlaybackState, setVoiceContinuous, voiceContinuous])
 
   useEffect(() => () => {
     fadeRunRef.current += 1
@@ -219,12 +266,13 @@ export function VoicePage({ echo, navigate, playbackState, setPlaybackState, ref
     await fadeVolume(echo, currentVolume, restoreVolumeRef.current, 1500, setPlaybackState, () => fadeRunRef.current !== runId)
   }
 
-  async function speak() {
+  async function speak(automatic = false) {
     fadeRunRef.current += 1
     if (musicTimerRef.current) window.clearTimeout(musicTimerRef.current)
     stopTtsWave(true)
     audioRef.current?.pause()
     musicStartedRef.current = false
+    voiceBaselinePlaybackKeyRef.current = trackIdentity(playbackStateRef.current.current)
     setStatus('generating')
     setNotice('')
     setProgress(0)
@@ -233,8 +281,8 @@ export function VoicePage({ echo, navigate, playbackState, setPlaybackState, ref
 
     try {
       const segment = await echo.listening.generateSegment()
+      autoFailureCountRef.current = 0
       setText(segment.text)
-      setTrack(segment.track)
       trackRef.current = segment.track
       if (!segment.audioUrl) {
         setNotice(segment.error ?? '我现在说不出话来,但你能看到我说什么。')
@@ -255,6 +303,15 @@ export function VoicePage({ echo, navigate, playbackState, setPlaybackState, ref
         setStatus('text-only-done')
       }), 80)
     } catch (error) {
+      if (automatic) {
+        autoFailureCountRef.current += 1
+        if (autoFailureCountRef.current >= 2) {
+          setVoiceContinuous(false)
+          setNotice('我先停一下，刚才没接上。')
+          setStatus('error')
+          return
+        }
+      }
       setNotice(error instanceof Error ? error.message : `${pageLabels.voice}生成失败`)
       setStatus('error')
     }
@@ -262,11 +319,15 @@ export function VoicePage({ echo, navigate, playbackState, setPlaybackState, ref
   speakRef.current = speak
 
   useEffect(() => {
-    if (autoStartToken <= 0 || status !== 'idle') return
-    speakRef.current?.().catch(() => undefined)
+    if (autoStartToken <= 0 || status === 'generating' || status === 'speaking') return
+    if (lastAutoStartTokenRef.current === autoStartToken) return
+    lastAutoStartTokenRef.current = autoStartToken
+    speakRef.current?.(true).catch(() => undefined)
   }, [autoStartToken, status])
 
   function backToChat() {
+    setVoiceContinuous(false)
+    voiceBaselinePlaybackKeyRef.current = ''
     fadeRunRef.current += 1
     if (musicTimerRef.current) window.clearTimeout(musicTimerRef.current)
     stopTtsWave(true)
@@ -308,7 +369,7 @@ export function VoicePage({ echo, navigate, playbackState, setPlaybackState, ref
                   <div className="voice-greet-primary">{greet.primary}</div>
                   {greet.secondary && <div className="voice-greet-secondary">{greet.secondary}</div>}
                 </div>
-                <button className="voice-orb-button" type="button" onClick={speak} aria-label="听 Echo 说几句">
+                <button className="voice-orb-button" type="button" onClick={() => { void speak() }} aria-label="听 Echo 说几句">
                   <span className="voice-orb" aria-hidden="true">
                     <span className="voice-orb-ring ring-one" />
                     <span className="voice-orb-ring ring-two" />
@@ -348,10 +409,12 @@ export function VoicePage({ echo, navigate, playbackState, setPlaybackState, ref
             </div>
             {notice && <div className="voice-notice">{notice}</div>}
             <div className="voice-foot">
-              <span className="voice-label">{track ? `${track.artist} · ${track.title}` : 'FM Echo · 场景化语音'}</span>
               <div className="voice-actions">
-                <button className="exit-btn" type="button" onClick={speak} disabled={status === 'speaking'}>再 说 一 段</button>
-                <button className="exit-btn" type="button" onClick={backToChat}>回 主 对 话</button>
+                <button className={voiceContinuous ? 'exit-btn voice-loop active' : 'exit-btn voice-loop'} type="button" onClick={() => setVoiceContinuous(!voiceContinuous)}>
+                  连 续 回 声
+                </button>
+                <button className="exit-btn" type="button" onClick={() => { void speak() }} disabled={status === 'speaking'}>再 来 一 次</button>
+                <button className="exit-btn" type="button" onClick={backToChat}>回 到 首 页</button>
               </div>
             </div>
           </>

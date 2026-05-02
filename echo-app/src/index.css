@@ -3357,7 +3357,8 @@ button:disabled {
 
 .voice-actions {
   display: flex;
-  gap: 8px;
+  width: 100%;
+  gap: 7px;
   flex-shrink: 0;
 }
 
@@ -3380,6 +3381,21 @@ button:disabled {
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 2px;
+}
+
+.voice-actions .exit-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 8px 8px;
+  letter-spacing: 1.2px;
+  white-space: nowrap;
+}
+
+.voice-loop.active {
+  border-color: rgba(99, 153, 34, 0.88);
+  background: rgba(99, 153, 34, 0.12);
+  color: var(--ayin-green-900);
+  box-shadow: inset 0 0 0 1px rgba(99, 153, 34, 0.08), 0 8px 18px rgba(99, 153, 34, 0.1);
 }
 
 .player-mini {

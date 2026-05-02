@@ -506,6 +506,39 @@ const mockEcho: EchoApi = {
       sceneSessions.unshift(scene)
       return structuredClone(scene)
     },
+    async play(key, options) {
+      const scene = await this.start(key)
+      const tracks = structuredClone(mockTracks.slice(0, scene.targetCount).map((track) => ({
+        ...track,
+        playUrl: track.playUrl ?? 'mock://audio',
+        sceneKey: scene.key,
+        sceneLabel: scene.label,
+        sceneLine: scene.line,
+        sceneSessionId: scene.id,
+        queueStatus: 'pending' as const,
+      })))
+      if (tracks.length > 0) {
+        const [first, ...rest] = tracks
+        playbackState.current = { ...first, queueStatus: 'playing' }
+        playbackState.position = 0
+        playbackState.duration = first.durationMs ?? 180000
+        playbackState.status = 'loading'
+        playbackState.queue = rest
+        queueState = [{ ...first, queueStatus: 'playing' }, ...rest]
+        emitPlayback()
+      }
+      const message = options?.appendChatMessage
+        ? {
+          id: ++messageId,
+          role: 'assistant' as const,
+          content: tracks[0] ? `我切到${scene.label}了。先放《${tracks[0].title}》，后面几首我也排好了。` : `我切到${scene.label}了，先帮你把歌排起来。`,
+          createdAt: new Date().toISOString(),
+          tracks,
+        }
+        : undefined
+      if (message) messages.push(message)
+      return { scene, tracks, state: structuredClone(playbackState), message }
+    },
     async end() {
       if (!activeSceneState || activeSceneState.status !== 'active') return null
       activeSceneState = { ...activeSceneState, status: 'ended', endedAt: new Date().toISOString() }
@@ -717,7 +750,7 @@ const mockEcho: EchoApi = {
   },
   listening: {
     async generateSegment() {
-      const track = { ...mockTracks[0], playUrl: 'mock://audio', durationMs: 180000 }
+      const track = { ...mockTracks[0], playUrl: 'mock://audio', durationMs: 180000, sourceContext: 'voice' as const }
       return {
         text: `下午好。这个时间适合把节奏放轻一点,我给你放${track.artist}的《${track.title}》。先让它垫在后面,你不用急着切走。`,
         track,
