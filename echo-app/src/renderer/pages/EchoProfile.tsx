@@ -81,14 +81,11 @@ const SIGNATURE_VARIANTS: Record<ProfileEvidenceSource, string[]> = {
   ],
 }
 
-function signatureNote(track: Track, source: ProfileEvidenceSource, note?: string, count?: number, evidenceLevel?: ProfileEvidenceLevel): string {
+function signatureNote(track: Track, source: ProfileEvidenceSource, note?: string, _count?: number, evidenceLevel?: ProfileEvidenceLevel): string {
   if (note && evidenceLevel === 'strong') return note
   const variants = SIGNATURE_VARIANTS[source] ?? SIGNATURE_VARIANTS.fallback
   const key = `${track.neteaseId ?? track.id ?? ''}:${track.title}:${track.artist}`
-  const index = stableHash(key) % variants.length
-  let text = variants[index]
-  if (count) text = text.replace('这首', `这首(${count}次)`)
-  return text
+  return variants[stableHash(key) % variants.length]
 }
 
 function moodCloudStyle(mood: MoodItem, index: number): CSSProperties {
