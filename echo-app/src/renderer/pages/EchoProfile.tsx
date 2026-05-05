@@ -1,43 +1,83 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Play, RefreshCw, Settings } from 'lucide-react'
-import type { EchoApi, PlaybackState, TasteProfile, TasteQuestion, Track } from '../../types/ipc'
+import type { EchoApi, PlaybackState, TasteProfile, Track } from '../../types/ipc'
 import type { AppPageProps } from '../../App'
 import { BrandLogo, EmptyState, Section } from '../components'
 
 interface EchoProfileProps extends AppPageProps {
   echo: EchoApi
   profile: TasteProfile | null
-  questions: TasteQuestion[]
   setPlaybackState: (state: PlaybackState) => void
   refreshQueue: () => Promise<Track[]>
   refreshProfile: () => Promise<void>
 }
 
 function asPercent(value: number) {
+  if (!Number.isFinite(value)) return 0
   return Math.max(0, Math.min(100, Math.round(value <= 1 ? value * 100 : value)))
 }
 
 function displayDate(value?: string) {
-  if (!value) return new Date().toLocaleDateString('zh-CN')
+  if (!value) return ''
   return new Date(value).toLocaleDateString('zh-CN')
 }
 
-export function EchoProfilePage({ echo, navigate, profile, questions, setPlaybackState, refreshQueue, refreshProfile }: EchoProfileProps) {
+function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)) }
+
+export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, refreshQueue, refreshProfile }: EchoProfileProps) {
   const [busy, setBusy] = useState(false)
+  const [phase, setPhase] = useState<'idle' | 'out' | 'loading' | 'in'>('idle')
   const [playingKey, setPlayingKey] = useState('')
-  const [status, setStatus] = useState('')
-  void questions
+  const playingKeyRef = useRef('')
+  const statusTimerRef = useRef<ReturnType<typeof setTimeout>>()
+  const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle')
+  const [statusMessage, setStatusMessage] = useState('')
   const portraitUpdatedAt = profile?.profile_meta?.updatedAt ?? profile?.profile_meta?.structuredUpdatedAt
+
+  function showStatus(type: 'success' | 'error', message: string, autoHideMs?: number) {
+    clearTimeout(statusTimerRef.current)
+    setStatus(type)
+    setStatusMessage(message)
+    if (autoHideMs) statusTimerRef.current = setTimeout(() => setStatus('idle'), autoHideMs)
+  }
+
+  function clearStatus() {
+    clearTimeout(statusTimerRef.current)
+    setStatus('idle')
+    setStatusMessage('')
+  }
 
   async function regenerate() {
     setBusy(true)
-    setStatus('')
+    clearStatus()
+
+    // Phase 1: 旧画像模糊消失
+    setPhase('out')
+    await sleep(400)
+
+    // Phase 2: 加载态（模糊中）
+    setPhase('loading')
+
     try {
       await echo.taste.regeneratePortrait()
-      await refreshProfile()
-      setStatus('画像已刷新')
+
+      try {
+        await refreshProfile()
+      } catch {
+        // 画像已生成成功，只是本地刷新失败，下次进入页面会自动加载
+      }
+
+      // Phase 3: 新画像从模糊中显现
+      setPhase('in')
+      await sleep(400)
+
+      setPhase('idle')
+      showStatus('success', '已刷新', 2000)
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '画像刷新失败')
+      setPhase('in')
+      await sleep(400)
+      setPhase('idle')
+      showStatus('error', error instanceof Error ? error.message : '画像刷新失败')
     } finally {
       setBusy(false)
     }
@@ -45,13 +85,16 @@ export function EchoProfilePage({ echo, navigate, profile, questions, setPlaybac
 
   async function playSignature(track: Track) {
     const key = `${track.id ?? track.neteaseId ?? ''}:${track.title}:${track.artist}`
+    playingKeyRef.current = key
     setPlayingKey(key)
     try {
       const next = await echo.playback.play(track)
       setPlaybackState(next)
       await refreshQueue()
+    } catch (error) {
+      showStatus('error', error instanceof Error ? error.message : '播放失败', 3000)
     } finally {
-      setPlayingKey('')
+      if (playingKeyRef.current === key) setPlayingKey('')
     }
   }
 
@@ -60,7 +103,7 @@ export function EchoProfilePage({ echo, navigate, profile, questions, setPlaybac
       <div className="page-toolbar">
         <div className="tb-status">Echo 眼里的你</div>
         <div className="tb-actions">
-          <button className="tb-btn icon-only" onClick={regenerate} disabled={busy} title="重新生成画像">
+          <button className={`tb-btn icon-only${busy ? ' spinning' : ''}`} onClick={regenerate} disabled={busy} title="重新生成画像">
             <RefreshCw size={14} />
           </button>
           <button className="tb-btn icon-only" onClick={() => navigate('settings')} title="设置">
@@ -82,10 +125,18 @@ export function EchoProfilePage({ echo, navigate, profile, questions, setPlaybac
         ) : (
           <>
             <Section className="portrait-section">
-              <BrandLogo className="avatar-big" size={56} />
-              <p className="portrait-text">{profile.echo_portrait}</p>
-              <div className="portrait-sign">— Echo · 写于 {displayDate(portraitUpdatedAt)}</div>
-              {status && <div className="quiet-line">{status}</div>}
+              <BrandLogo className={`avatar-big${busy ? ' avatar-breathing' : ''}`} size={56} />
+              <div className={`portrait-content ${phase}`}>
+                {phase === 'idle' || phase === 'in' ? (
+                  <p className="portrait-text">{profile.echo_portrait}</p>
+                ) : (
+                  <p className="portrait-text portrait-loading">正在透过音乐看你,请稍等。</p>
+                )}
+              </div>
+              <div className="portrait-sign">
+                — Echo · {busy ? '正在写' : (portraitUpdatedAt ? `写于 ${displayDate(portraitUpdatedAt)}` : '初次见面')}
+                {status !== 'idle' && <span className={`portrait-status ${status}`}>{statusMessage}</span>}
+              </div>
             </Section>
 
             <Section label="S I G N A T U R E · 7">
@@ -111,6 +162,7 @@ export function EchoProfilePage({ echo, navigate, profile, questions, setPlaybac
               </div>
             </Section>
 
+            {profile.genres.length > 0 && (
             <Section label="G E N R E">
               {profile.genres.map((genre) => (
                 <div className="genre-row" key={genre.name}>
@@ -127,7 +179,9 @@ export function EchoProfilePage({ echo, navigate, profile, questions, setPlaybac
                 </div>
               ))}
             </Section>
+            )}
 
+            {profile.artists.length > 0 && (
             <Section label="A R T I S T S">
               <div className="artist-list">
                 {profile.artists.map((artist, index) => (
@@ -144,7 +198,9 @@ export function EchoProfilePage({ echo, navigate, profile, questions, setPlaybac
                 ))}
               </div>
             </Section>
+            )}
 
+            {profile.moods.length > 0 && (
             <Section label="M O O D">
               <div className="moods">
                 {profile.moods.map((mood) => (
@@ -154,9 +210,14 @@ export function EchoProfilePage({ echo, navigate, profile, questions, setPlaybac
                 ))}
               </div>
             </Section>
+            )}
 
             <footer className="page-foot">
-              画像上次更新 · {displayDate(portraitUpdatedAt)} · 结构刷新 {displayDate(profile.profile_meta?.structuredUpdatedAt)}
+              {portraitUpdatedAt
+                ? `画像上次更新 · ${displayDate(portraitUpdatedAt)}`
+                : '画像 · 尚未生成'}
+              {profile.profile_meta?.structuredUpdatedAt && profile.profile_meta.structuredUpdatedAt !== portraitUpdatedAt &&
+                ` · 结构刷新 ${displayDate(profile.profile_meta.structuredUpdatedAt)}`}
             </footer>
           </>
         )}

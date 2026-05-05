@@ -149,7 +149,14 @@ function pickTrackFromText(text: string, candidates: Track[], selectedIndex?: nu
 function alignTextToTrack(text: string, track: Track | null): string {
   if (!track || textMentionsTrack(text, track)) return text
   const quoted = quotedTitles(text)
-  if (quoted.length > 0) return fallbackText(track)
+  if (quoted.length > 0) {
+    // LLM 编了一个不在 candidates 里的歌名——替换成正确的，不扔掉整段文案
+    let aligned = text
+    for (const title of quoted) {
+      aligned = aligned.replace(`《${title}》`, `《${track.title}》`)
+    }
+    if (textMentionsTrack(aligned, track)) return aligned
+  }
   return `${text}我给你接上${track.artist}的《${track.title}》。`
 }
 
@@ -235,14 +242,7 @@ function buildContext(input: {
     ? `
 
 <continuation>
-这是你连续说话的后续段落。你上一段说的是:
-"${recentScenarios[0]}"
-${recentTrackKeys.length > 0 ? '推荐了对应的歌。' : ''}
-要求:
-- 不要重复上一段的句式、切入点、语气词
-- 换一个角度: 如果上一段从"时间"切入,这段从"状态/情绪/天气/某首歌"切入
-- 如果上一段比较安静克制,这段可以更随意一点(或反过来)
-- 你仍然要选一首不同的歌
+你正在连续说话。S1 是你刚刚说的那一段。接着说,像聊天接话。可以换个话题,可以跑题,可以回前面提过的事。选一首不同的歌。不要重复上一段的句式和切入点。
 </continuation>`
     : ''
 

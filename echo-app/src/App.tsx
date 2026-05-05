@@ -433,7 +433,6 @@ function App() {
               {...commonProps}
               echo={echo}
               profile={profile}
-              questions={questions}
               setPlaybackState={setPlaybackState}
               refreshQueue={refreshQueue}
               refreshProfile={refreshProfile}

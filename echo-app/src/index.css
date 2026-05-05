@@ -64,8 +64,7 @@ button:disabled {
 .brand-logo,
 .hdr-avatar-logo,
 .empty-logo,
-.echo-avatar,
-.avatar-big {
+.echo-avatar {
   display: block;
   object-fit: contain;
   user-select: none;
@@ -1638,12 +1637,51 @@ button:disabled {
 }
 
 .avatar-big {
+  display: block;
   width: 56px;
   height: 56px;
   border-radius: 50%;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
   background: transparent;
   margin-bottom: 18px;
   box-shadow: 0 6px 18px rgba(39, 80, 10, 0.14);
+  transition: box-shadow 0.3s ease;
+}
+
+.avatar-breathing {
+  animation: breathe 2s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  0%, 100% { box-shadow: 0 6px 18px rgba(39, 80, 10, 0.14); transform: scale(1); }
+  50% { box-shadow: 0 8px 24px rgba(39, 80, 10, 0.24); transform: scale(1.04); }
+}
+
+.portrait-content {
+  transition: filter 0.4s ease, opacity 0.4s ease;
+}
+
+.portrait-content.out {
+  filter: blur(4px);
+  opacity: 0;
+}
+
+.portrait-content.loading {
+  filter: blur(2px);
+  opacity: 0.6;
+  animation: loading-pulse 2s ease-in-out infinite;
+}
+
+.portrait-content.in {
+  filter: blur(0);
+  opacity: 1;
+}
+
+@keyframes loading-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 0.35; }
 }
 
 .portrait-text {
@@ -1664,6 +1702,43 @@ button:disabled {
   color: var(--ayin-green-400);
   margin-right: 4px;
   vertical-align: -16px;
+}
+
+.portrait-loading {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.portrait-loading::before {
+  content: '';
+  margin: 0;
+}
+
+.portrait-status {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-style: normal;
+  vertical-align: middle;
+  animation: status-in 0.3s ease-out;
+}
+
+.portrait-status.success {
+  background: rgba(99, 153, 34, 0.12);
+  color: var(--ayin-green-700);
+}
+
+.portrait-status.error {
+  background: rgba(200, 50, 50, 0.1);
+  color: #b33a3a;
+}
+
+@keyframes status-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .portrait-sign {
@@ -4240,6 +4315,15 @@ body {
 .tb-btn.icon-only {
   width: 24px;
   padding: 0;
+}
+
+.tb-btn.spinning svg {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .autoplay-toggle {

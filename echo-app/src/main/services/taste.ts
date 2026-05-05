@@ -231,8 +231,8 @@ function buildProfileFromTracks(tracks: Track[]): TasteProfile {
     }
   }
 
-  const maxGenre = Math.max(1, ...Array.from(genreCounts.values()))
-  const maxMood = Math.max(1, ...Array.from(moodCounts.values()))
+  const totalGenre = Math.max(1, Array.from(genreCounts.values()).reduce((sum, value) => sum + value, 0))
+  const totalMood = Math.max(1, Array.from(moodCounts.values()).reduce((sum, value) => sum + value, 0))
   const totalEra = Math.max(1, Array.from(eraCounts.values()).reduce((sum, value) => sum + value, 0))
   const maxArtistScore = Math.max(1, ...Array.from(artistStats.values()).map((item) => item.score))
   const topArtists = Array.from(artistStats.entries()).sort((a, b) => b[1].score - a[1].score).slice(0, 8).map(([name, stats]) => ({
@@ -242,21 +242,21 @@ function buildProfileFromTracks(tracks: Track[]): TasteProfile {
   }))
   const topGenres = topEntries(genreCounts, 8).map(([name, count]) => ({
     name,
-    weight: clamp(count / maxGenre),
+    weight: clamp(count / totalGenre),
     trend: (() => {
       const last = previous?.genres.find((genre) => genre.name === name)?.weight ?? 0
-      const next = count / maxGenre
-      if (next - last > 0.08) return 'up' as const
-      if (last - next > 0.08) return 'down' as const
+      const next = count / totalGenre
+      if (next - last > 0.03) return 'up' as const
+      if (last - next > 0.03) return 'down' as const
       return 'steady' as const
     })(),
     note: genreNote(
       name,
       (() => {
         const last = previous?.genres.find((genre) => genre.name === name)?.weight ?? 0
-        const next = count / maxGenre
-        if (next - last > 0.08) return 'up' as const
-        if (last - next > 0.08) return 'down' as const
+        const next = count / totalGenre
+        if (next - last > 0.03) return 'up' as const
+        if (last - next > 0.03) return 'down' as const
         return 'steady' as const
       })(),
       topEntries(genreArtists.get(name) ?? new Map<string, number>(), 3).map(([artist]) => artist),
@@ -264,7 +264,7 @@ function buildProfileFromTracks(tracks: Track[]): TasteProfile {
   }))
   const moods = topEntries(moodCounts, 8).map(([tag, count]) => ({
     tag,
-    frequency: clamp(count / maxMood),
+    frequency: clamp(count / totalMood),
     signature_artists: topArtists.slice(0, 3).map((artist) => artist.name),
   }))
   const candidateMap = new Map<string, Track>()
@@ -304,7 +304,7 @@ function buildProfileFromTracks(tracks: Track[]): TasteProfile {
     moods,
     era_preference: Object.fromEntries(Array.from(eraCounts.entries()).map(([era, count]) => [era, clamp(count / totalEra)])),
     discovery_appetite: 0.5,
-    anti_patterns: ['纯实验电子', 'noise / drone', '古典纯器乐'],
+    anti_patterns: [] as string[],
     signature_tracks: signatureTracks,
     echo_portrait: previous?.echo_portrait ?? buildFallbackPortrait(topArtistNames, topGenreNames, signatureTracks),
     profile_meta: {
@@ -343,6 +343,130 @@ function readPortraitPrompt(): string {
 function compactLine(text: string, limit = 180): string {
   const normalized = text.replace(/\s+/g, ' ').trim()
   return normalized.length > limit ? `${normalized.slice(0, limit)}...` : normalized
+}
+
+function buildRelationshipContext(profile: TasteProfile): string {
+  const settings = getSettings()
+  const firstUsedAt = settings.meta.firstUsedAt
+  const date = new Date(firstUsedAt)
+  if (Number.isNaN(date.getTime())) return '(首次使用时间未知)'
+  const days = Math.max(1, Math.ceil((Date.now() - date.getTime()) / 86400000))
+  const yinyiCount = getYinyiRange(500).length
+  const hasWrittenPortrait = (profile.profile_meta?.portraitSignalCount ?? 0) > 0 || profile.profile_meta?.updatedAt != null
+  if (days <= 3) return `你刚认识 Ta — 才第 ${days} 天。这是第一次写画像,坦诚"我只看到了粗线条"。`
+  if (days <= 14) return `你认识 Ta ${days} 天了,${hasWrittenPortrait ? '至少写过一版' : '还没写过'}画像。还处在"慢慢认识"的阶段。`
+  if (days <= 60) return `你们已经相处 ${days} 天,${yinyiCount > 0 ? `写过 ${yinyiCount} 篇风信` : '还在熟悉中'}。你应该开始看到一些稳定的模式了。`
+  return `你已经陪 Ta ${days} 天了,${yinyiCount > 0 ? `${yinyiCount} 篇风信` : ''}。你看着 Ta 的口味在变,应该有能力写出有分量的观察。`
+}
+
+function buildMusicRoleSummary(): string {
+  const feedback = listTrackFeedback(200)
+  if (feedback.length < 3) return '(行为数据还太少,无法判断音乐角色)'
+  const totalPlays = feedback.reduce((sum, item) => sum + item.playCount, 0)
+  const totalSkips = feedback.reduce((sum, item) => sum + item.skipCount, 0)
+  const totalLoops = feedback.reduce((sum, item) => sum + item.loopCount, 0)
+  const totalFavorites = feedback.reduce((sum, item) => sum + item.favoriteCount, 0)
+  const totalEncounters = totalPlays + totalSkips
+  const skipRate = totalEncounters > 0 ? totalSkips / totalEncounters : 0
+  const loopRate = totalPlays > 0 ? totalLoops / totalPlays : 0
+  const favoriteRate = totalPlays > 0 ? totalFavorites / totalPlays : 0
+  const events = loadProfileTrackEvents(200)
+  const nightEvents = events.filter((event) => {
+    const hour = new Date(event.listenedAt).getHours()
+    return hour >= 22 || hour < 5
+  })
+  const nightRatio = events.length > 0 ? nightEvents.length / events.length : 0
+
+  const signals: string[] = []
+  if (skipRate > 0.35) signals.push('高频切歌(切歌率 ' + Math.round(skipRate * 100) + '%),总在找"对的那首"')
+  if (loopRate > 0.15) signals.push('循环很多(循环率 ' + Math.round(loopRate * 100) + '%),会回到同一首歌')
+  if (nightRatio > 0.45) signals.push('深夜集中听(夜间占比 ' + Math.round(nightRatio * 100) + '%)')
+  if (favoriteRate > 0.2) signals.push('收藏率高(' + Math.round(favoriteRate * 100) + '%),会主动标记喜欢的歌')
+  if (signals.length === 0) signals.push('播放行为比较均匀,没有极端的倾向')
+
+  if (skipRate > 0.35 && loopRate > 0.15) return signals.join('; ') + '。音乐对 Ta 来说既是挑剔的陪伴,也是安全区。'
+  if (skipRate > 0.35) return signals.join('; ') + '。音乐对 Ta 来说是挑剔的陪伴——总在找刚好对的那首。'
+  if (loopRate > 0.15) return signals.join('; ') + '。音乐是 Ta 的安全区——会回到同一首歌,像回到一个熟悉的地方。'
+  if (nightRatio > 0.45) return signals.join('; ') + '。Ta 用音乐消化深夜的情绪。'
+  return signals.join('; ') + '。'
+}
+
+const LOW_MOOD_SIGNALS = ['sad', 'melancholic', '忧郁', '伤感', '孤独', '失眠', '疲惫', '沉思', '怀旧', '孤独感']
+const HIGH_MOOD_SIGNALS = ['energetic', 'upbeat', '欢快', '激昂', '热血', '有劲', '活力', '振奋', '阳光', '嗨']
+const CALM_MOOD_SIGNALS = ['calm', 'relaxing', '舒缓', '放松', '治愈', '温柔', '轻柔', '安静', '平静', '冥想']
+
+function moodDirection(mood: string): 'low' | 'high' | 'calm' | 'neutral' {
+  const tag = mood.toLowerCase()
+  if (LOW_MOOD_SIGNALS.some((signal) => tag.includes(signal))) return 'low'
+  if (HIGH_MOOD_SIGNALS.some((signal) => tag.includes(signal))) return 'high'
+  if (CALM_MOOD_SIGNALS.some((signal) => tag.includes(signal))) return 'calm'
+  return 'neutral'
+}
+
+function buildMoodTrendSignal(profile: TasteProfile): string {
+  const semantics = listSemantics()
+  const events = loadProfileTrackEvents(100)
+  if (events.length < 3 && semantics.length < 5) return '(情绪信号还太少)'
+
+  const recentCutoff = Date.now() - 7 * 86400000
+  const recentEvents = events.filter((event) => new Date(event.listenedAt).getTime() > recentCutoff)
+  const semanticByKey = new Map(semantics.map((s) => [semanticTrackKey(s), s.semantic]))
+
+  const recentMoods: string[] = []
+  let recentEnergy = 0
+  let recentEnergyCount = 0
+
+  for (const event of recentEvents) {
+    const key = semanticTrackKey(event.track)
+    const semantic = semanticByKey.get(key) ?? event.track.semantic
+    if (semantic) {
+      recentMoods.push(...semantic.moods)
+      if (semantic.energy > 0) {
+        recentEnergy += semantic.energy
+        recentEnergyCount += 1
+      }
+    }
+  }
+
+  if (recentMoods.length < 3 && recentEnergyCount < 3) {
+    if (semantics.length >= 5) return `(有 ${semantics.length} 首歌的语义数据,但近一周播放记录不足,情绪趋势判断受限)`
+    return '(近一周情绪信号不足)'
+  }
+
+  const moodCounts = new Map<string, number>()
+  for (const mood of recentMoods) moodCounts.set(mood, (moodCounts.get(mood) ?? 0) + 1)
+  const topMoods = Array.from(moodCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([tag]) => tag)
+
+  let lowCount = 0
+  let highCount = 0
+  let calmCount = 0
+  for (const [mood, count] of moodCounts) {
+    const dir = moodDirection(mood)
+    if (dir === 'low') lowCount += count
+    if (dir === 'high') highCount += count
+    if (dir === 'calm') calmCount += count
+  }
+  const total = lowCount + highCount + calmCount || 1
+  const avgEnergy = recentEnergyCount > 0 ? recentEnergy / recentEnergyCount : 0.5
+  const baseEnergy = profile.energy_preference ?? 0.5
+
+  const lines: string[] = []
+  lines.push(`近一周高频 mood: ${topMoods.join('、') || '无明确标签'}`)
+
+  if (lowCount / total > 0.45) {
+    lines.push('情绪色调偏低落')
+    if (baseEnergy > 0.4 && avgEnergy < baseEnergy - 0.1) lines.push('能量明显比平时低')
+  } else if (highCount / total > 0.4) {
+    lines.push('情绪色调偏高涨')
+  } else if (calmCount / total > 0.4) {
+    lines.push('情绪色调偏平静/收敛')
+  }
+
+  if (Math.abs(avgEnergy - baseEnergy) > 0.12) {
+    lines.push(avgEnergy < baseEnergy ? `音乐能量在下降(最近 ${avgEnergy.toFixed(1)} vs 平时 ${baseEnergy.toFixed(1)})` : `音乐能量在上升(最近 ${avgEnergy.toFixed(1)} vs 平时 ${baseEnergy.toFixed(1)})`)
+  }
+
+  return lines.join('。')
 }
 
 function buildEchoShouldAsk(profile: TasteProfile): string {
@@ -394,7 +518,19 @@ function buildThisMonthSignals(profile: TasteProfile): string {
 }
 
 function buildPortraitUserPrompt(profile: TasteProfile): string {
-  return `<current_profile>
+  return `<relationship>
+${buildRelationshipContext(profile)}
+</relationship>
+
+<music_role>
+${buildMusicRoleSummary()}
+</music_role>
+
+<mood_trend>
+${buildMoodTrendSignal(profile)}
+</mood_trend>
+
+<current_profile>
 ${JSON.stringify(profile, null, 2)}
 </current_profile>
 
@@ -422,22 +558,20 @@ ${buildKpopUndetermined(profile)}
 ${buildRecentYinyiSummaries()}
 </recent_yinyi_summaries>
 
-请严格返回 JSON,字段只包含 portrait、summary、suggested_questions。portrait 必须通过 v2 checklist,并控制在 100-120 字。`
+请严格返回 JSON,字段只包含 portrait、summary、suggested_questions。portrait 100-120 字。像朋友在 Ta 生日时写的一段话,不像专辑乐评。`
 }
 
 function portraitV2Issues(portrait: string): string[] {
   const compact = portrait.replace(/\s+/g, '')
   const issues: string[] = []
   if (Array.from(compact).length < 90 || Array.from(compact).length > 140) issues.push('portrait 字数需要接近 100-120 字')
-  if (!/(我猜|我不太确定|我说不准|我还没看清|我有一处不确定|我没搞懂)/.test(portrait)) issues.push('缺少克制权表达')
-  if (!/(比起|上次|以前|这周|上周|这个月|上个月|刚认识|最近|从.+到|变化|变|涨到|降到|多了|少了)/.test(portrait)) {
-    issues.push('缺少对比或变化')
+  if (!/(可能|也许|大概|猜|说不准|不确定|拿不准|没看清|不知道|不太[确准]|感觉[像是]?好像|或许)/.test(portrait)) {
+    issues.push('缺少不确定或猜测的表达,画像不应该全知')
   }
-  if (!/(《[^》]+》|top\s*\d|Top\s*\d|\d+\s*次|\d+%|\d+首|周[一二三四五六日天]|凌晨|晚上|下午|早上)/.test(portrait)) {
+  if (!/(《[^》]+》|\d+\s*次|\d+%|\d+首|周[一二三四五六日天]|凌晨|晚上|下午|早上)/.test(portrait)) {
     issues.push('缺少具体歌名、数据或时间锚点')
   }
-  if (!/(我没搞懂|我有一处不确定|我还没看清|改天告诉我|吗[？?]|是不是|为什么)/.test(portrait)) issues.push('缺少 Echo 想继续问的问题')
-  if (/(分寸感|续航感|底色|光谱)/.test(portrait)) issues.push('出现 v2 禁用抽象词')
+  if (/(分寸感|续航感|底色|光谱|底韵)/.test(portrait)) issues.push('出现禁用抽象词')
   return issues
 }
 
@@ -531,7 +665,7 @@ export async function regeneratePortrait(options: RegeneratePortraitOptions = {}
       { role: 'system', content: prompt },
       { role: 'user', content: userPrompt },
     ]
-    const response = await completeChat(settings, messages)
+    const response = await completeChat(settings, messages, { temperature: 0.9 })
     let parsed = parseJsonObject<PortraitResponse>(response)
     const issues = parsed?.portrait ? portraitV2Issues(parsed.portrait) : ['没有返回 portrait']
     if (issues.length) {
@@ -540,9 +674,9 @@ export async function regeneratePortrait(options: RegeneratePortraitOptions = {}
         { role: 'assistant', content: response },
         {
           role: 'user',
-          content: `上一版没有通过 portrait-writer-v2 checklist: ${issues.join('；')}。请重写一次,继续严格返回 JSON。`,
+          content: `上一版没有通过画像 checklist: ${issues.join('；')}。请重写一次,继续严格返回 JSON。`,
         },
-      ])
+      ], { temperature: 0.9 })
       parsed = parseJsonObject<PortraitResponse>(retryResponse) ?? parsed
     }
     if (!parsed?.portrait) throw new PortraitRegenerationError('画像文案生成失败：模型没有返回 portrait。')
