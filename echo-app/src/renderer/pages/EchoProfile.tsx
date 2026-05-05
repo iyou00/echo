@@ -32,16 +32,6 @@ function stableHash(value: string) {
   return hash
 }
 
-const ARTIST_BADGE_LABELS: Record<ProfileEvidenceSource, string> = {
-  favorite: '收藏',
-  loop: '循环',
-  played: '播放',
-  scene: '场景',
-  imported: '导入',
-  semantic: '语义',
-  fallback: '',
-}
-
 type SignatureDisplayItem = NonNullable<TasteProfile['display']>['signatureItems'][number]
 
 const SIGNATURE_VARIANTS: Record<ProfileEvidenceSource, string[]> = {
@@ -302,9 +292,6 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
                       {artist.name}
                       <small>{artist.note ?? '还在观察'}</small>
                     </div>
-                    {ARTIST_BADGE_LABELS[artist.source] && (
-                      <span className={`artist-badge badge-${artist.source}`}>{ARTIST_BADGE_LABELS[artist.source]}</span>
-                    )}
                     <div className="affinity-bar">
                       <span className="affinity-fill" style={{ width: `${asPercent(artist.affinity)}%` }} />
                     </div>
