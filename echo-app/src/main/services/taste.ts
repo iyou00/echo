@@ -561,7 +561,7 @@ ${buildRecentYinyiSummaries()}
 请严格返回 JSON,字段只包含 portrait、summary、suggested_questions。portrait 100-120 字。像朋友在 Ta 生日时写的一段话,不像专辑乐评。`
 }
 
-function portraitV2Issues(portrait: string): string[] {
+function portraitV2Issues(portrait: string, profile?: TasteProfile): string[] {
   const compact = portrait.replace(/\s+/g, '')
   const issues: string[] = []
   if (Array.from(compact).length < 90 || Array.from(compact).length > 140) issues.push('portrait 字数需要接近 100-120 字')
@@ -572,6 +572,19 @@ function portraitV2Issues(portrait: string): string[] {
     issues.push('缺少具体歌名、数据或时间锚点')
   }
   if (/(分寸感|续航感|底色|光谱|底韵)/.test(portrait)) issues.push('出现禁用抽象词')
+  if (profile?.artists?.length) {
+    const knownNames = new Set(profile.artists.map((a) => a.name.toLowerCase()))
+    const songBlocks = portrait.match(/《([^》]+)》/g) ?? []
+    for (const block of songBlocks) {
+      const inner = block.slice(1, -1)
+      const dashIndex = inner.indexOf(' - ')
+      if (dashIndex < 0) continue
+      const artistPart = inner.slice(0, dashIndex).trim().toLowerCase()
+      if (artistPart && !knownNames.has(artistPart)) {
+        issues.push(`画像中提到的歌手「${inner.slice(0, dashIndex).trim()}」不在用户口味档案中,可能是编造的`)
+      }
+    }
+  }
   return issues
 }
 
@@ -667,14 +680,17 @@ export async function regeneratePortrait(options: RegeneratePortraitOptions = {}
     ]
     const response = await completeChat(settings, messages, { temperature: 0.9 })
     let parsed = parseJsonObject<PortraitResponse>(response)
-    const issues = parsed?.portrait ? portraitV2Issues(parsed.portrait) : ['没有返回 portrait']
+    const issues = parsed?.portrait ? portraitV2Issues(parsed.portrait, profile) : ['没有返回 portrait']
     if (issues.length) {
+      const artistHint = issues.some((i) => i.includes('不在用户口味档案中'))
+        ? `\n用户口味档案中的歌手: ${profile.artists.map((a) => a.name).join('、')}。画像中提到的歌手必须来自这个列表。`
+        : ''
       const retryResponse = await completeChat(settings, [
         ...messages,
         { role: 'assistant', content: response },
         {
           role: 'user',
-          content: `上一版没有通过画像 checklist: ${issues.join('；')}。请重写一次,继续严格返回 JSON。`,
+          content: `上一版没有通过画像 checklist: ${issues.join('；')}${artistHint}\n请重写一次,继续严格返回 JSON。`,
         },
       ], { temperature: 0.9 })
       parsed = parseJsonObject<PortraitResponse>(retryResponse) ?? parsed
