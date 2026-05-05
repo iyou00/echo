@@ -573,15 +573,35 @@ function portraitV2Issues(portrait: string, profile?: TasteProfile): string[] {
   }
   if (/(分寸感|续航感|底色|光谱|底韵)/.test(portrait)) issues.push('出现禁用抽象词')
   if (profile?.artists?.length) {
-    const knownNames = new Set(profile.artists.map((a) => a.name.toLowerCase()))
+    const knownNames = new Set([
+      ...profile.artists.map((a) => a.name.toLowerCase()),
+      ...profile.signature_tracks.map((t) => t.artist?.toLowerCase() ?? ''),
+    ])
     const songBlocks = portrait.match(/《([^》]+)》/g) ?? []
+    const reportedArtists = new Set<string>()
     for (const block of songBlocks) {
       const inner = block.slice(1, -1)
-      const dashIndex = inner.indexOf(' - ')
-      if (dashIndex < 0) continue
-      const artistPart = inner.slice(0, dashIndex).trim().toLowerCase()
-      if (artistPart && !knownNames.has(artistPart)) {
-        issues.push(`画像中提到的歌手「${inner.slice(0, dashIndex).trim()}」不在用户口味档案中,可能是编造的`)
+      // 格式1: 《artist - title》
+      const dashMatch = inner.match(/^(.+?)[\s]*[-\-–—][\s]*(.+)$/)
+      if (dashMatch) {
+        const artistPart = dashMatch[1].trim().toLowerCase()
+        if (artistPart && !knownNames.has(artistPart) && !reportedArtists.has(artistPart)) {
+          issues.push(`画像中提到的歌手「${dashMatch[1].trim()}」不在用户口味档案中,可能是编造的`)
+          reportedArtists.add(artistPart)
+        }
+        continue
+      }
+      // 格式2: 《title》— 从《》前面的文本提取可能的歌手名（如 "周杰伦的《晴天》"）
+      const blockIndex = portrait.indexOf(block)
+      if (blockIndex <= 0) continue
+      const before = portrait.slice(Math.max(0, blockIndex - 20), blockIndex)
+      const artistBeforeMatch = before.match(/([一-鿿\w]{2,15})[的]$/)
+      if (artistBeforeMatch) {
+        const artistName = artistBeforeMatch[1].toLowerCase()
+        if (!knownNames.has(artistName) && !reportedArtists.has(artistName)) {
+          issues.push(`画像中提到的歌手「${artistBeforeMatch[1]}」不在用户口味档案中,可能是编造的`)
+          reportedArtists.add(artistName)
+        }
       }
     }
   }
@@ -693,7 +713,11 @@ export async function regeneratePortrait(options: RegeneratePortraitOptions = {}
           content: `上一版没有通过画像 checklist: ${issues.join('；')}${artistHint}\n请重写一次,继续严格返回 JSON。`,
         },
       ], { temperature: 0.9 })
-      parsed = parseJsonObject<PortraitResponse>(retryResponse) ?? parsed
+      const retryParsed = parseJsonObject<PortraitResponse>(retryResponse)
+      if (retryParsed?.portrait) {
+        const retryIssues = portraitV2Issues(retryParsed.portrait, profile)
+        if (retryIssues.length <= issues.length) parsed = retryParsed
+      }
     }
     if (!parsed?.portrait) throw new PortraitRegenerationError('画像文案生成失败：模型没有返回 portrait。')
 
