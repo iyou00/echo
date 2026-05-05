@@ -12,9 +12,60 @@ interface SettingsPageProps extends AppPageProps {
   hasLlmConfig: boolean
   refreshProfile: () => Promise<void>
   refreshQueue: () => Promise<Track[]>
+  importFocusToken?: number
 }
 
-const modelPresets = ['deepseek-chat', 'moonshot-v1-32k', 'gpt-4o', 'glm-4-plus', 'qwen-max']
+const providerPresets: Record<string, { label: string; baseUrl: string; keyHint: string; modelPlaceholder: string; docsUrl: string }> = {
+  deepseek: {
+    label: 'DeepSeek · 深度求索',
+    baseUrl: 'https://api.deepseek.com/v1',
+    keyHint: '本地加密存储。DeepSeek 后台 → API Keys。',
+    modelPlaceholder: 'deepseek-v4-pro',
+    docsUrl: 'https://platform.deepseek.com/api-docs/models',
+  },
+  moonshot: {
+    label: 'Moonshot · Kimi',
+    baseUrl: 'https://api.moonshot.cn/v1',
+    keyHint: '本地加密存储。Kimi 开放平台 → API Key 管理。',
+    modelPlaceholder: 'kimi-k2.5',
+    docsUrl: 'https://platform.moonshot.cn/docs/intro',
+  },
+  zhipu: {
+    label: '智谱 · GLM',
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    keyHint: '本地加密存储。智谱开放平台 → API Keys。',
+    modelPlaceholder: 'glm-5.1',
+    docsUrl: 'https://open.bigmodel.cn/dev/howto/model',
+  },
+  qwen: {
+    label: '通义千问 · Qwen',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    keyHint: '本地加密存储。阿里云百炼 → API Key。',
+    modelPlaceholder: 'qwen3.6-max-preview',
+    docsUrl: 'https://help.aliyun.com/zh/model-studio/getting-started/models',
+  },
+  openai: {
+    label: 'OpenAI',
+    baseUrl: 'https://api.openai.com/v1',
+    keyHint: '本地加密存储。OpenAI → API Keys。',
+    modelPlaceholder: 'gpt-5.5',
+    docsUrl: 'https://platform.openai.com/docs/models',
+  },
+  custom: {
+    label: '自定义',
+    baseUrl: '',
+    keyHint: '本地加密存储。',
+    modelPlaceholder: '模型名',
+    docsUrl: '',
+  },
+}
+
+function detectProvider(baseUrl: string): string {
+  for (const [key, preset] of Object.entries(providerPresets)) {
+    if (key !== 'custom' && preset.baseUrl && baseUrl === preset.baseUrl) return key
+  }
+  return 'custom'
+}
 const defaultTtsBaseUrl = 'https://tts.wangwangit.com'
 const ttsVoices = [
   ['zh-CN-XiaochenNeural', '晓辰 · 知性'],
@@ -42,16 +93,27 @@ const ttsVoices = [
 ]
 
 export function SettingsPage({
+  navigate,
   echo,
   settings,
   setSettings,
   hasLlmConfig,
   refreshProfile,
   refreshQueue,
+  importFocusToken = 0,
 }: SettingsPageProps) {
+  const [provider, setProvider] = useState('deepseek')
   const [baseUrl, setBaseUrl] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [model, setModel] = useState('')
+
+  function switchProvider(key: string) {
+    setProvider(key)
+    const preset = providerPresets[key]
+    if (preset?.baseUrl) setBaseUrl(preset.baseUrl)
+    setTestState('idle')
+    setModelStatus('')
+  }
   const [generateAt, setGenerateAt] = useState('22:00')
   const [openWithRandom, setOpenWithRandom] = useState(false)
   const [restoreOnStart, setRestoreOnStart] = useState(true)
@@ -88,6 +150,7 @@ export function SettingsPage({
   const [showResetConfirm, setShowResetConfirm] = useState(false)
   const [resetConfirmChecked, setResetConfirmChecked] = useState(false)
   const skipHydrateRef = useRef(false)
+  const importSectionRef = useRef<HTMLDivElement | null>(null)
 
   function commitSettings(next: Settings) {
     skipHydrateRef.current = true
@@ -101,6 +164,7 @@ export function SettingsPage({
       return
     }
     setBaseUrl(settings.llm.baseUrl)
+    setProvider(detectProvider(settings.llm.baseUrl))
     setApiKey(settings.llm.apiKey)
     setModel(settings.llm.model)
     setGenerateAt(settings.yinyi.generateAt)
@@ -147,6 +211,13 @@ export function SettingsPage({
       }
     })
   }, [echo])
+
+  useEffect(() => {
+    if (!importFocusToken) return
+    window.setTimeout(() => {
+      importSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    }, 120)
+  }, [importFocusToken])
 
   useEffect(() => {
     if (!neteaseQr) return
@@ -281,6 +352,7 @@ export function SettingsPage({
       setImportStatus(result.imported ? `${result.message ?? `已导入 ${result.count} 首`} · ${result.name ?? '歌单'}` : result.message ?? '导入失败')
       if (result.imported) {
         await Promise.all([refreshProfile(), refreshQueue()])
+        await markImportOnboardingDone()
       }
     } catch (error) {
       setImportState('fail')
@@ -301,6 +373,14 @@ export function SettingsPage({
       setTemplateState('fail')
       setTemplateStatus(error instanceof Error ? error.message : '模板保存失败')
     }
+  }
+
+  async function markImportOnboardingDone() {
+    let next = await echo.settings.update('meta.onboardingStep', 'done')
+    if (!next.meta.onboardingCompletedAt) {
+      next = await echo.settings.update('meta.onboardingCompletedAt', new Date().toISOString())
+    }
+    commitSettings(next)
   }
 
   function importProgressLine(progress: ImportProgressPayload): string {
@@ -510,6 +590,7 @@ export function SettingsPage({
       setNeteasePlaylistStatus(result.imported ? `${result.message} · ${result.name ?? '歌单'}` : result.message ?? '导入失败')
       if (result.imported) {
         await Promise.all([refreshProfile(), refreshQueue()])
+        await markImportOnboardingDone()
       }
     } catch (error) {
       setNeteasePlaylistStatus(error instanceof Error ? error.message : '导入失败')
@@ -577,14 +658,32 @@ export function SettingsPage({
             )}
 
             <label className="field">
-              <div className="field-label">API 端点</div>
-              <div className="field-hint">支持任何 OpenAI 兼容服务。</div>
-              <input className="input" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.example.com/v1" />
+              <div className="field-label">服务商</div>
+              <select className="input" value={provider} onChange={(event) => switchProvider(event.target.value)}>
+                {Object.entries(providerPresets).map(([key, preset]) => (
+                  <option value={key} key={key}>{preset.label}</option>
+                ))}
+              </select>
             </label>
+
+            {provider !== 'custom' && providerPresets[provider] && (
+              <div className="provider-info">
+                <span className="provider-dot" />
+                端点 {providerPresets[provider].baseUrl} · 只需填 Key 即可
+              </div>
+            )}
+
+            {provider === 'custom' && (
+              <label className="field">
+                <div className="field-label">API 端点</div>
+                <div className="field-hint">填写完整的 OpenAI 兼容 Base URL。</div>
+                <input className="input" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.example.com/v1" />
+              </label>
+            )}
 
             <label className="field">
               <div className="field-label">API Key</div>
-              <div className="field-hint">{storageDegraded ? '加密存储不可用，已禁止保存以避免明文写入。' : '本地加密存储。'}</div>
+              <div className="field-hint">{storageDegraded ? '加密存储不可用，已禁止保存以避免明文写入。' : (providerPresets[provider]?.keyHint ?? '本地加密存储。')}</div>
               <input
                 className="input"
                 type="password"
@@ -597,15 +696,17 @@ export function SettingsPage({
 
             <label className="field">
               <div className="field-label">模型</div>
-              <div className="field-hint">点击下方常用预设，或在输入框里自由填写模型名。</div>
-              <div className="model-presets">
-                {modelPresets.map((item) => (
-                  <button type="button" className={model === item ? 'model-tag active' : 'model-tag'} key={item} onClick={() => setModel(item)}>
-                    {item}
-                  </button>
-                ))}
-              </div>
-              <input className="input" value={model} onChange={(event) => setModel(event.target.value)} placeholder="deepseek-chat" />
+              <input
+                className="input"
+                value={model}
+                onChange={(event) => setModel(event.target.value)}
+                placeholder={providerPresets[provider]?.modelPlaceholder ?? '模型名'}
+              />
+              {provider !== 'custom' && providerPresets[provider]?.docsUrl && (
+                <a href={providerPresets[provider].docsUrl} target="_blank" rel="noopener noreferrer" className="model-docs-link">
+                  了解模型名称 ›
+                </a>
+              )}
             </label>
 
             <div className="settings-row">
@@ -653,6 +754,7 @@ export function SettingsPage({
             )}
           </Section>
 
+          <div ref={importSectionRef} className="import-focus-anchor">
           <Section label="絮 语 与 品 味">
             <label className="toggle-row">
               <div className="toggle-text">
@@ -715,6 +817,7 @@ export function SettingsPage({
               </button>
             </div>
           </Section>
+          </div>
 
           <Section label="网 易 云 · v 0 . 2">
             <div className="data-line">
@@ -934,6 +1037,12 @@ export function SettingsPage({
             )}
           </Section>
         </form>
+
+        <div className="about-link">
+          <button type="button" className="about-link-btn" onClick={() => navigate('about')}>
+            关于 Echo &nbsp;›
+          </button>
+        </div>
 
         <footer className="page-foot">E C H O · v 0 . 1 . 0</footer>
       </div>

@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Echo · 首次启动画面</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ayin-900: #173404;
+    --ayin-800: #27500A;
+    --ayin-700: #3B6D11;
+    --ayin-600: #639922;
+    --ayin-500: #75AC2B;
+    --ayin-400: #8FBC57;
+    --ayin-300: #C0DD97;
+    --ayin-100: #EAF3DE;
+    --ayin-50:  #F5FAED;
+    --ayin-25:  #FAFCF6;
+    
+    --serif: "Noto Serif SC", Georgia, serif;
+    --sans: "Noto Sans SC", -apple-system, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  
+  html, body {
+    background: #ECECE6;
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+    padding: 36px 16px 80px;
+  }
+
+  h1 {
+    text-align: center;
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 24px;
+    color: #1A1A1A;
+    margin-bottom: 6px;
+  }
+  .h-sub {
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 2.8px;
+    color: #5F5E5A;
+    margin-bottom: 8px;
+  }
+  .intro {
+    text-align: center;
+    max-width: 640px;
+    margin: 0 auto 36px;
+    font-family: var(--serif);
+    font-style: italic;
+    color: #5F5E5A;
+    font-size: 12.5px;
+    line-height: 1.85;
+  }
+
+  .section-title {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 2.5px;
+    color: #3B6D11;
+    margin: 56px auto 24px;
+    padding: 0 16px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    max-width: 920px;
+  }
+  .section-title::before, .section-title::after {
+    content: '';
+    flex: 1;
+    height: 0.5px;
+    background: rgba(0,0,0,0.1);
+  }
+
+  /* ============================================ */
+  /* 真实尺寸的"实时演示"画面(默认显示) */
+  /* ============================================ */
+  
+  .demo-wrap {
+    max-width: 880px;
+    margin: 0 auto 24px;
+    text-align: center;
+  }
+  
+  .demo-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 2.2px;
+    color: #5F5E5A;
+    margin-bottom: 14px;
+  }
+  .demo-title {
+    font-family: var(--serif);
+    font-size: 16px;
+    font-weight: 500;
+    margin-bottom: 4px;
+  }
+  .demo-desc {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 11.5px;
+    color: #5F5E5A;
+    margin-bottom: 18px;
+    line-height: 1.7;
+  }
+
+  /* === Echo App Frame · 模拟实际 app 窗口 === */
+  .app-frame {
+    width: 880px;
+    height: 580px;
+    margin: 0 auto;
+    background: linear-gradient(135deg, var(--ayin-25) 0%, var(--ayin-50) 50%, var(--ayin-100) 100%);
+    border-radius: 14px;
+    box-shadow: 0 18px 42px rgba(0,40,0,0.16), 0 4px 12px rgba(0,40,0,0.08);
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  
+  /* 模拟无边框窗口顶部(只放窗口控制) */
+  .frame-topbar {
+    height: 36px;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    padding: 0 12px;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  .ctrl {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    border: 0.5px solid rgba(99,153,34,0.3);
+    background: transparent;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s;
+  }
+  .ctrl:hover { background: rgba(99,153,34,0.12); }
+  .ctrl-min { width: 8px; height: 1.2px; background: var(--ayin-700); border-radius: 1px; }
+  .ctrl-max { width: 7px; height: 7px; border: 1.1px solid var(--ayin-700); border-radius: 1.5px; }
+  .ctrl-x-line { width: 8px; height: 1.2px; background: var(--ayin-700); transform: rotate(45deg); position: relative; border-radius: 1px; }
+  .ctrl-x-line::after { content: ''; position: absolute; inset: 0; background: var(--ayin-700); transform: rotate(-90deg); border-radius: 1px; }
+
+  /* 主舞台 */
+  .stage {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 0 24px 60px;
+    position: relative;
+  }
+
+  /* 光点 · 永久呼吸 */
+  .orb {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, var(--ayin-500), var(--ayin-700) 70%);
+    box-shadow: 
+      0 4px 18px rgba(99,153,34,0.35),
+      inset -4px -6px 12px rgba(23,52,4,0.3);
+    margin-bottom: 56px;
+    animation: orb-breathe 2.4s ease-in-out infinite;
+    opacity: 0;
+    animation-delay: 0.5s;
+    animation-fill-mode: forwards;
+  }
+  
+  @keyframes orb-breathe {
+    0% { opacity: 0; transform: scale(0.94); }
+    10% { opacity: 1; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.04); }
+    100% { opacity: 1; transform: scale(1); }
+  }
+
+  /* 文字三段 · 累加显示 */
+  .lines {
+    text-align: center;
+    margin-bottom: 56px;
+  }
+  
+  .line {
+    font-family: var(--serif);
+    font-size: 22px;
+    font-weight: 500;
+    color: var(--ayin-900);
+    letter-spacing: 0.4px;
+    line-height: 1.95;
+    opacity: 0;
+    animation-fill-mode: forwards;
+    animation-duration: 1s;
+    animation-timing-function: ease-out;
+  }
+  
+  .line-1 {
+    animation-name: line-fade-in;
+    animation-delay: 1.5s;
+  }
+  
+  .line-2 {
+    animation-name: line-fade-in;
+    animation-delay: 2.8s;
+    margin-top: 4px;
+  }
+  
+  .line-3 {
+    animation-name: line-fade-in;
+    animation-delay: 4.0s;
+    margin-top: 14px;
+    font-size: 19px;  /* 第 3 段稍小,因为是问句 */
+  }
+  
+  @keyframes line-fade-in {
+    0% { opacity: 0; transform: translateY(6px); }
+    100% { opacity: 1; transform: translateY(0); }
+  }
+
+  /* 按钮 · 描边主色 · 邀请感 */
+  .cta {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 3px;
+    padding: 11px 28px;
+    border: 0.5px solid var(--ayin-600);
+    background: transparent;
+    color: var(--ayin-700);
+    border-radius: 22px;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    opacity: 0;
+    animation: cta-fade-in 0.7s ease-out 5.8s forwards;
+  }
+  .cta:hover {
+    background: var(--ayin-600);
+    color: white;
+    border-color: var(--ayin-600);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(99,153,34,0.3);
+  }
+  .cta:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 8px rgba(99,153,34,0.4);
+  }
+  
+  @keyframes cta-fade-in {
+    0% { opacity: 0; transform: translateY(8px); }
+    100% { opacity: 1; transform: translateY(0); }
+  }
+
+  /* 重新播放按钮 */
+  .replay {
+    margin: 14px auto 0;
+    text-align: center;
+  }
+  .replay-btn {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--ayin-700);
+    cursor: pointer;
+    padding: 6px 14px;
+    border: 0.5px solid rgba(99,153,34,0.4);
+    background: white;
+    border-radius: 14px;
+    transition: all 0.15s;
+  }
+  .replay-btn:hover { background: var(--ayin-50); }
+
+  /* ============================================ */
+  /* 时序图 */
+  /* ============================================ */
+
+  .timeline {
+    max-width: 760px;
+    margin: 0 auto;
+    background: white;
+    border-radius: 12px;
+    padding: 24px 28px;
+    box-shadow: 0 4px 14px rgba(0,40,0,0.06);
+  }
+  .timeline h3 {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 2.2px;
+    color: var(--ayin-700);
+    margin-bottom: 18px;
+    font-weight: 500;
+  }
+  .ts-row {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    padding: 8px 0;
+    border-bottom: 0.5px solid rgba(0,0,0,0.06);
+  }
+  .ts-row:last-child { border: 0; }
+  .ts-time {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ayin-600);
+    letter-spacing: 0.5px;
+    width: 64px;
+    flex-shrink: 0;
+    padding-top: 1px;
+    font-weight: 500;
+  }
+  .ts-event {
+    font-size: 13px;
+    color: #1A1A1A;
+    line-height: 1.65;
+    flex: 1;
+  }
+  .ts-event b { color: var(--ayin-800); font-weight: 500; }
+  .ts-event small {
+    display: block;
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 11.5px;
+    color: #5F5E5A;
+    margin-top: 2px;
+  }
+
+  .ts-row.user-action {
+    background: var(--ayin-50);
+    margin: 4px -28px;
+    padding: 12px 28px;
+    border-bottom: 0;
+    border-left: 1.5px solid var(--ayin-600);
+  }
+  .ts-row.user-action .ts-time {
+    color: var(--ayin-700);
+  }
+
+  /* 4 帧定格图(展示动画过程的 4 个时间点) */
+  .keyframes-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    max-width: 920px;
+    margin: 0 auto;
+  }
+  
+  .kf {
+    background: linear-gradient(135deg, var(--ayin-25) 0%, var(--ayin-50) 50%, var(--ayin-100) 100%);
+    border-radius: 10px;
+    aspect-ratio: 4/3;
+    padding: 16px 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    box-shadow: 0 6px 16px rgba(0,40,0,0.08);
+    position: relative;
+  }
+  .kf-time {
+    position: absolute;
+    top: 8px;
+    left: 10px;
+    font-family: var(--mono);
+    font-size: 8.5px;
+    color: var(--ayin-700);
+    letter-spacing: 1px;
+  }
+  .kf-orb {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, var(--ayin-500), var(--ayin-700) 70%);
+    box-shadow: 0 2px 10px rgba(99,153,34,0.35), inset -2px -3px 6px rgba(23,52,4,0.3);
+    margin-bottom: 12px;
+  }
+  .kf-orb.invisible { opacity: 0; }
+  .kf-line {
+    font-family: var(--serif);
+    font-size: 10px;
+    color: var(--ayin-900);
+    line-height: 1.7;
+    margin-bottom: 2px;
+  }
+  .kf-line.dim { opacity: 0.25; }
+  .kf-cta {
+    margin-top: 10px;
+    font-family: var(--mono);
+    font-size: 7.5px;
+    letter-spacing: 1.2px;
+    padding: 4px 10px;
+    border: 0.5px solid var(--ayin-600);
+    color: var(--ayin-700);
+    border-radius: 9px;
+  }
+  .kf-cta.dim { opacity: 0; }
+
+  .kf-label {
+    text-align: center;
+    margin-top: 8px;
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 1.2px;
+    color: #5F5E5A;
+  }
+
+  /* 设计说明 */
+  .specs {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 18px 22px;
+    background: var(--ayin-50);
+    border-left: 2.5px solid var(--ayin-600);
+    border-radius: 8px;
+    font-size: 12.5px;
+    line-height: 1.85;
+    color: var(--ayin-900);
+  }
+  .specs h4 {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 2px;
+    color: var(--ayin-700);
+    margin-bottom: 10px;
+    font-weight: 500;
+  }
+  .specs ul {
+    padding-left: 18px;
+  }
+  .specs li {
+    margin-bottom: 4px;
+  }
+  .specs code {
+    font-family: var(--mono);
+    background: white;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 11px;
+    color: var(--ayin-800);
+  }
+</style>
+</head>
+<body>
+
+<h1>Echo · 首次启动画面</h1>
+<div class="h-sub">F I R S T - R U N &nbsp; W E L C O M E &nbsp; · &nbsp; H I G H - F I D E L I T Y</div>
+<div class="intro">
+  累加显示 · 用户驱动 · 等你回来 · 不催<br>
+  这是 Echo 这个产品对用户说的<b>第一个词</b>
+</div>
+
+<div class="section-title">实 时 演 示 · 在 这 里 看 完 整 动 画</div>
+
+<div class="demo-wrap">
+  <div class="demo-label">▶ &nbsp; L I V E &nbsp; D E M O</div>
+  <div class="demo-title">完整 6 秒动画</div>
+  <div class="demo-desc">页面打开后会自动播放,鼠标移到按钮可看 hover 效果。点"重新播放"再看一次。</div>
+
+  <div class="app-frame" id="app-frame">
+    <!-- 顶部窗口控制(无边框模式) -->
+    <div class="frame-topbar">
+      <button class="ctrl"><div class="ctrl-min"></div></button>
+      <button class="ctrl"><div class="ctrl-max"></div></button>
+      <button class="ctrl"><div class="ctrl-x-line"></div></button>
+    </div>
+    
+    <!-- 主舞台 -->
+    <div class="stage">
+      <div class="orb"></div>
+      
+      <div class="lines">
+        <div class="line line-1">你 好。</div>
+        <div class="line line-2">我 是 Echo。</div>
+        <div class="line line-3">我 还 不 认 识 你 ——<br>你 给 我 看 看 你 听 什 么?</div>
+      </div>
+      
+      <button class="cta">没 &nbsp; 问 &nbsp; 题</button>
+    </div>
+  </div>
+
+  <div class="replay">
+    <button class="replay-btn" onclick="replay()">↻ &nbsp; 重 新 播 放</button>
+  </div>
+</div>
+
+
+<div class="section-title">动 画 时 序</div>
+
+<div class="timeline">
+  <h3>T I M E L I N E · 6 秒展开 · 之后永久等待</h3>
+  
+  <div class="ts-row">
+    <div class="ts-time">t = 0</div>
+    <div class="ts-event">
+      <b>画面出现 · 抹茶绿渐变底</b>
+      <small>从 #FAFCF6 → #F5FAED → #EAF3DE 的柔和渐变,135deg 斜向</small>
+    </div>
+  </div>
+  
+  <div class="ts-row">
+    <div class="ts-time">0.5s</div>
+    <div class="ts-event">
+      <b>光点 fade-in,开始呼吸</b>
+      <small>48px 光点中央位置,2.4s 周期 scale 1.0 ↔ 1.04 缓动呼吸</small>
+    </div>
+  </div>
+  
+  <div class="ts-row">
+    <div class="ts-time">1.5s</div>
+    <div class="ts-event">
+      <b>第 1 行 "你 好。" 淡入</b>
+      <small>衬线 22px · 主色 #173404 · 字距 0.4px · 不消失,会保留到底</small>
+    </div>
+  </div>
+  
+  <div class="ts-row">
+    <div class="ts-time">2.8s</div>
+    <div class="ts-event">
+      <b>第 2 行 "我 是 Echo。" 淡入</b>
+      <small>第 1 行依然在</small>
+    </div>
+  </div>
+  
+  <div class="ts-row">
+    <div class="ts-time">4.0s</div>
+    <div class="ts-event">
+      <b>第 3 行问句淡入</b>
+      <small>"我还不认识你 —— 你给我看看你听什么?" · 字号略小到 19px,因为是问句,降低权重让它不抢主标</small>
+    </div>
+  </div>
+  
+  <div class="ts-row">
+    <div class="ts-time">5.5s</div>
+    <div class="ts-event">
+      <b>按钮 "没 问 题" 淡入</b>
+      <small>描边主色按钮 · 等宽字 · 字距 3px · padding 11px 28px</small>
+    </div>
+  </div>
+  
+  <div class="ts-row">
+    <div class="ts-time">6.5s</div>
+    <div class="ts-event">
+      <b>★ 全部就位 · 永久等待用户</b>
+      <small>光点继续呼吸 · 文字保持 · 按钮等待点击 · <b>不自动跳转</b>,用户可以走开 30 分钟回来再点</small>
+    </div>
+  </div>
+
+  <div class="ts-row user-action">
+    <div class="ts-time">[ 点击 ]</div>
+    <div class="ts-event">
+      <b>用户点击"没问题"按钮</b>
+      <small>按钮 active 状态(下沉 1px)→ 整个画面 1s 淡出 → 进入 onboarding 第一步(导入歌单)</small>
+    </div>
+  </div>
+</div>
+
+
+<div class="section-title">4 帧 关 键 状 态</div>
+
+<div class="keyframes-grid">
+  <div>
+    <div class="kf">
+      <div class="kf-time">t = 0.5s</div>
+      <div class="kf-orb"></div>
+      <div class="kf-line dim">你好。</div>
+      <div class="kf-line dim">我是 Echo。</div>
+      <div class="kf-line dim">我还不认识你...</div>
+      <div class="kf-cta dim">没问题</div>
+    </div>
+    <div class="kf-label">F R A M E &nbsp; 1 &nbsp; · &nbsp; 光点出现</div>
+  </div>
+  
+  <div>
+    <div class="kf">
+      <div class="kf-time">t = 2.8s</div>
+      <div class="kf-orb"></div>
+      <div class="kf-line">你好。</div>
+      <div class="kf-line">我是 Echo。</div>
+      <div class="kf-line dim">我还不认识你...</div>
+      <div class="kf-cta dim">没问题</div>
+    </div>
+    <div class="kf-label">F R A M E &nbsp; 2 &nbsp; · &nbsp; 双行就位</div>
+  </div>
+  
+  <div>
+    <div class="kf">
+      <div class="kf-time">t = 4.5s</div>
+      <div class="kf-orb"></div>
+      <div class="kf-line">你好。</div>
+      <div class="kf-line">我是 Echo。</div>
+      <div class="kf-line">我还不认识你 ——</div>
+      <div class="kf-line">你给我看看你听什么?</div>
+      <div class="kf-cta dim">没问题</div>
+    </div>
+    <div class="kf-label">F R A M E &nbsp; 3 &nbsp; · &nbsp; 问句出现</div>
+  </div>
+  
+  <div>
+    <div class="kf">
+      <div class="kf-time">t = 6s+</div>
+      <div class="kf-orb"></div>
+      <div class="kf-line">你好。</div>
+      <div class="kf-line">我是 Echo。</div>
+      <div class="kf-line">我还不认识你 ——</div>
+      <div class="kf-line">你给我看看你听什么?</div>
+      <div class="kf-cta">没问题</div>
+    </div>
+    <div class="kf-label">F R A M E &nbsp; 4 &nbsp; · &nbsp; 等你回来</div>
+  </div>
+</div>
+
+
+<div class="section-title">设 计 决 策</div>
+
+<div class="specs">
+  <h4>① &nbsp; 为 什 么 累 加 显 示 不 是 切 换</h4>
+  <ul>
+    <li>用户可能装完软件去倒水 / 接电话,5 秒内不在屏幕前</li>
+    <li>累加显示意味着 — <b>晚回来 30 秒,第一行还在那等你</b></li>
+    <li>切换显示则前两帧错过就错过了,失去仪式</li>
+  </ul>
+  
+  <h4 style="margin-top: 16px;">② &nbsp; 为 什 么 不 自 动 进 入 onboarding</h4>
+  <ul>
+    <li>这是 Echo 对用户说的<b>第一个词</b> · 仪式必须由用户主动结束</li>
+    <li>"没问题"这个动作让用户<b>第一次回应 Echo</b> — 这是关系的开始</li>
+    <li>自动跳转 = 把用户当成被流程拖着走的人,违反 Echo 的"朋友感"</li>
+  </ul>
+
+  <h4 style="margin-top: 16px;">③ &nbsp; 为 什 么 没 有 "跳 过" 按 钮</h4>
+  <ul>
+    <li>这一段 6 秒一辈子只看一次,<b>不需要跳过</b></li>
+    <li>有跳过按钮 = 暗示这是流程,削弱仪式感</li>
+    <li>用户真不想看,会直接关掉 app(下次再开依然看到这一段)</li>
+  </ul>
+  
+  <h4 style="margin-top: 16px;">④ &nbsp; 为 什 么 第 3 行 字 号 比 前 两 行 小</h4>
+  <ul>
+    <li>第 1、2 行是<b>陈述句 / 自我介绍</b>,字号 22px 主标</li>
+    <li>第 3 行是<b>问句 / 邀请</b>,字号 19px,权重次一档</li>
+    <li>视觉重心仍在前两行的"你好 / 我是 Echo",问句作为<b>引出按钮的桥梁</b></li>
+  </ul>
+
+  <h4 style="margin-top: 16px;">⑤ &nbsp; 为 什 么 按 钮 不 用 主 色 实 心</h4>
+  <ul>
+    <li>主程序里所有"主操作"按钮都是<b>主色实心</b>(发送 / 播放)</li>
+    <li>启动画面的按钮是<b>邀请,不是命令</b> · 描边比实心更克制</li>
+    <li>hover 时变实心 — 用户主动伸手时,按钮才"亮起"</li>
+  </ul>
+
+  <h4 style="margin-top: 16px;">⑥ &nbsp; 触 发 条 件</h4>
+  <ul>
+    <li>检查 <code>localStorage.firstRunCompleted</code> · 不存在 → 显示启动画面</li>
+    <li>用户点"没问题" → 写入 <code>firstRunCompleted = true</code> + 时间戳</li>
+    <li>之后所有启动 → 走 echo 字母闪屏 → 进 app 主页</li>
+    <li>用户重置数据 / 重装,标记会清空,启动画面会再次出现</li>
+  </ul>
+
+  <h4 style="margin-top: 16px;">⑦ &nbsp; 与 现 有 echo 字 母 闪 屏 的 关 系</h4>
+  <ul>
+    <li>每次启动:<b>echo 字母闪屏(0.8s 自动消失) → 主程序</b></li>
+    <li>第一次启动:<b>echo 字母闪屏(0.8s 自动消失) → 这个仪式画面 → 用户点击 → onboarding</b></li>
+    <li>两个东西<b>互不冲突</b>,前者是 splash,后者是 welcome</li>
+  </ul>
+</div>
+
+
+<script>
+  function replay() {
+    const frame = document.getElementById('app-frame');
+    const clone = frame.cloneNode(true);
+    frame.parentNode.replaceChild(clone, frame);
+    clone.id = 'app-frame';
+  }
+</script>
+
+</body>
+</html>

@@ -102,7 +102,6 @@ export function YinyiPage({ echo, isActive, openWithRandom }: YinyiPageProps) {
       return (
         <EmptyState
           muted
-          icon=" "
           title="那天我们没见。我等了你一会儿。"
           sign="— E C H O"
         />
@@ -133,7 +132,6 @@ export function YinyiPage({ echo, isActive, openWithRandom }: YinyiPageProps) {
     return (
       <EmptyState
         muted
-        icon=" "
         title="那天我们没见。我等了你一会儿。"
         action={date === isoDate() ? <button className="primary-button empty-cta" onClick={generate}>生成这一篇</button> : undefined}
         sign="— E C H O"
@@ -163,13 +161,16 @@ export function YinyiPage({ echo, isActive, openWithRandom }: YinyiPageProps) {
             <input ref={dateInputRef} type="date" value={date} onChange={(event) => setDate(event.target.value)} />
           </span>
           <button className="tb-btn icon-only" onClick={randomEntry} title="随手翻一页">⤴</button>
+          <button className="tb-btn" onClick={generate} disabled={loading}>生 成</button>
           <button className="tb-btn" onClick={() => setDate(isoDate())}>今 日</button>
         </div>
       </div>
 
+      <button className="page-hot left" onClick={() => shift(-1)} title="前一天"><span className="page-arrow">‹</span></button>
+      <button className="page-hot right" onClick={() => shift(1)} title="后一天"><span className="page-arrow">›</span></button>
+
       <div className="yinyi-scroll">
         <div className="book">
-          <button className="page-hot left" onClick={() => shift(-1)} title="前一天"><span className="page-arrow">‹</span></button>
           <article className="paper-page">
             <div className="page-head">
               <span className="date-stamp">{spacedDate(date)}</span>
@@ -192,19 +193,6 @@ export function YinyiPage({ echo, isActive, openWithRandom }: YinyiPageProps) {
               </div>
             )}
           </article>
-          <button className="page-hot right" onClick={() => shift(1)} title="后一天"><span className="page-arrow">›</span></button>
-        </div>
-
-        <div className="meta-bar">
-          <div className="meta-nav">
-            <button onClick={() => shift(-1)}>‹</button>
-            <span>前一天</span>
-          </div>
-          <div className="page-num">第 {range.findIndex((item) => item.date === date) + 1 || '-'} 篇 · 已陪伴 {range.length} 天</div>
-          <div className="meta-nav">
-            <button onClick={generate}>生成</button>
-            <button onClick={() => shift(1)}>›</button>
-          </div>
         </div>
       </div>
     </div>

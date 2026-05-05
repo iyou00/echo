@@ -7,24 +7,11 @@ const sceneListeners = new Set<(scene: ActiveScene | null) => void>()
 
 export const sceneDefinitions: SceneDefinition[] = [
   {
-    key: 'work',
-    label: '工作',
-    shortLabel: '工 作',
-    line: '让节奏慢慢提起来,先别太炸。',
-    prompt: '我想进入工作状态,帮我推荐 5 首歌曲。',
-    targetCount: 5,
-    moods: ['清醒', '陪伴'],
-    scenes: ['下午工作'],
-    energy: 'medium',
-    tempo: 'medium',
-    familiarity: 'balanced',
-  },
-  {
     key: 'focus',
-    label: '专注',
-    shortLabel: '专 注',
+    label: '静下来',
+    shortLabel: '静下来',
     line: '少一点存在感,让节奏稳定铺着。',
-    prompt: '我想专注一会儿,帮我推荐 5 首不抢注意力的歌曲。',
+    prompt: '想静一会儿,帮我找几首不抢注意力的歌。',
     targetCount: 5,
     moods: ['松弛', '陪伴'],
     scenes: ['独处', '下午工作'],
@@ -34,10 +21,10 @@ export const sceneDefinitions: SceneDefinition[] = [
   },
   {
     key: 'sleepy',
-    label: '犯困',
-    shortLabel: '犯 困',
+    label: '有点困',
+    shortLabel: '有点困',
     line: '把精神提一下,别一下子太猛。',
-    prompt: '我有点犯困,帮我推荐 5 首提神但别太炸的歌曲。',
+    prompt: '有点犯困,帮我找几首提神但别太炸的歌。',
     targetCount: 5,
     moods: ['清醒', '轻快'],
     scenes: ['下午工作'],
@@ -47,10 +34,10 @@ export const sceneDefinitions: SceneDefinition[] = [
   },
   {
     key: 'relax',
-    label: '放松',
-    shortLabel: '放 松',
+    label: '松口气',
+    shortLabel: '松口气',
     line: '工作间隙缓一下,别把情绪拽太深。',
-    prompt: '我想放松一下,帮我推荐 5 首轻一点的歌曲。',
+    prompt: '想松口气,帮我找几首轻一点的歌。',
     targetCount: 5,
     moods: ['松弛', '治愈'],
     scenes: ['独处'],
@@ -59,24 +46,11 @@ export const sceneDefinitions: SceneDefinition[] = [
     familiarity: 'safe',
   },
   {
-    key: 'rain',
-    label: '雨天',
-    shortLabel: '雨 天',
-    line: '窗外慢一点,歌也慢一点。',
-    prompt: '雨天这个气氛,帮我推荐 5 首歌曲。',
-    targetCount: 5,
-    moods: ['怀旧', '发呆'],
-    scenes: ['雨天'],
-    energy: 'low',
-    tempo: 'slow',
-    familiarity: 'balanced',
-  },
-  {
     key: 'irritated',
-    label: '烦躁',
-    shortLabel: '烦 躁',
+    label: '有点烦',
+    shortLabel: '有点烦',
     line: '先降噪,让脑子别继续被推着走。',
-    prompt: '我有点烦躁,帮我推荐 5 首别太吵的歌曲。',
+    prompt: '有点烦,帮我找几首能让脑子安静下来的歌。',
     targetCount: 5,
     moods: ['松弛', '治愈'],
     scenes: ['独处'],
@@ -86,10 +60,10 @@ export const sceneDefinitions: SceneDefinition[] = [
   },
   {
     key: 'random',
-    label: '随便听',
-    shortLabel: '随 便',
+    label: '随便吧',
+    shortLabel: '随便吧',
     line: '交给 Echo 发散,从你的口味里随手捞。',
-    prompt: '随便听点什么吗?不改的话,就给你自动连播 5 首哦。',
+    prompt: '随便听点什么,从我的口味里捞几首就好。',
     targetCount: 5,
     moods: ['陪伴'],
     scenes: ['下午工作'],
@@ -238,6 +212,26 @@ export function endCurrentScene(): ActiveScene | null {
   const ended = { ...current, status: 'ended' as const, endedAt: new Date().toISOString() }
   emitScene(null)
   return ended
+}
+
+export function isSceneSessionCurrent(sceneId: number): boolean {
+  return getCurrentScene()?.id === sceneId
+}
+
+export function hasNewerSceneSession(scene: ActiveScene): boolean {
+  expireOverdueScenes()
+  const row = getDb()
+    .prepare(`
+      SELECT id
+      FROM scene_sessions
+      WHERE user_id = 1
+        AND id > ?
+        AND datetime(started_at) >= datetime(?)
+      ORDER BY id DESC
+      LIMIT 1
+    `)
+    .get(scene.id, scene.startedAt) as { id: number } | undefined
+  return Boolean(row)
 }
 
 function durationMinutes(startedAt: string, endedAt?: string, expiresAt?: string): number {

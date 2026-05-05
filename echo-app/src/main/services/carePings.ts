@@ -132,14 +132,9 @@ async function buildPromptContext(track?: Track) {
   const recentConversations = conversations.length > 0
     ? conversations.map((item) => `${item.role}: ${item.content.slice(0, 120)}`).join('\n')
     : '(暂无)'
-  const currentTime = new Date().toLocaleString('zh-CN', {
-    hour12: false,
-    weekday: 'long',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  const now = new Date()
+  const w = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+  const currentTime = `${now.getMonth() + 1}月${now.getDate()}日 ${w[now.getDay()]} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
   return {
     currentTime,
     weather: weather?.summary ?? '未知',

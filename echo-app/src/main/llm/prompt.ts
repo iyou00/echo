@@ -33,7 +33,6 @@ export function buildChatContext(userText: string, options: ChatContextOptions =
   const history = loadTodayConversations(12)
   const recentSeal = getMostRecentSeal()
   const candidates = options.recommendationCandidates ?? []
-  const followUpQuestion = options.followUpQuestion
   const musicSession = buildTodayMusicSessionSummary()
   const sceneContext = buildCurrentSceneContext()
   const candidatesBlock = candidates.length > 0
@@ -50,13 +49,12 @@ ${formatCandidates(candidates)}
 未登录或登录已过期。在没有登录之前，你拿不到任何可播放的歌。请用 Echo 的语气告诉 Ta：现在还没接上网易云，去设置页扫一下码就能开始挑歌。不要硬编候选歌名。
 </netease_status>`
     : ''
-  const followUpBlock = followUpQuestion
+  const curiosityBlock = options.followUpQuestion
     ? `
 
-<taste_followup_question>
-这轮可以自然追问一次，问题是：${followUpQuestion.content}
-要求：先完整回应用户当前需求；问题只能放在末尾，像朋友顺手问一句；不要说“系统/画像/pending/问题池”；不要连续追问多个问题。
-</taste_followup_question>`
+<taste_curiosity>
+你最近在想：${options.followUpQuestion.content}
+</taste_curiosity>`
     : ''
 
   const messages: LlmMessage[] = [
@@ -69,8 +67,8 @@ ${profile?.echo_portrait ?? '用户还没有导入歌单，Echo 对 Ta 的品味
 </taste_profile_summary>
 
 <current_context>
-- 当前时间:${new Date().toLocaleString('zh-CN', { hour12: false })}
-</current_context>${candidatesBlock}${authBlock}${followUpBlock}
+- 当前时间:${(() => { const n = new Date(); const w = ['周日','周一','周二','周三','周四','周五','周六']; return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')} ${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')} ${w[n.getDay()]}` })()}
+</current_context>${candidatesBlock}${authBlock}${curiosityBlock}
 <today_music_session>
 ${musicSession}
 </today_music_session>

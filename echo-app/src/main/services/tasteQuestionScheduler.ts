@@ -7,6 +7,7 @@ import {
   getLatestAskedPendingQuestion,
   getPendingQuestions,
   hasTasteQuestionBeenAsked,
+  hasRecentTasteQuestionForTrack,
   markTasteQuestionAsked,
   addTasteQuestion,
 } from '../db/taste'
@@ -18,6 +19,8 @@ import { completeChat } from '../llm/client'
 const DAILY_QUESTION_LIMIT = 3
 const MIN_USER_TURNS_AFTER_QUESTION = 2
 const FOLLOW_UP_CLASSIFIER_TIMEOUT_MS = 2500
+const RECOMMENDATION_FOLLOW_UP_COOLDOWN_DAYS = 7
+const RECOMMENDATION_FOLLOW_UP_EXPIRES_MS = 24 * 60 * 60 * 1000
 
 export type PendingQuestionReplyAction = 'none' | 'answer_only' | 'extend_recommendation'
 
@@ -27,6 +30,28 @@ export interface PendingQuestionReplyCapture {
   polarity?: 'positive' | 'negative' | 'mixed' | 'neutral'
   focus?: string
   recommendationText?: string
+}
+
+function stableIndex(value: string, modulo: number): number {
+  let hash = 0
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0
+  }
+  return modulo > 0 ? hash % modulo : 0
+}
+
+function buildRecommendationFollowUpQuestion(track: Track): string {
+  const variants = [
+    `刚才这首《${track.title}》，你更被旋律、人声，还是整体氛围打到？`,
+    `我想记一下，《${track.title}》对你来说更像是旋律对了，还是声音和氛围对了？`,
+    `这首《${track.title}》如果算贴近，你觉得主要贴在哪：人声、旋律，还是那种感觉？`,
+    `《${track.title}》这首我想确认一下：它打中你的是唱的人、旋律，还是整体气质？`,
+  ]
+  return variants[stableIndex(`${track.title}::${track.artist}`, variants.length)]
+}
+
+function recommendationFollowUpExpiresAt(): string {
+  return new Date(Date.now() + RECOMMENDATION_FOLLOW_UP_EXPIRES_MS).toISOString().slice(0, 19).replace('T', ' ')
 }
 
 function compact(value: string): string {
@@ -119,8 +144,10 @@ function detectAnswerFocus(text: string): string {
 }
 
 function ruleClassifyPendingReply(text: string): PendingQuestionReplyCapture['action'] | null {
+  const explicitFreshMusic = /(来一首|来几首|推荐|推|放首|放点|找首|找一首|给我).{0,18}(歌|音乐|曲|粤语|英文|欧美|华语|韩语|日语|激昂|热血|舒缓|慢歌|快歌|放松|欢快|魔力红|maroon)/i
+  if (explicitFreshMusic.test(text) && !/(这种|那种|类似|这个方向|氛围|感觉|味道)/.test(text)) return 'none'
   if (looksLikeFollowUpExtension(text)) return 'extend_recommendation'
-  if (/(来一首|来几首|推荐|推|放首|放点|找首|找一首|给我).{0,18}(歌|音乐|曲|粤语|英文|欧美|华语|韩语|日语|激昂|热血|舒缓|慢歌|快歌|放松|欢快|魔力红|maroon)/i.test(text)) return 'none'
+  if (explicitFreshMusic.test(text)) return 'none'
   if (isLikelyAnswer(text)) return 'answer_only'
   if (/^(嗯|对|是|可以|还行|不错|喜欢|算|挺好)[呀啊吧的了，。!！?？]*$/.test(text)) return 'answer_only'
   if (looksLikeFreshMusicRequest(text)) return 'none'
@@ -196,6 +223,11 @@ function buildRecommendationTextFromAnswer(text: string, question: TasteQuestion
   return `像${seed}这种感觉，${text}。${countHint}可播放的歌。`
 }
 
+export const tasteQuestionSchedulerTestHelpers = {
+  buildRecommendationTextFromAnswer,
+  ruleClassifyPendingReply,
+}
+
 async function classifyPendingQuestionReply(text: string, question: TasteQuestion): Promise<PendingQuestionReplyCapture['action']> {
   const ruleAction = ruleClassifyPendingReply(text)
   if (ruleAction) return ruleAction
@@ -244,10 +276,12 @@ function addConversationQuestions(userText: string): void {
 function addCurrentRecommendationQuestions(userText: string, tracks: Track[]): void {
   if (!/喜欢|不喜欢|感觉|想听|来|推|推荐|这首|这种|那种|歌|声音|氛围|慢|快|燃|粤语|英文/.test(userText)) return
   for (const track of tracks.slice(0, 2)) {
+    if (hasRecentTasteQuestionForTrack('recommendation_followup', track.title, track.artist, RECOMMENDATION_FOLLOW_UP_COOLDOWN_DAYS)) continue
     addTasteQuestion(
       'recommendation_followup',
-      `刚才我给你接了《${track.title}》，我想确认一下：你更吃它的旋律、人声，还是这首歌的氛围？`,
+      buildRecommendationFollowUpQuestion(track),
       { source: 'current_recommendation', title: track.title, artist: track.artist },
+      recommendationFollowUpExpiresAt(),
     )
   }
 }
@@ -345,14 +379,6 @@ export function pickTasteFollowUpQuestion(userText: string, tracks: Track[]): Ta
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score)
   return candidates[0]?.question ?? null
-}
-
-export function appendFollowUpQuestion(content: string, question: TasteQuestion | null): string {
-  if (!question) return content
-  const text = content.trim()
-  if (!text) return content
-  if (compact(text).includes(compact(question.content).slice(0, 8))) return text
-  return `${text}\n\n顺便问一句，${question.content}`
 }
 
 export function recordFollowUpQuestionAsked(question: TasteQuestion | null, conversationId: number): void {

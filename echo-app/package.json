@@ -10,6 +10,8 @@
     "dist": "npm run build && electron-builder --win nsis",
     "rebuild:native": "electron-builder install-app-deps",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "test": "vitest run --config vitest.config.ts",
+    "test:watch": "vitest --config vitest.config.ts",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -18,22 +20,21 @@
     "dotenv": "^16.5.0",
     "jszip": "^3.10.1",
     "lucide-react": "^0.468.0",
-    "node-cron": "^3.0.3",
+    "node-cron": "^4.2.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.15.2",
-    "@types/node-cron": "^3.0.11",
     "@types/react": "^18.3.20",
     "@types/react-dom": "^18.3.6",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
     "@vitejs/plugin-react": "^4.4.1",
     "autoprefixer": "^10.4.21",
-    "electron": "^30.5.1",
-    "electron-builder": "^24.13.3",
+    "electron": "^35.7.5",
+    "electron-builder": "^26.9.0",
     "eslint": "^8.57.1",
     "eslint-plugin-react-hooks": "^4.6.2",
     "eslint-plugin-react-refresh": "^0.4.20",
@@ -42,7 +43,8 @@
     "typescript": "^5.8.3",
     "vite": "^5.4.19",
     "vite-plugin-electron": "^0.28.8",
-    "vite-plugin-electron-renderer": "^0.14.6"
+    "vite-plugin-electron-renderer": "^0.14.6",
+    "vitest": "^4.1.5"
   },
   "build": {
     "appId": "local.echo.app",
@@ -56,12 +58,16 @@
       {
         "from": "../prompts",
         "to": "prompts",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "../samples",
         "to": "samples",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "asarUnpack": [

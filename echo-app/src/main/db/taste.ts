@@ -17,14 +17,14 @@ export function saveTasteProfile(profile: TasteProfile, summary = ''): TasteProf
   return profile
 }
 
-export function addTasteQuestion(kind: string, content: string, context: Record<string, unknown> = {}): void {
+export function addTasteQuestion(kind: string, content: string, context: Record<string, unknown> = {}, expiresAt?: string): void {
   const existing = getDb()
     .prepare("SELECT id FROM taste_questions WHERE user_id = 1 AND status = 'pending' AND content = ? LIMIT 1")
     .get(content) as { id: number } | undefined
   if (existing) return
   getDb()
-    .prepare('INSERT INTO taste_questions (user_id, kind, content, context_json) VALUES (1, ?, ?, ?)')
-    .run(kind, content, JSON.stringify(context))
+    .prepare('INSERT INTO taste_questions (user_id, kind, content, context_json, expires_at) VALUES (1, ?, ?, ?, ?)')
+    .run(kind, content, JSON.stringify(context), expiresAt ?? null)
 }
 
 function toQuestion(row: Record<string, unknown>): TasteQuestion {
@@ -44,6 +44,32 @@ function toQuestion(row: Record<string, unknown>): TasteQuestion {
     answered_content: typeof row.answered_content === 'string' ? row.answered_content : undefined,
     context,
   }
+}
+
+export function hasRecentTasteQuestionForTrack(kind: string, title: string, artist: string, days: number): boolean {
+  const normalizedTitle = title.trim().toLowerCase()
+  const normalizedArtist = artist.trim().toLowerCase()
+  if (!normalizedTitle) return false
+  const rows = getDb()
+    .prepare(`
+      SELECT context_json
+      FROM taste_questions
+      WHERE user_id = 1
+        AND kind = ?
+        AND datetime(created_at) >= datetime('now', ?)
+    `)
+    .all(kind, `-${days} days`) as Array<{ context_json?: string | null }>
+  return rows.some((row) => {
+    if (!row.context_json) return false
+    try {
+      const context = JSON.parse(row.context_json) as Record<string, unknown>
+      const contextTitle = String(context.title ?? '').trim().toLowerCase()
+      const contextArtist = String(context.artist ?? '').trim().toLowerCase()
+      return contextTitle === normalizedTitle && (!normalizedArtist || contextArtist === normalizedArtist)
+    } catch {
+      return false
+    }
+  })
 }
 
 export function getPendingQuestions(limit = 3): TasteQuestion[] {

@@ -11,13 +11,36 @@ import { recordHealth } from './health'
 import { MAX_RECOMMENDATION_COUNT, OVER_LIMIT_RECOMMENDATION_LINE, inferIntentWithLlm, NeteaseAuthRequiredError, parseRequestedTrackCount, recommendFromNetease } from './recommendation'
 import { getCurrentScene } from './scene'
 import {
-  appendFollowUpQuestion,
   capturePendingQuestionAnswer,
   generateDynamicTasteQuestions,
   type PendingQuestionReplyCapture,
   pickTasteFollowUpQuestion,
   recordFollowUpQuestionAsked,
 } from './tasteQuestionScheduler'
+import { checkJailbreak, pickJailbreakResponse } from './safety/jailbreak-filter'
+import { checkOutputSafe } from './safety/output-filter'
+
+/**
+ * LLM 偶尔会原样回吐系统注入的 XML 标签块（如 <recommendation_candidates>）。
+ * 在输出用于展示 / 匹配 / 存储之前，统一清掉这些标签及内容。
+ */
+const SYSTEM_OUTPUT_TAGS = [
+  'recommendation_candidates',
+  'netease_status',
+  'taste_curiosity',
+  'today_music_session',
+  'recent_day_seal',
+  'current_context',
+  'taste_profile_summary',
+]
+
+function stripSystemBlocks(text: string): string {
+  let result = text
+  for (const tag of SYSTEM_OUTPUT_TAGS) {
+    result = result.replace(new RegExp(`<${tag}>[\\s\\S]*?<\\/${tag}>`, 'g'), '')
+  }
+  return result.replace(/\n{3,}/g, '\n\n').trim()
+}
 
 interface ActiveChat {
   canceled: boolean
@@ -339,6 +362,15 @@ export async function send(text: string, sender?: WebContents): Promise<SendChat
   if (trimmed.length > 2000) throw new Error('这么长我得分两口气听,你要不分两次发?')
 
   appendConversation('user', trimmed)
+
+  const jailbreak = checkJailbreak(trimmed)
+  if (jailbreak.isJailbreak) {
+    const response = pickJailbreakResponse()
+    const message = appendConversation('assistant', response)
+    sender?.send('chat:stream:end', { message, tracks: [], durationMs: 0 })
+    return { message, tracks: [] }
+  }
+
   await inferTasteSignal(trimmed)
   const pendingReply = await capturePendingQuestionAnswer(trimmed)
 
@@ -347,8 +379,10 @@ export async function send(text: string, sender?: WebContents): Promise<SendChat
   const settings = getSettings()
   if (pendingReply.action === 'answer_only') {
     const started = Date.now()
-    const content = await streamPendingAnswerReply(trimmed, pendingReply, active, settings, sender)
+    let content = await streamPendingAnswerReply(trimmed, pendingReply, active, settings, sender)
     activeChats.delete(active)
+    content = stripSystemBlocks(content)
+    if (!checkOutputSafe(content).safe) content = pickJailbreakResponse()
     const message = appendConversation('assistant', content.trim(), [])
     sender?.send('chat:stream:end', { message, tracks: [], durationMs: Date.now() - started })
     return { message, tracks: [] }
@@ -388,6 +422,10 @@ export async function send(text: string, sender?: WebContents): Promise<SendChat
       content = content.trim() || '行,我先停在这里。'
     }
 
+    content = stripSystemBlocks(content)
+
+    if (!checkOutputSafe(content).safe) content = pickJailbreakResponse()
+
     if (candidates.length > 0) {
       const picked = pickCandidatesFromText(content, candidates, requested.targetCount)
       if (picked.length > 0) tracks.push(...picked)
@@ -408,7 +446,6 @@ export async function send(text: string, sender?: WebContents): Promise<SendChat
     if (requested.overLimit && tracks.length > 0 && !content.includes(OVER_LIMIT_RECOMMENDATION_LINE)) {
       content = `${OVER_LIMIT_RECOMMENDATION_LINE}${content ? ` ${content}` : ''}`
     }
-    if (!authRequired) content = appendFollowUpQuestion(content, followUpQuestion)
   } catch (error) {
     followUpQuestion = null
     if (error instanceof LlmError) {

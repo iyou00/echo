@@ -95,38 +95,42 @@ export function WindowControls({
 export function SceneRail({
   scenes,
   currentScene,
+  loadingKey,
   onStart,
-  onEnd,
   compact = false,
 }: {
   scenes: SceneDefinition[]
   currentScene: ActiveScene | null
+  loadingKey?: string | null
   onStart: (key: SceneKey) => void
-  onEnd: () => void
   compact?: boolean
 }) {
   const activeKey = currentScene?.key
   return (
     <div className={compact ? 'scene-rail compact' : 'scene-rail'}>
-      {currentScene && (
-        <div className="scene-current">
-          <span>当前：{currentScene.label}中</span>
-          <small>{currentScene.line}</small>
-          <button type="button" onClick={onEnd}>结束</button>
-        </div>
-      )}
       <div className="scene-scroll" aria-label="场景模式">
-        {scenes.map((scene) => (
-          <button
-            type="button"
-            key={scene.key}
-            className={activeKey === scene.key ? 'scene-chip active' : 'scene-chip'}
-            onClick={() => onStart(scene.key)}
-            title={scene.line}
-          >
-            <span>{compact ? scene.label : scene.shortLabel}</span>
-          </button>
-        ))}
+        {scenes.map((scene) => {
+          const isActive = activeKey === scene.key
+          const isLoading = loadingKey === scene.key
+          const chipClass = isActive
+            ? isLoading ? 'scene-chip active loading' : 'scene-chip active'
+            : isLoading
+              ? 'scene-chip loading'
+              : 'scene-chip'
+          return (
+            <button
+              type="button"
+              key={scene.key}
+              className={chipClass}
+              onClick={() => onStart(scene.key)}
+              title={scene.line}
+              disabled={Boolean(loadingKey) && !isLoading}
+            >
+              <span>{compact ? scene.label : scene.shortLabel}</span>
+              {isLoading && <span className="scene-chip-spinner" aria-hidden="true" />}
+            </button>
+          )
+        })}
       </div>
     </div>
   )

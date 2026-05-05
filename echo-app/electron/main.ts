@@ -45,7 +45,7 @@ let cleanupStarted = false
 let tray: Tray | null = null
 let traySceneRunning: SceneKey | null = null
 
-const TRAY_SCENE_KEYS: SceneKey[] = ['work', 'focus', 'sleepy', 'relax', 'rain', 'irritated']
+const TRAY_SCENE_KEYS: SceneKey[] = ['focus', 'sleepy', 'relax', 'irritated', 'random']
 
 function createAppIcon() {
   const publicDir = process.env.VITE_PUBLIC ?? path.join(process.env.APP_ROOT ?? process.cwd(), 'public')

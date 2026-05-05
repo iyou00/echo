@@ -122,6 +122,7 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
+  const [loadingScene, setLoadingScene] = useState<string | null>(null)
   const [favoriteKeys, setFavoriteKeys] = useState<Set<string>>(new Set())
   const [feedbackMap, setFeedbackMap] = useState<Record<string, 'more_like_this' | 'not_right'>>({})
   const [waitingLines, setWaitingLines] = useState<Record<number, string>>({})
@@ -214,7 +215,7 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
 
   async function submitText(rawText: string) {
     const text = rawText.trim()
-    if (!text || sending || !hasLlmConfig) return
+    if (!text || sending || !hasLlmConfig || currentScene) return
 
     const userMessage: ChatMessage = {
       id: -Date.now(),
@@ -420,20 +421,26 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
 
   async function enterScene(key: SceneKey) {
     if (sending || !hasLlmConfig) return
-    if (!autoPlayNext) await updateAutoPlayNext(true)
-    if (key === 'random') {
-      const scene = await startScene(key)
-      setDraft(scene.prompt)
+    // toggle：点击已激活的场景 = 退出
+    if (currentScene?.key === key) {
+      await endScene()
       return
     }
+    if (!autoPlayNext) await updateAutoPlayNext(true)
+    setLoadingScene(key)
     setDraft('')
-    const result = await playScene(key)
-    const sceneMessage = result.message
-    if (sceneMessage) {
-      setMessages((items) => items.some((item) => item.id === sceneMessage.id) ? items : [...items, sceneMessage])
+    try {
+      const result = await playScene(key)
+      if (result.tracks.length === 0 && !result.message) return
+      const sceneMessage = result.message
+      if (sceneMessage) {
+        setMessages((items) => items.some((item) => item.id === sceneMessage.id) ? items : [...items, sceneMessage])
+      }
+      setPlaybackState(result.state)
+      await refreshQueue()
+    } finally {
+      setLoadingScene(null)
     }
-    setPlaybackState(result.state)
-    await refreshQueue()
   }
 
   async function recordTrackFeedback(track: Track, action: 'more_like_this' | 'not_right') {
@@ -552,8 +559,8 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
           <SceneRail
             scenes={scenes}
             currentScene={currentScene}
+            loadingKey={loadingScene}
             onStart={(key) => { void enterScene(key) }}
-            onEnd={() => { void endScene() }}
             compact
           />
         )}
@@ -561,15 +568,15 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
           <input
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            placeholder={hasLlmConfig ? '和 Echo 说点什么...' : '先填好 LLM 才能说话...'}
-            disabled={!hasLlmConfig}
+            placeholder={currentScene ? `正在「${currentScene.label}」中…` : hasLlmConfig ? '和 Echo 说点什么...' : '先填好 LLM 才能说话...'}
+            disabled={Boolean(currentScene) || !hasLlmConfig}
           />
           {sending ? (
             <button className="cancel-button" type="button" onClick={cancelMessage} title="让 Echo 先停一下">
               <Square size={13} fill="currentColor" />
             </button>
           ) : (
-            <button type="submit" disabled={!draft.trim() || !hasLlmConfig} title="发送">
+            <button type="submit" disabled={!draft.trim() || !hasLlmConfig || Boolean(currentScene)} title="发送">
               <Send size={17} />
             </button>
           )}

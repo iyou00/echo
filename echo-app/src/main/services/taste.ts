@@ -1,8 +1,8 @@
-import type { TasteProfile, Track } from '../../types/ipc'
+import type { TasteProfile, Track, TrackSemantic } from '../../types/ipc'
 import { getDb } from '../db'
 import { getFeedbackSignalCount, listTrackFeedback, type TrackFeedback } from '../db/feedback'
 import { getAllImportedTracks } from '../db/playlists'
-import { listSemantics, semanticTrackKey } from '../db/semantics'
+import { getTrackSemantic, listSemantics, semanticTrackKey } from '../db/semantics'
 import { loadProfileTrackEvents, type ProfileTrackEvent } from '../db/tracks'
 import {
   addTasteQuestion,
@@ -472,11 +472,28 @@ export function refreshStructuredProfile(reason = 'manual'): TasteProfile | null
   return next ? saveTasteProfile(next, next.echo_portrait) : null
 }
 
+function mergeIncrementalSignals(rebuilt: TasteProfile, previous: TasteProfile | null): TasteProfile {
+  if (!previous) return rebuilt
+  const rebuiltAntiSet = new Set(rebuilt.anti_patterns)
+  for (const pattern of previous.anti_patterns) {
+    if (!rebuiltAntiSet.has(pattern)) rebuilt.anti_patterns.push(pattern)
+  }
+  const rebuiltSigKeys = new Set(rebuilt.signature_tracks.map((t) => `${t.title}::${t.artist}`))
+  for (const track of previous.signature_tracks) {
+    if (!rebuiltSigKeys.has(`${track.title}::${track.artist}`)) rebuilt.signature_tracks.push(track)
+  }
+  rebuilt.signature_tracks = rebuilt.signature_tracks.slice(0, 10)
+  if (previous.energy_preference != null) rebuilt.energy_preference = previous.energy_preference
+  if (previous.tempo_preference) rebuilt.tempo_preference = previous.tempo_preference
+  if (previous.scenes) rebuilt.scenes = previous.scenes
+  return rebuilt
+}
+
 function buildStructuredProfileDraft(reason = 'manual'): TasteProfile | null {
   const tracks = getAllImportedTracks()
   const current = getTasteProfile()
   if (!current && tracks.length === 0) return null
-  const next = buildProfileFromTracks(tracks)
+  const next = mergeIncrementalSignals(buildProfileFromTracks(tracks), current)
   next.echo_portrait = current?.echo_portrait ?? next.echo_portrait
   next.profile_meta = {
     ...(next.profile_meta ?? {}),
@@ -555,6 +572,18 @@ export async function regeneratePortrait(options: RegeneratePortraitOptions = {}
   }
 }
 
+function applySemanticBoost(profile: TasteProfile, semantic: TrackSemantic, moodBoost: number, energyWeight: number): void {
+  for (const mood of semantic.moods) {
+    const existing = profile.moods.find((m) => m.tag === mood)
+    if (existing) existing.frequency = clamp(existing.frequency + moodBoost)
+  }
+  const alpha = 0.15 / energyWeight
+  const currentEnergy = profile.energy_preference ?? 0.5
+  profile.energy_preference = clamp(currentEnergy * (1 - alpha) + semantic.energy * alpha)
+  if (!profile.tempo_preference) profile.tempo_preference = { slow: 0, medium: 0, fast: 0 }
+  profile.tempo_preference[semantic.tempo] = (profile.tempo_preference[semantic.tempo] ?? 0) + energyWeight
+}
+
 export async function applySignal(kind: string, payload: Record<string, unknown>): Promise<TasteProfile | null> {
   const profile = getTasteProfile() ?? buildProfileFromTracks(getAllImportedTracks())
   const target = String(payload.target ?? payload.artist ?? payload.genre ?? payload.vibe ?? '').trim()
@@ -562,10 +591,19 @@ export async function applySignal(kind: string, payload: Record<string, unknown>
 
   if (!target && !kind.startsWith('event_')) return saveTasteProfile(profile, profile.echo_portrait)
 
+  const rawTrackId = payload.trackId ?? payload.neteaseId
+  const trackLookup = {
+    title: String(payload.title ?? ''),
+    artist: String(payload.artist ?? target ?? ''),
+    id: rawTrackId != null ? String(rawTrackId) : undefined,
+  }
+  const semantic = (trackLookup.title && trackLookup.artist) ? getTrackSemantic(trackLookup) : null
+
   if (kind === 'like_artist') {
     const existing = profile.artists.find((artist) => artist.name === target)
     if (existing) existing.affinity = clamp(existing.affinity + strength)
     else profile.artists.unshift({ name: target, affinity: clamp(0.5 + strength), notes: String(payload.note ?? '用户在对话中提到喜欢') })
+    if (semantic) applySemanticBoost(profile, semantic, 0.07, 3)
   }
 
   if (kind === 'unlike_artist') {
@@ -609,6 +647,7 @@ export async function applySignal(kind: string, payload: Record<string, unknown>
         profile.artists.unshift({ name: artist, affinity: 0.56, notes: '最近完整听过' })
       }
     }
+    if (semantic) applySemanticBoost(profile, semantic, 0.03, 1)
   }
 
   if (kind === 'skipped') {
@@ -620,6 +659,12 @@ export async function applySignal(kind: string, payload: Record<string, unknown>
       if (title) {
         const marker = `跳过:${title}`
         if (!profile.anti_patterns.includes(marker)) profile.anti_patterns.push(marker)
+      }
+    }
+    if (semantic) {
+      for (const mood of semantic.moods) {
+        const existing = profile.moods.find((m) => m.tag === mood)
+        if (existing) existing.frequency = clamp(existing.frequency - 0.01)
       }
     }
   }
@@ -635,6 +680,7 @@ export async function applySignal(kind: string, payload: Record<string, unknown>
         profile.artists.unshift({ name: artist, affinity: 0.62, notes: '最近循环过' })
       }
     }
+    if (semantic) applySemanticBoost(profile, semantic, 0.06, 3)
   }
 
   if (kind === 'favorited') {
@@ -663,6 +709,7 @@ export async function applySignal(kind: string, payload: Record<string, unknown>
         ].slice(0, 10)
       }
     }
+    if (semantic) applySemanticBoost(profile, semantic, 0.08, 4)
   }
 
   if (kind === 'event_started' || kind === 'correct_assumption') {

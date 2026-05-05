@@ -7,10 +7,11 @@
 **第一次打开这个仓库,按顺序读:**
 
 1. `PRD.md` — 产品是什么
-2. `specs/persona.md` — Echo是谁(最重要)
-3. `specs/tech-stack.md` — 用什么技术栈
-4. `specs/architecture.md` — 代码结构
-5. 要做哪个功能,就读 `features/<feature>.md`
+2. `specs/product-concept-handoff.md` — 当前产品构思与开发交接
+3. `specs/persona.md` — Echo是谁(最重要)
+4. `specs/tech-stack.md` — 用什么技术栈
+5. `specs/architecture.md` — 代码结构
+6. 要做哪个功能,就读 `features/<feature>.md`
 
 **每次实现功能前必读:**
 - 对应的 `features/<xxx>.md`

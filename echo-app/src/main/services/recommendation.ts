@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module'
-import type { RecommendationSource, SceneKey, Track, TrackSemantic } from '../../types/ipc'
+import type { RecommendationSource, SceneKey, TasteProfile, Track, TrackSemantic } from '../../types/ipc'
 import { getAllImportedTracks } from '../db/playlists'
 import { getRecommendationCache, setRecommendationCache } from '../db/recommendationCache'
 import { getTrackSemantic, listSemantics, semanticTrackKey } from '../db/semantics'
@@ -229,7 +229,7 @@ function normalizeIntentOverride(raw: unknown): IntentOverride | null {
     override.intentConfidence = Math.max(0, Math.min(1, value.intentConfidence))
   }
   if (typeof value.sceneKey === 'string') {
-    const allowedSceneKeys = new Set<SceneKey>(['work', 'focus', 'sleepy', 'relax', 'rain', 'irritated', 'random'])
+    const allowedSceneKeys = new Set<SceneKey>(['focus', 'sleepy', 'relax', 'irritated', 'random'])
     if (allowedSceneKeys.has(value.sceneKey as SceneKey)) override.sceneKey = value.sceneKey as SceneKey
   }
   override.evidence = normalizeEvidence(value.evidence)
@@ -376,7 +376,7 @@ const FETCH_CANDIDATES_TIMEOUT_MS = 9000
 const EXPLICIT_FEEDBACK_LIMIT = 50
 const FAVORITE_DIRECTION_LIMIT = 60
 
-interface DirectionMemoryItem {
+export interface DirectionMemoryItem {
   action: 'more_like_this' | 'not_right' | 'favorite'
   semantic: TrackSemantic
   artist: string
@@ -596,20 +596,19 @@ function buildCacheKey(intent: RecommendationIntent): string {
 
 function sceneKeyword(intent: RecommendationIntent): string {
   switch (intent.sceneKey) {
-    case 'work':
-      return '工作 清醒 华语流行'
     case 'focus':
-      return '专注 安静 轻音乐 舒缓'
+      return '安静 轻音乐 舒缓'
     case 'sleepy':
       return '提神 节奏 轻快'
     case 'relax':
       return '放松 舒缓 治愈'
-    case 'rain':
-      return '雨天 慢歌 怀旧'
     case 'irritated':
       return '放松 降噪 舒缓'
-    case 'random':
-      return ''
+    case 'random': {
+      const profile = pickWeightedKeywords()
+      const picked = shuffleItems(profile).slice(0, 3)
+      return picked.join(' ') || '华语流行'
+    }
     default:
       return ''
   }
@@ -877,8 +876,9 @@ function shuffleItems<T>(items: T[]): T[] {
 
 async function fetchPlaylistCandidates(intent: RecommendationIntent, cookie: string): Promise<Track[]> {
   const keywords = `${keywordFromIntent(intent)} 歌单`.trim()
+  const playlistOffset = Math.floor(Math.random() * 3) * 5
   const search = await timed(
-    netease.cloudsearch({ keywords, type: 1000, limit: 5, offset: 0, cookie }),
+    netease.cloudsearch({ keywords, type: 1000, limit: 5, offset: playlistOffset, cookie }),
     NET_CALL_TIMEOUT_MS,
     null as ApiResponse | null,
   )
@@ -906,10 +906,11 @@ async function fetchCandidatesInternal(intent: RecommendationIntent): Promise<Tr
   if (!cookie) throw new NeteaseAuthRequiredError()
   const candidates: Track[] = []
 
+  const searchOffset = Math.floor(Math.random() * 4) * 10
   const calls: Array<Promise<Track[]>> = [
     netCall(netease.recommend_songs({ cookie }), 'daily'),
     netCall(netease.personal_fm({ cookie }), 'fm'),
-    netCall(netease.cloudsearch({ keywords: keywordFromIntent(intent), type: 1, limit: 30, offset: 0, cookie }), 'search'),
+    netCall(netease.cloudsearch({ keywords: keywordFromIntent(intent), type: 1, limit: 30, offset: searchOffset, cookie }), 'search'),
     netCall(netease.personalized_newsong({ limit: 20, cookie }), 'new_song'),
     timed(fetchArtistCandidates(intent, cookie), NET_CALL_TIMEOUT_MS + 2000, [] as Track[]),
     timed(fetchPlaylistCandidates(intent, cookie), NET_CALL_TIMEOUT_MS + 2000, [] as Track[]),
@@ -946,7 +947,7 @@ async function fetchCandidates(intent: RecommendationIntent): Promise<Track[]> {
 }
 
 function semanticForCandidate(track: Track): TrackSemantic {
-  return getTrackSemantic(track) ?? inferTrackSemanticFallback(track)
+  return track.semantic ?? getTrackSemantic(track) ?? inferTrackSemanticFallback(track)
 }
 
 function overlapScore(left: string[], right: string[], unit: number): number {
@@ -1009,7 +1010,14 @@ function directionMemoryScore(track: Track, semantic: TrackSemantic, memory: Dir
   return Math.max(-10, Math.min(7, Number(score.toFixed(2))))
 }
 
-function scoreCandidate(track: Track, intent: RecommendationIntent, recentKeys: Set<string>, memory: DirectionMemoryItem[]): number {
+function scoreCandidateWithFeedback(
+  track: Track,
+  intent: RecommendationIntent,
+  recentKeys: Set<string>,
+  memory: DirectionMemoryItem[],
+  feedbackScore: (track: Track) => number,
+  profile?: TasteProfile | null,
+): number {
   const semantic = semanticForCandidate(track)
   let score = 0
   for (const mood of intent.moods) if (semantic.moods.includes(mood)) score += 3
@@ -1031,10 +1039,28 @@ function scoreCandidate(track: Track, intent: RecommendationIntent, recentKeys: 
   if (track.recommendSource === 'artist') score += 0.9
   if (track.recommendSource === 'playlist') score += 0.7
   if (track.recommendSource === 'daily' || track.recommendSource === 'fm') score += 0.8
-  score += Math.max(-5, Math.min(5, getFeedbackScore(track)))
+  score += Math.max(-5, Math.min(5, feedbackScore(track)))
   score += directionMemoryScore(track, semantic, memory)
   if (hasTrackIdentity(recentKeys, track)) score -= 12
+  if (profile?.energy_preference != null && intent.energy == null) {
+    const gap = Math.abs(semantic.energy - profile.energy_preference)
+    if (gap <= 0.15) score += 1.0
+    else if (gap <= 0.3) score += 0.4
+    else if (gap > 0.5) score -= 1.5
+  }
+  if (profile?.tempo_preference && intent.tempo == null) {
+    const total = profile.tempo_preference.slow + profile.tempo_preference.medium + profile.tempo_preference.fast
+    if (total > 0) score += ((profile.tempo_preference[semantic.tempo] ?? 0) / total) * 2.5
+  }
   return score
+}
+
+function scoreCandidate(track: Track, intent: RecommendationIntent, recentKeys: Set<string>, memory: DirectionMemoryItem[], profile?: TasteProfile | null): number {
+  return scoreCandidateWithFeedback(track, intent, recentKeys, memory, getFeedbackScore, profile)
+}
+
+function scoreCandidateForTest(track: Track, intent: RecommendationIntent, recentKeys: Set<string>, memory: DirectionMemoryItem[]): number {
+  return scoreCandidateWithFeedback(track, intent, recentKeys, memory, () => 0)
 }
 
 function matchesIntentFloor(track: Track, intent: RecommendationIntent): boolean {
@@ -1048,6 +1074,31 @@ function matchesIntentFloor(track: Track, intent: RecommendationIntent): boolean
   if (intent.energy === 'low' && semantic.energy > 0.78) return false
   if (intent.tempo === 'slow' && semantic.tempo === 'fast' && semantic.energy > 0.72) return false
   return true
+}
+
+export async function pickPlayableCandidatesForTest(
+  candidates: Track[],
+  intent: RecommendationIntent,
+  recentTracks: Track[],
+  playableFilter: (tracks: Track[], limit: number) => Promise<Track[]>,
+  memory: DirectionMemoryItem[] = [],
+): Promise<Track[]> {
+  const recentKeys = trackIdentitySet(recentTracks)
+  const ranked = uniqueTracks(candidates)
+    .map((track) => ({ track: { ...track, semantic: semanticForCandidate(track) }, score: scoreCandidateForTest(track, intent, recentKeys, memory) }))
+    .sort((a, b) => b.score - a.score)
+    .map((item) => item.track)
+    .filter((track) => !hasTrackIdentity(recentKeys, track) && matchesIntentFloor(track, intent))
+  return playableFilter(ranked, intent.targetCount)
+}
+
+export const recommendationTestHelpers = {
+  buildCacheKey,
+  hasTrackIdentity,
+  matchesIntentFloor,
+  parseIntent,
+  scoreCandidate: scoreCandidateForTest,
+  trackIdentitySet,
 }
 
 function parseJsonObject(content: string): Record<string, unknown> | null {
@@ -1125,6 +1176,7 @@ export async function recommendFromNetease(text: string, override?: IntentOverri
   }
   const allowCooldownFallback = Boolean(intent.seedTitle || intent.artistQuery || intent.sceneKey)
   const cacheKey = buildCacheKey(intent)
+  const profile = getTasteProfile()
   const memory = buildDirectionMemory()
   const hardCooldownKeys = trackIdentitySet(loadListenedTracksSince(24, 500))
   const recentKeys = trackIdentitySet([...loadRecentRecommendedTracks(120), ...loadListenedTracksSince(24 * 7, 900)])
@@ -1161,7 +1213,7 @@ export async function recommendFromNetease(text: string, override?: IntentOverri
     }
   }
   const ranked = candidates
-    .map((track) => ({ track: { ...track, semantic: semanticForCandidate(track) }, score: scoreCandidate(track, intent, recentKeys, memory) }))
+    .map((track) => ({ track: { ...track, semantic: semanticForCandidate(track) }, score: scoreCandidate(track, intent, recentKeys, memory, profile) }))
     .sort((a, b) => b.score - a.score)
     .map((item) => item.track)
   const intentMatched = ranked.filter((track) => !hasTrackIdentity(hardCooldownKeys, track) && !hasTrackIdentity(recentKeys, track) && matchesIntentFloor(track, intent))
@@ -1176,7 +1228,7 @@ export async function recommendFromNetease(text: string, override?: IntentOverri
       moods: intent.moods,
       scenes: intent.scenes,
       source: track.recommendSource ?? 'search',
-      score: scoreCandidate(track, intent, recentKeys, memory),
+      score: scoreCandidate(track, intent, recentKeys, memory, profile),
     },
   }))
   const playable = await filterPlayableTracks(evidencedTracks, intent.targetCount)

@@ -29,9 +29,10 @@ export interface Track {
 export type PlaybackStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'error'
 export type RecommendationSource = 'daily' | 'fm' | 'similar' | 'style' | 'search' | 'new_song' | 'artist' | 'playlist'
 export type ExplicitTrackFeedbackAction = 'more_like_this' | 'not_right'
-export type SceneKey = 'work' | 'focus' | 'sleepy' | 'relax' | 'rain' | 'irritated' | 'random'
+export type SceneKey = 'focus' | 'sleepy' | 'relax' | 'irritated' | 'random'
 export type PingType = 'recommend_track' | 'casual_check' | 'voice_invite'
 export type CareFrequency = 'gentle' | 'normal' | 'frequent'
+export type OnboardingStep = 'playlist' | 'done'
 export type AppPageKey = 'chat' | 'profile' | 'yinyi' | 'voice' | 'queue' | 'settings'
 export type ServiceHealthKind = 'llm' | 'netease' | 'tts' | 'weather' | 'scheduler' | 'storage'
 export type ServiceHealthStatus = 'ok' | 'degraded' | 'error' | 'unknown'
@@ -190,6 +191,9 @@ export interface TasteProfile {
   anti_patterns: string[]
   signature_tracks: Track[]
   echo_portrait: string
+  energy_preference?: number
+  tempo_preference?: { slow: number; medium: number; fast: number }
+  scenes?: Array<{ tag: string; frequency: number }>
   profile_meta?: {
     updatedAt?: string
     structuredUpdatedAt?: string
@@ -251,6 +255,9 @@ export interface Settings {
     schemaVersion: number
     firstUsedAt: string
     lastViewedYinyiAt?: string
+    firstRunWelcomeCompletedAt?: string
+    onboardingCompletedAt?: string
+    onboardingStep?: OnboardingStep
   }
 }
 
@@ -385,6 +392,7 @@ export interface EchoApi {
     play(key: SceneKey, options?: ScenePlaybackOptions): Promise<ScenePlaybackResult>
     end(): Promise<ActiveScene | null>
     today(): Promise<SceneSessionSummary[]>
+    onChanged(listener: (scene: ActiveScene | null) => void): () => void
   }
   semantics: {
     buildForImportedTracks(): Promise<{ tagged: number; skipped: number }>
@@ -436,7 +444,7 @@ export interface EchoApi {
     get(city?: string): Promise<{ city: string; condition: string; tempC: number; humidity: number; summary: string } | null>
   }
   listening: {
-    generateSegment(): Promise<{ text: string; track: Track | null; audioUrl?: string; error?: string; generatedAt: string }>
+    generateSegment(options?: { continuation?: boolean }): Promise<{ text: string; track: Track | null; audioUrl?: string; error?: string; generatedAt: string }>
   }
   carePings: {
     test(type?: PingType): Promise<{ ok: boolean; message: string }>

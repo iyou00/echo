@@ -51,6 +51,7 @@ const defaultSettings: Settings = {
     schemaVersion: 1,
     firstUsedAt: new Date().toISOString(),
     lastViewedYinyiAt: '',
+    onboardingStep: 'playlist',
   },
 }
 

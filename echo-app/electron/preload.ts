@@ -71,6 +71,11 @@ const echoApi: EchoApi = {
     play: (key, options) => ipcRenderer.invoke('scene:play', key, options),
     end: () => ipcRenderer.invoke('scene:end'),
     today: () => ipcRenderer.invoke('scene:today'),
+    onChanged: (listener) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, scene: Parameters<typeof listener>[0]) => listener(scene)
+      ipcRenderer.on('scene:changed', wrapped)
+      return () => ipcRenderer.off('scene:changed', wrapped)
+    },
   },
   semantics: {
     buildForImportedTracks: () => ipcRenderer.invoke('semantics:buildForImportedTracks'),
@@ -149,7 +154,7 @@ const echoApi: EchoApi = {
     get: (city) => ipcRenderer.invoke('weather:get', city),
   },
   listening: {
-    generateSegment: () => ipcRenderer.invoke('listening:generateSegment'),
+    generateSegment: (options?: { continuation?: boolean }) => ipcRenderer.invoke('listening:generateSegment', options),
   },
   carePings: {
     test: (type) => ipcRenderer.invoke('carePings:test', type),

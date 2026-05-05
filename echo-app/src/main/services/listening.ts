@@ -163,11 +163,15 @@ function formatConversationTime(createdAt?: string) {
 function fallbackText(track: Track | null): string {
   const hour = new Date().getHours()
   const time = hour < 11 ? '早上' : hour < 18 ? '下午' : '晚上'
-  if (!track) return `${time}这个点,我先陪你安静一会儿。我现在还没摸清你的歌单,所以先不硬推歌。等你导入更多歌以后,我会把这一刻接到一首真的合适的歌上。`
+  if (!track) return `${time}好。我先不急着推歌，你先听点什么，或者跟我聊两句，我慢慢跟上你的节奏。`
+  const profile = getTasteProfile()
+  const topArtist = profile?.artists?.[0]?.name
   const variants = [
     `${time}这个点,我猜你可能只是想让旁边有点声音。我也没打算讲大道理,就给你接一首${track.artist}的《${track.title}》。它不会太抢,先垫着,你手上的事可以慢慢做。`,
     `我刚刚在想,你这会儿点回声,大概不是想听我分析什么,就是想有个人先开个头。那我给你放${track.artist}的《${track.title}》,旋律先进来,你跟着缓一会儿。`,
     `现在这个点挺适合换一口气。你不用马上进入什么状态,先听${track.artist}的《${track.title}》。这首入口轻,能把刚才那点绷着的感觉慢慢放下来。`,
+    `${time}了,${topArtist ? `你之前听过不少${topArtist}的歌,` : ''}我猜这会儿需要的是一首不那么抢的歌。${track.artist}的《${track.title}》刚好,先让它走一遍。`,
+    `这会儿没什么特别要做的对吧。我给你放${track.artist}的《${track.title}》,旋律进去以后,手上的事可以慢一点做。`,
   ]
   return variants[Math.floor(Math.random() * variants.length)]
 }
@@ -176,7 +180,12 @@ async function getFallbackCandidates(): Promise<Track[]> {
   const imported = getAllImportedTracks()
   const blocked = recentBlockedKeys()
   const fresh = imported.filter((track) => !hasTrackIdentity(blocked, track))
-  const pool = fresh.length > 0 ? fresh : imported
+  let pool = fresh
+  if (fresh.length < 8 && imported.length > fresh.length) {
+    const hardBlocked = trackIdentitySet(loadListenedTracksSince(2, 200))
+    const relaxed = imported.filter((track) => !hasTrackIdentity(hardBlocked, track))
+    pool = relaxed.length >= fresh.length ? relaxed : imported
+  }
   const candidates = shuffled(pool).slice(0, 24)
   return filterPlayableTracks(candidates, 5)
 }
@@ -189,6 +198,8 @@ async function getCandidates(): Promise<Track[]> {
   return getFallbackCandidates()
 }
 
+const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+
 function buildContext(input: {
   generatedAt: string
   weatherSummary?: string
@@ -196,16 +207,16 @@ function buildContext(input: {
   seal: string
   profile: ReturnType<typeof getTasteProfile>
   candidates: Track[]
+  continuation?: boolean
 }) {
-  const currentTime = new Date(input.generatedAt).toLocaleString('zh-CN', {
-    hour12: false,
-    weekday: 'long',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  const now = new Date(input.generatedAt)
+  const y = now.getFullYear()
+  const m = String(now.getMonth() + 1).padStart(2, '0')
+  const d = String(now.getDate()).padStart(2, '0')
+  const hh = String(now.getHours()).padStart(2, '0')
+  const mm = String(now.getMinutes()).padStart(2, '0')
+  const weekday = WEEKDAYS[now.getDay()]
+  const currentTime = `${y}-${m}-${d} ${hh}:${mm} ${weekday}`
   const recent = input.conversations.length > 0
     ? input.conversations.map((item) => `- ${item.role}${formatConversationTime(item.createdAt) ? ` (${formatConversationTime(item.createdAt)})` : ''}: ${item.content}`).join('\n')
     : '(暂无)'
@@ -219,6 +230,21 @@ function buildContext(input: {
       input.profile.artists?.slice(0, 5).map((item) => `${item.name} affinity ${Math.round(item.affinity * 100)}%`).join(' / '),
     ].filter(Boolean).join('\n')
     : '(暂无)'
+
+  const continuationBlock = input.continuation && recentScenarios.length > 0
+    ? `
+
+<continuation>
+这是你连续说话的后续段落。你上一段说的是:
+"${recentScenarios[0]}"
+${recentTrackKeys.length > 0 ? '推荐了对应的歌。' : ''}
+要求:
+- 不要重复上一段的句式、切入点、语气词
+- 换一个角度: 如果上一段从"时间"切入,这段从"状态/情绪/天气/某首歌"切入
+- 如果上一段比较安静克制,这段可以更随意一点(或反过来)
+- 你仍然要选一首不同的歌
+</continuation>`
+    : ''
 
   return `<current_time>${currentTime}</current_time>
 
@@ -238,7 +264,7 @@ ${tasteSignals}
 
 <recent_listening_segments>
 ${recentSegments}
-</recent_listening_segments>
+</recent_listening_segments>${continuationBlock}
 
 <candidates>
 ${input.candidates.map((item, index) => `- C${index + 1}: ${item.artist} / ${item.title}${item.album ? ` (${item.album})` : ''}`).join('\n')}
@@ -250,7 +276,7 @@ ${input.candidates.map((item, index) => `- C${index + 1}: ${item.artist} / ${ite
 </output_contract>`
 }
 
-export async function generateListeningSegment(): Promise<{ text: string; track: Track | null; audioUrl?: string; error?: string; generatedAt: string }> {
+export async function generateListeningSegment(options?: { continuation?: boolean }): Promise<{ text: string; track: Track | null; audioUrl?: string; error?: string; generatedAt: string }> {
   const generatedAt = new Date().toISOString()
   const settings = getSettings()
   const conversations = loadRecentConversations(5)
@@ -269,7 +295,7 @@ export async function generateListeningSegment(): Promise<{ text: string; track:
         { role: 'system', content: prompt },
         {
           role: 'user',
-          content: buildContext({ generatedAt, weatherSummary: weather?.summary, conversations, seal, profile, candidates }),
+          content: buildContext({ generatedAt, weatherSummary: weather?.summary, conversations, seal, profile, candidates, continuation: options?.continuation }),
         },
       ], { temperature: 0.85 })
       const parsed = parseJsonObject(response)

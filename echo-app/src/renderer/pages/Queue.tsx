@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { ArrowUpToLine, Check, Heart, Play, Trash2, X } from 'lucide-react'
-import type { ActiveScene, EchoApi, PlaybackState, QueueHistoryDay, Track } from '../../types/ipc'
+import { Check, Heart, Play, Trash2, X } from 'lucide-react'
+import type { EchoApi, PlaybackState, QueueHistoryDay, Track } from '../../types/ipc'
 import type { AppPageProps } from '../../App'
 import { EmptyState } from '../components'
 import { pageLabels } from '../labels'
@@ -13,15 +13,8 @@ interface QueuePageProps extends AppPageProps {
   refreshQueue: () => Promise<Track[]>
   autoPlayNext: boolean
   updateAutoPlayNext: (value: boolean) => Promise<void>
-  currentScene: ActiveScene | null
-  endScene: () => Promise<void>
 }
 
-function historyStatusLabel(status?: Track['queueStatus']) {
-  if (status === 'completed') return '已听完'
-  if (status === 'skipped') return '已切歌'
-  return '可播放'
-}
 
 function trackKey(track?: Track | null): string {
   if (!track) return ''
@@ -44,8 +37,6 @@ export function QueuePage({
   navigate,
   autoPlayNext,
   updateAutoPlayNext,
-  currentScene,
-  endScene,
 }: QueuePageProps) {
   const [tab, setTab] = useState<'now' | 'favorites' | 'past'>('now')
   const [dragIndex, setDragIndex] = useState<number | null>(null)
@@ -91,12 +82,6 @@ export function QueuePage({
     const index = playbackQueueIndex(track)
     if (index < 0) return
     await applyState(await echo.playback.removeFromQueue(index))
-  }
-
-  async function moveToNext(track: Track) {
-    const index = playbackQueueIndex(track)
-    if (index < 0) return
-    await applyState(await echo.playback.reorderQueue(index, 0))
   }
 
   async function reorder(fromIndex: number, toIndex: number) {
@@ -176,16 +161,16 @@ export function QueuePage({
     }
   }
 
-  function historyStatus(track: Track): { label: string; className: string } {
+  function historyStatus(track: Track): { className: string } {
     const isCurrent = playbackState.current && trackKey(playbackState.current) === trackKey(track)
     if (isCurrent && (playbackState.status === 'playing' || playbackState.status === 'loading')) {
-      return { label: '播放中', className: 'playing' }
+      return { className: 'playing' }
     }
     if (isCurrent && playbackState.status === 'paused') {
-      return { label: '已暂停', className: 'pending' }
+      return { className: 'pending' }
     }
     const normalized = track.queueStatus === 'playing' ? 'pending' : track.queueStatus
-    return { label: historyStatusLabel(normalized), className: normalized ?? 'pending' }
+    return { className: normalized ?? 'pending' }
   }
 
   function nowStatus(track: Track): { label: string; className: string } {
@@ -232,11 +217,6 @@ export function QueuePage({
       <div className="page-toolbar">
         <div className="tb-status">
           今日 {rest.length + (playing ? 1 : 0)} 首 · 总长 {totalMinutes || '-'} 分钟
-          {currentScene && (
-            <button className="queue-scene-pill" type="button" onClick={() => { void endScene() }} title="结束当前场景">
-              {currentScene.label}中 · 结束
-            </button>
-          )}
         </div>
         <div className="tb-actions">
           {tab === 'now' && (
@@ -295,7 +275,6 @@ export function QueuePage({
                 <div className="np-info">
                   <div className="np-title">{playing.title}</div>
                   <div className="np-meta">{playing.artist}{playing.year ? ` · ${playing.year}` : ''}</div>
-                  {playing.reason && <div className="np-note">— {playing.reason}</div>}
                   <SceneTag track={playing} />
                 </div>
                 <div className="np-actions">
@@ -340,7 +319,6 @@ export function QueuePage({
                       <div className="q-title">{track.title}</div>
                       <div className="q-meta">{track.artist}{track.year ? ` · ${track.year}` : ''}</div>
                       <SceneTag track={track} />
-                      {track.reason && <div className="q-note">— {track.reason}</div>}
                     </div>
                     <div className="q-tail">
                       <div className={`queue-status ${status.className}`} title={status.label} />
@@ -351,10 +329,7 @@ export function QueuePage({
                         <button className={favoriteKeys.has(trackKey(track)) ? 'q-act-btn favorite active' : 'q-act-btn favorite'} title={favoriteKeys.has(trackKey(track)) ? '取消收藏' : '收藏'} onClick={(event) => { event.stopPropagation(); void toggleFavorite(track) }}>
                           <Heart size={13} fill={favoriteKeys.has(trackKey(track)) ? 'currentColor' : 'none'} />
                         </button>
-                        <button className="q-act-btn" title="置顶下一首" onClick={(event) => { event.stopPropagation(); void moveToNext(track) }} disabled={!canOperatePlaybackQueue}>
-                          <ArrowUpToLine size={13} />
-                        </button>
-                        <button className="q-act-btn" title="移除" onClick={(event) => { event.stopPropagation(); void removeTrack(track) }} disabled={!canOperatePlaybackQueue}>
+                        <button className="q-act-btn delete-btn" title="移除" onClick={(event) => { event.stopPropagation(); void removeTrack(track) }} disabled={!canOperatePlaybackQueue}>
                           <Trash2 size={13} />
                         </button>
                       </div>
@@ -380,7 +355,6 @@ export function QueuePage({
                       <div className="q-title">{track.title}</div>
                       <div className="q-meta">{track.artist}{track.year ? ` · ${track.year}` : track.album ? ` · ${track.album}` : ''}</div>
                       <SceneTag track={track} />
-                      {(track.echoNote || track.reason) && <div className="q-note">— {track.echoNote ?? track.reason}</div>}
                     </div>
                     <div className="q-tail q-tail-favorite">
                       <div className="q-actions always">
@@ -449,12 +423,10 @@ export function QueuePage({
                                 <div className="q-body">
                                   <div className="q-title">{track.title}</div>
                                   <div className="q-meta">{track.artist}{track.year ? ` · ${track.year}` : ''}</div>
-                                  <SceneTag track={track} />
-                                  {(track.echoNote || track.reason) && <div className="q-note">— {track.echoNote ?? track.reason}</div>}
                                 </div>
                                 <div className="q-tail q-tail-history">
-                                  <div className={`queue-status ${status.className}`} title={status.label} />
-                                  <div className="q-time">{status.label}</div>
+                                  <div className={`queue-status ${status.className}`} />
+                                  <SceneTag track={track} />
                                   <div className="q-actions always">
                                     <button className="q-act-btn" title="播放" onClick={() => playHistoryTrack(track, day.tracks)}>
                                       <Play size={13} fill="currentColor" />

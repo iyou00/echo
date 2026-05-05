@@ -114,10 +114,12 @@ export function VoicePage({
   const musicStartedRef = useRef(false)
   const trackRef = useRef<Track | null>(null)
   const fadeRunRef = useRef(0)
+  const fadeVolumeRef = useRef(false)
   const voiceBaselinePlaybackKeyRef = useRef('')
   const playbackStateRef = useRef(playbackState)
   const statusRef = useRef<VoiceStatus>('idle')
   const speakRef = useRef<(automatic?: boolean) => Promise<void>>()
+  const speakingLockRef = useRef(false)
   const autoFailureCountRef = useRef(0)
   const lastAutoStartTokenRef = useRef(0)
   const [status, setStatus] = useState<VoiceStatus>('idle')
@@ -158,7 +160,19 @@ export function VoicePage({
   }, [echo, isActive])
 
   useEffect(() => {
+    if (fadeVolumeRef.current) return
     const current = playbackState.current
+
+    // 连续回声：检测背景音乐播完（track 变了或变成 null）→ 触发下一段
+    if (voiceContinuous && (statusRef.current === 'done' || statusRef.current === 'text-only-done') && musicStartedRef.current) {
+      const baselineKey = voiceBaselinePlaybackKeyRef.current
+      const stillSameTrack = (baselineKey && current && trackIdentity(current) === baselineKey) || current?.sourceContext === 'voice'
+      if (!stillSameTrack) {
+        speakRef.current?.(true).catch(() => undefined)
+        return
+      }
+    }
+
     if (!current || current.sourceContext === 'voice') return
     const baselineKey = voiceBaselinePlaybackKeyRef.current
     const isBaselineMusic = Boolean(baselineKey && trackIdentity(current) === baselineKey)
@@ -263,24 +277,32 @@ export function VoicePage({
     setProgress(1)
     setStatus('done')
     const currentVolume = await echo.playback.getVolume().catch(() => 30)
-    await fadeVolume(echo, currentVolume, restoreVolumeRef.current, 1500, setPlaybackState, () => fadeRunRef.current !== runId)
+    fadeVolumeRef.current = true
+    try {
+      await fadeVolume(echo, currentVolume, restoreVolumeRef.current, 1500, setPlaybackState, () => fadeRunRef.current !== runId)
+    } finally {
+      fadeVolumeRef.current = false
+    }
   }
 
-  async function speak(automatic = false) {
-    fadeRunRef.current += 1
-    if (musicTimerRef.current) window.clearTimeout(musicTimerRef.current)
-    stopTtsWave(true)
-    audioRef.current?.pause()
-    musicStartedRef.current = false
-    voiceBaselinePlaybackKeyRef.current = trackIdentity(playbackStateRef.current.current)
-    setStatus('generating')
-    setNotice('')
-    setProgress(0)
-    setAudioUrl('')
-    restoreVolumeRef.current = await echo.playback.getVolume()
-
+  async function speak(automatic = false, continuation = false) {
+    if (speakingLockRef.current) return
+    if (statusRef.current === 'generating' || statusRef.current === 'speaking') return
+    speakingLockRef.current = true
     try {
-      const segment = await echo.listening.generateSegment()
+      fadeRunRef.current += 1
+      if (musicTimerRef.current) window.clearTimeout(musicTimerRef.current)
+      stopTtsWave(true)
+      audioRef.current?.pause()
+      musicStartedRef.current = false
+      voiceBaselinePlaybackKeyRef.current = trackIdentity(playbackStateRef.current.current)
+      setStatus('generating')
+      setNotice('')
+      setProgress(0)
+      setAudioUrl('')
+      restoreVolumeRef.current = await echo.playback.getVolume()
+
+      const segment = await echo.listening.generateSegment({ continuation: automatic || continuation })
       autoFailureCountRef.current = 0
       setText(segment.text)
       trackRef.current = segment.track
@@ -314,16 +336,35 @@ export function VoicePage({
       }
       setNotice(error instanceof Error ? error.message : `${pageLabels.voice}生成失败`)
       setStatus('error')
+    } finally {
+      speakingLockRef.current = false
     }
   }
   speakRef.current = speak
 
   useEffect(() => {
-    if (autoStartToken <= 0 || status === 'generating' || status === 'speaking') return
+    if (autoStartToken <= 0) return
     if (lastAutoStartTokenRef.current === autoStartToken) return
     lastAutoStartTokenRef.current = autoStartToken
+    // status 检查放在 lastAutoStartTokenRef 更新之后：
+    // 即使当前 speak() 正在执行（generating/speaking），也要先把 token 标记为已处理。
+    // 否则等 status 变回 done 时 effect 会因 status 依赖重入，误判为"未处理"而重复触发 speak()。
+    if (statusRef.current === 'generating' || statusRef.current === 'speaking') return
     speakRef.current?.(true).catch(() => undefined)
   }, [autoStartToken, status])
+
+  // 连续回声兜底：仅在背景音乐从未启动时（比如没有推荐到歌），2 秒后自动触发下一段
+  // 音乐在播时由 playbackState effect 检测音乐播完再触发
+  useEffect(() => {
+    if (!voiceContinuous) return
+    if (status !== 'done' && status !== 'text-only-done') return
+    const timer = window.setTimeout(() => {
+      if (statusRef.current !== 'done' && statusRef.current !== 'text-only-done') return
+      if (musicStartedRef.current) return
+      speakRef.current?.(true).catch(() => undefined)
+    }, 2000)
+    return () => window.clearTimeout(timer)
+  }, [status, voiceContinuous])
 
   function backToChat() {
     setVoiceContinuous(false)
@@ -413,7 +454,7 @@ export function VoicePage({
                 <button className={voiceContinuous ? 'exit-btn voice-loop active' : 'exit-btn voice-loop'} type="button" onClick={() => setVoiceContinuous(!voiceContinuous)}>
                   连 续 回 声
                 </button>
-                <button className="exit-btn" type="button" onClick={() => { void speak() }} disabled={status === 'speaking'}>再 来 一 次</button>
+                <button className="exit-btn" type="button" onClick={() => { void speak(false, true) }} disabled={status === 'speaking'}>再 来 一 次</button>
                 <button className="exit-btn" type="button" onClick={backToChat}>回 到 首 页</button>
               </div>
             </div>

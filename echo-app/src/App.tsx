@@ -1,17 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ActiveScene, PlaybackState, SceneDefinition, SceneKey, Settings, TasteProfile, TasteQuestion, Track } from './types/ipc'
 import { getEchoApi } from './renderer/api'
+import { AboutEchoPage } from './renderer/pages/AboutEcho'
 import { ChatPage } from './renderer/pages/Chat'
 import { EchoProfilePage } from './renderer/pages/EchoProfile'
 import { QueuePage } from './renderer/pages/Queue'
 import { SettingsPage } from './renderer/pages/Settings'
 import { VoicePage } from './renderer/pages/Voice'
 import { YinyiPage } from './renderer/pages/Yinyi'
+import { FirstRunWelcome } from './renderer/components/FirstRunWelcome'
 import { Player } from './renderer/components/Player'
 import { HeaderAvatar, WindowControls } from './renderer/components'
 import { pageLabels } from './renderer/labels'
 
-export type PageKey = 'chat' | 'profile' | 'yinyi' | 'voice' | 'queue' | 'settings'
+export type PageKey = 'chat' | 'profile' | 'yinyi' | 'voice' | 'queue' | 'settings' | 'about'
 
 export interface AppPageProps {
   navigate: (page: PageKey) => void
@@ -27,6 +29,8 @@ function App() {
   const [queue, setQueue] = useState<Track[]>([])
   const [sceneDefinitions, setSceneDefinitions] = useState<SceneDefinition[]>([])
   const [currentScene, setCurrentScene] = useState<ActiveScene | null>(null)
+  const currentSceneRef = useRef(currentScene)
+  useEffect(() => { currentSceneRef.current = currentScene }, [currentScene])
   const [playbackNotice, setPlaybackNotice] = useState('')
   const [careMuteToast, setCareMuteToast] = useState(false)
   const [careMuteCountdown, setCareMuteCountdown] = useState(5)
@@ -35,6 +39,9 @@ function App() {
   const [closeDialogOpen, setCloseDialogOpen] = useState(false)
   const [rememberCloseChoice, setRememberCloseChoice] = useState(false)
   const [latestYinyiDate, setLatestYinyiDate] = useState('')
+  const [onboardingOpen, setOnboardingOpen] = useState(false)
+  const [firstRunWelcomeOpen, setFirstRunWelcomeOpen] = useState(false)
+  const [settingsImportFocusToken, setSettingsImportFocusToken] = useState(0)
   const [playbackState, setPlaybackState] = useState<PlaybackState>({
     current: null,
     position: 0,
@@ -88,6 +95,10 @@ function App() {
       setLatestYinyiDate(nextYinyi[0]?.date ?? '')
       setSceneDefinitions(nextScenes)
       setCurrentScene(nextScene)
+      const isExistingUser = Boolean(nextSettings.meta.onboardingCompletedAt) || Boolean(nextTaste.profile)
+      const shouldShowFirstRunWelcome = !isExistingUser && !nextSettings.meta.firstRunWelcomeCompletedAt
+      setFirstRunWelcomeOpen(shouldShowFirstRunWelcome)
+      setOnboardingOpen(!shouldShowFirstRunWelcome && !nextSettings.meta.onboardingCompletedAt && !nextTaste.profile)
       const isRealElectron = Boolean(window.echo)
       if (isRealElectron && (!nextSettings.llm.baseUrl || !nextSettings.llm.apiKey || !nextSettings.llm.model)) {
         setPage('settings')
@@ -110,9 +121,18 @@ function App() {
   }, [refreshScene])
 
   useEffect(() => {
+    return echo.scene.onChanged((next) => {
+      setCurrentScene(next)
+    })
+  }, [echo])
+
+  useEffect(() => {
     return echo.playback.onStateChanged((next) => {
       setPlaybackState(next)
       refreshQueue()
+      if (next.status === 'idle' && !next.current && currentSceneRef.current) {
+        echo.scene.end().then(() => setCurrentScene(null)).catch(() => undefined)
+      }
     })
   }, [echo, refreshQueue])
 
@@ -178,6 +198,12 @@ function App() {
 
   const yinyiUnread = Boolean(latestYinyiDate) && latestYinyiDate !== (settings?.meta?.lastViewedYinyiAt ?? '')
 
+  useEffect(() => {
+    if (!bootReady || !settings) return
+    const firstRunDone = Boolean(settings.meta.firstRunWelcomeCompletedAt)
+    setOnboardingOpen(firstRunDone && !firstRunWelcomeOpen && !settings.meta.onboardingCompletedAt && !profile)
+  }, [bootReady, settings, profile, firstRunWelcomeOpen])
+
   async function rememberMinimizeChoice() {
     if (!rememberCloseChoice) return
     const next = await echo.settings.update('ui.closeBehavior', 'minimize')
@@ -206,6 +232,28 @@ function App() {
     setSettings(next)
   }
 
+  async function completeFirstRunWelcome() {
+    const next = await echo.settings.update('meta.firstRunWelcomeCompletedAt', new Date().toISOString())
+    setSettings(next)
+    setFirstRunWelcomeOpen(false)
+    setOnboardingOpen(!next.meta.onboardingCompletedAt && !profile)
+  }
+
+  async function startOnboardingImport() {
+    let next = await echo.settings.update('meta.onboardingStep', 'playlist')
+    next = await echo.settings.update('meta.onboardingCompletedAt', new Date().toISOString())
+    setSettings(next)
+    setOnboardingOpen(false)
+    setPage('settings')
+    setSettingsImportFocusToken((value) => value + 1)
+  }
+
+  async function skipOnboarding() {
+    const next = await echo.settings.update('meta.onboardingCompletedAt', new Date().toISOString())
+    setSettings(next)
+    setOnboardingOpen(false)
+  }
+
   function setVoiceContinuous(value: boolean) {
     setVoiceContinuousState(value)
     localStorage.setItem('echo:voiceContinuous', value ? '1' : '0')
@@ -219,9 +267,11 @@ function App() {
 
   async function playScene(key: SceneKey) {
     const result = await echo.scene.play(key, { appendChatMessage: true })
-    setCurrentScene(result.scene)
-    setPlaybackState(result.state)
-    await refreshQueue()
+    if (result.tracks.length > 0 || result.message) {
+      setCurrentScene(result.scene)
+      setPlaybackState(result.state)
+      await refreshQueue()
+    }
     return result
   }
 
@@ -277,12 +327,12 @@ function App() {
 
     return (
       <header className="shell-hdr shell-hdr-detail">
-        <button className="shell-return" type="button" onClick={() => setPage(page === 'settings' ? 'profile' : 'chat')}>
+        <button className="shell-return" type="button" onClick={() => setPage(page === 'settings' ? 'profile' : page === 'about' ? 'settings' : 'chat')}>
           ◁ 返回
         </button>
         <div className="shell-title">
-          {page === 'settings' ? '设 置' : 'Echo'}
-          <small>{page === 'settings' ? 'S E T T I N G S' : 'P R O F I L E'}</small>
+          {page === 'settings' ? '设 置' : page === 'about' ? '关 于' : 'Echo'}
+          <small>{page === 'settings' ? 'S E T T I N G S' : page === 'about' ? 'A B O U T' : 'P R O F I L E'}</small>
         </div>
         <WindowControls
           onMinimize={() => echo.window.minimize().catch(() => undefined)}
@@ -376,8 +426,6 @@ function App() {
               refreshQueue={refreshQueue}
               autoPlayNext={settings?.playback.autoPlayNext ?? true}
               updateAutoPlayNext={updateAutoPlayNext}
-              currentScene={currentScene}
-              endScene={endScene}
             />
           </div>
           {page === 'profile' && (
@@ -400,7 +448,11 @@ function App() {
               hasLlmConfig={hasLlmConfig}
               refreshProfile={refreshProfile}
               refreshQueue={refreshQueue}
+              importFocusToken={settingsImportFocusToken}
             />
+          )}
+          {page === 'about' && (
+            <AboutEchoPage {...commonProps} />
           )}
         </section>
         <div className={page === 'voice' ? 'voice-mode-active' : ''}>
@@ -417,6 +469,7 @@ function App() {
             }}
           />
         </div>
+        {firstRunWelcomeOpen && <FirstRunWelcome onContinue={completeFirstRunWelcome} />}
         {closeDialogOpen && (
           <div className="close-dialog-layer" role="presentation">
             <section className="close-dialog" role="dialog" aria-modal="true" aria-labelledby="close-dialog-title">
@@ -437,6 +490,23 @@ function App() {
                 <button className="btn sec close-quit-btn" type="button" onClick={quitEcho}>直接退出</button>
                 <button className="btn close-minimize-btn" type="button" onClick={minimizeToTray}>最小化到托盘</button>
               </div>
+            </section>
+          </div>
+        )}
+        {onboardingOpen && (
+          <div className="onboarding-layer" role="presentation">
+            <section className="onboarding-card" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+              <div className="onboarding-kicker">E C H O · F I R S T</div>
+              <h2 id="onboarding-title">先让我认识你的歌</h2>
+              <p>
+                导入一份歌单后，我会先读懂你的口味、常听情绪和安全区。后面推荐、风信、画像和主动关心都会从这里长出来。
+              </p>
+              <button className="btn onboarding-primary" type="button" onClick={() => { void startOnboardingImport() }}>
+                开始导入歌单
+              </button>
+              <button className="btn sec onboarding-skip" type="button" onClick={() => { void skipOnboarding() }}>
+                先逛逛
+              </button>
             </section>
           </div>
         )}

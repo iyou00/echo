@@ -35,13 +35,11 @@ const mockTracks: Track[] = [
 ]
 
 const mockScenes: SceneDefinition[] = [
-  { key: 'work', label: '工作', shortLabel: '工 作', line: '让节奏慢慢提起来,先别太炸。', prompt: '我想进入工作状态,帮我推荐 5 首歌曲。', targetCount: 5, moods: ['清醒', '陪伴'], scenes: ['下午工作'], energy: 'medium', tempo: 'medium', familiarity: 'balanced' },
-  { key: 'focus', label: '专注', shortLabel: '专 注', line: '少一点存在感,让节奏稳定铺着。', prompt: '我想专注一会儿,帮我推荐 5 首不抢注意力的歌曲。', targetCount: 5, moods: ['松弛', '陪伴'], scenes: ['独处', '下午工作'], energy: 'low', tempo: 'slow', familiarity: 'safe' },
-  { key: 'sleepy', label: '犯困', shortLabel: '犯 困', line: '把精神提一下,别一下子太猛。', prompt: '我有点犯困,帮我推荐 5 首提神但别太炸的歌曲。', targetCount: 5, moods: ['清醒', '轻快'], scenes: ['下午工作'], energy: 'high', tempo: 'medium', familiarity: 'balanced' },
-  { key: 'relax', label: '放松', shortLabel: '放 松', line: '工作间隙缓一下,别把情绪拽太深。', prompt: '我想放松一下,帮我推荐 5 首轻一点的歌曲。', targetCount: 5, moods: ['松弛', '治愈'], scenes: ['独处'], energy: 'low', tempo: 'slow', familiarity: 'safe' },
-  { key: 'rain', label: '雨天', shortLabel: '雨 天', line: '窗外慢一点,歌也慢一点。', prompt: '雨天这个气氛,帮我推荐 5 首歌曲。', targetCount: 5, moods: ['怀旧', '发呆'], scenes: ['雨天'], energy: 'low', tempo: 'slow', familiarity: 'balanced' },
-  { key: 'irritated', label: '烦躁', shortLabel: '烦 躁', line: '先降噪,让脑子别继续被推着走。', prompt: '我有点烦躁,帮我推荐 5 首别太吵的歌曲。', targetCount: 5, moods: ['松弛', '治愈'], scenes: ['独处'], energy: 'low', tempo: 'slow', familiarity: 'safe' },
-  { key: 'random', label: '随便听', shortLabel: '随 便', line: '交给 Echo 发散,从你的口味里随手捞。', prompt: '随便听点什么吗?不改的话,就给你自动连播 5 首哦。', targetCount: 5, moods: ['陪伴'], scenes: ['下午工作'], energy: 'medium', tempo: 'medium', familiarity: 'explore' },
+  { key: 'focus', label: '静下来', shortLabel: '静下来', line: '少一点存在感,让节奏稳定铺着。', prompt: '想静一会儿,帮我找几首不抢注意力的歌。', targetCount: 5, moods: ['松弛', '陪伴'], scenes: ['独处', '下午工作'], energy: 'low', tempo: 'slow', familiarity: 'safe' },
+  { key: 'sleepy', label: '有点困', shortLabel: '有点困', line: '把精神提一下,别一下子太猛。', prompt: '有点犯困,帮我找几首提神但别太炸的歌。', targetCount: 5, moods: ['清醒', '轻快'], scenes: ['下午工作'], energy: 'high', tempo: 'medium', familiarity: 'balanced' },
+  { key: 'relax', label: '松口气', shortLabel: '松口气', line: '工作间隙缓一下,别把情绪拽太深。', prompt: '想松口气,帮我找几首轻一点的歌。', targetCount: 5, moods: ['松弛', '治愈'], scenes: ['独处'], energy: 'low', tempo: 'slow', familiarity: 'safe' },
+  { key: 'irritated', label: '有点烦', shortLabel: '有点烦', line: '先降噪,让脑子别继续被推着走。', prompt: '有点烦,帮我找几首能让脑子安静下来的歌。', targetCount: 5, moods: ['松弛', '治愈'], scenes: ['独处'], energy: 'low', tempo: 'slow', familiarity: 'safe' },
+  { key: 'random', label: '随便吧', shortLabel: '随便吧', line: '交给 Echo 发散,从你的口味里随手捞。', prompt: '随便听点什么,从我的口味里捞几首就好。', targetCount: 5, moods: ['陪伴'], scenes: ['下午工作'], energy: 'medium', tempo: 'medium', familiarity: 'explore' },
 ]
 
 const mockSettings: Settings = {
@@ -84,6 +82,7 @@ const mockSettings: Settings = {
   meta: {
     schemaVersion: 1,
     firstUsedAt: now,
+    onboardingStep: 'playlist',
   },
 }
 
@@ -219,10 +218,33 @@ function mockIsFavorite(track: Track) {
   return favoriteState.some((item) => mockTrackKey(item) === mockTrackKey(track))
 }
 
+const sceneListeners = new Set<(scene: ActiveScene | null) => void>()
+
+function emitScene() {
+  const next = structuredClone(activeSceneState?.status === 'active' ? activeSceneState : null)
+  sceneListeners.forEach((listener) => listener(next))
+}
+
+function mockSceneSuperseded(scene: ActiveScene) {
+  return sceneSessions.some((item) => item.id > scene.id && new Date(item.startedAt).getTime() >= new Date(scene.startedAt).getTime())
+}
+
 function mockSceneDefinition(key: SceneKey) {
   const scene = mockScenes.find((item) => item.key === key)
   if (!scene) throw new Error('未知场景')
   return scene
+}
+
+const MOCK_SCENE_TEMPLATES: Record<string, (title: string) => string> = {
+  focus: (t) => `好，我把声音放低一点。先听《${t}》，后面几首也排好了。`,
+  sleepy: (t) => `给你提一点精神。先听《${t}》，别一下子太猛。`,
+  relax: (t) => `松口气。先听《${t}》，慢慢来。`,
+  irritated: (t) => `先把外面的声音降下来。先听《${t}》，让脑子缓一缓。`,
+  random: (t) => `随便来一首？先听《${t}》，后面看心情。`,
+}
+
+function mockSceneMessage(key: string, title: string): string {
+  return (MOCK_SCENE_TEMPLATES[key] ?? ((t) => `好，先听《${t}》，后面几首也排好了。`))(title)
 }
 
 function emitPlayback() {
@@ -504,6 +526,7 @@ const mockEcho: EchoApi = {
       }
       activeSceneState = scene
       sceneSessions.unshift(scene)
+      emitScene()
       return structuredClone(scene)
     },
     async play(key, options) {
@@ -517,6 +540,7 @@ const mockEcho: EchoApi = {
         sceneSessionId: scene.id,
         queueStatus: 'pending' as const,
       })))
+      if (mockSceneSuperseded(scene)) return { scene, tracks: [], state: structuredClone(playbackState) }
       if (tracks.length > 0) {
         const [first, ...rest] = tracks
         playbackState.current = { ...first, queueStatus: 'playing' }
@@ -527,11 +551,12 @@ const mockEcho: EchoApi = {
         queueState = [{ ...first, queueStatus: 'playing' }, ...rest]
         emitPlayback()
       }
+      if (mockSceneSuperseded(scene)) return { scene, tracks: [], state: structuredClone(playbackState) }
       const message = options?.appendChatMessage
         ? {
           id: ++messageId,
           role: 'assistant' as const,
-          content: tracks[0] ? `我切到${scene.label}了。先放《${tracks[0].title}》，后面几首我也排好了。` : `我切到${scene.label}了，先帮你把歌排起来。`,
+          content: tracks[0] ? mockSceneMessage(scene.key, tracks[0].title) : `好，我先帮你找几首${scene.label}的。`,
           createdAt: new Date().toISOString(),
           tracks,
         }
@@ -542,6 +567,7 @@ const mockEcho: EchoApi = {
     async end() {
       if (!activeSceneState || activeSceneState.status !== 'active') return null
       activeSceneState = { ...activeSceneState, status: 'ended', endedAt: new Date().toISOString() }
+      emitScene()
       return structuredClone(activeSceneState)
     },
     async today() {
@@ -555,6 +581,10 @@ const mockEcho: EchoApi = {
         status: scene.status,
         durationMinutes: Math.max(0, Math.round((new Date(scene.endedAt ?? scene.expiresAt).getTime() - new Date(scene.startedAt).getTime()) / 60000)),
       }))
+    },
+    onChanged(listener) {
+      sceneListeners.add(listener)
+      return () => sceneListeners.delete(listener)
     },
   },
   semantics: {
@@ -749,7 +779,7 @@ const mockEcho: EchoApi = {
     },
   },
   listening: {
-    async generateSegment() {
+    async generateSegment(_options?: { continuation?: boolean }) {
       const track = { ...mockTracks[0], playUrl: 'mock://audio', durationMs: 180000, sourceContext: 'voice' as const }
       return {
         text: `下午好。这个时间适合把节奏放轻一点,我给你放${track.artist}的《${track.title}》。先让它垫在后面,你不用急着切走。`,
