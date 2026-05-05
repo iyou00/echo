@@ -71,6 +71,16 @@ export interface TrackProfileEvidence {
   score?: number
 }
 
+export type ProfileEvidenceLevel = 'strong' | 'medium' | 'weak'
+export type ProfileEvidenceSource = 'favorite' | 'loop' | 'played' | 'scene' | 'imported' | 'semantic' | 'fallback'
+
+export interface ProfileDisplayModel {
+  signatureItems: Array<{ track: Track; note?: string; evidenceLevel: ProfileEvidenceLevel; source: ProfileEvidenceSource }>
+  genreItems: Array<{ name: string; weight: number; trend: 'up' | 'down' | 'steady'; representativeArtists: string[]; note?: string; evidenceLevel: ProfileEvidenceLevel; source: ProfileEvidenceSource }>
+  artistItems: Array<{ name: string; affinity: number; note?: string; evidenceLevel: ProfileEvidenceLevel; source: ProfileEvidenceSource }>
+  moodItems: Array<{ tag: string; frequency: number; evidenceLevel: ProfileEvidenceLevel; source: ProfileEvidenceSource }>
+}
+
 export interface SceneDefinition {
   key: SceneKey
   label: string
@@ -184,7 +194,7 @@ export interface ChatMessage {
 
 export interface TasteProfile {
   genres: Array<{ name: string; weight: number; trend: 'up' | 'down' | 'steady'; note?: string }>
-  artists: Array<{ name: string; affinity: number; last_played?: string; notes?: string }>
+  artists: Array<{ name: string; affinity: number; notes?: string }>
   moods: Array<{ tag: string; frequency: number; signature_artists?: string[] }>
   era_preference?: Record<string, number>
   discovery_appetite: number
@@ -194,6 +204,7 @@ export interface TasteProfile {
   energy_preference?: number
   tempo_preference?: { slow: number; medium: number; fast: number }
   scenes?: Array<{ tag: string; frequency: number }>
+  display?: ProfileDisplayModel
   profile_meta?: {
     updatedAt?: string
     structuredUpdatedAt?: string
