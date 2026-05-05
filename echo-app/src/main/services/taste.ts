@@ -114,6 +114,7 @@ interface EvidenceNote {
   text?: string
   evidenceLevel: ProfileEvidenceLevel
   source: ProfileEvidenceSource
+  count?: number
 }
 
 const LEGACY_PROFILE_NOTE_PATTERNS = [
@@ -128,26 +129,30 @@ function hasLegacyProfileNote(note?: string): boolean {
 }
 
 function signatureEvidence(feedback: TrackFeedback | undefined, events: ProfileTrackEvent[], semanticMood?: string): EvidenceNote {
-  if (feedback?.favoriteCount) return { text: '你主动收藏过,Echo 会把它留在代表曲里。', evidenceLevel: 'strong', source: 'favorite' }
-  if ((feedback?.loopCount ?? 0) >= 2) return { text: `你循环过 ${feedback?.loopCount} 次,属于会回头的声音。`, evidenceLevel: 'strong', source: 'loop' }
-  if ((feedback?.playCount ?? 0) >= 3) return { text: `你完整听过 ${feedback?.playCount} 次。`, evidenceLevel: 'strong', source: 'played' }
+  if (feedback?.favoriteCount) return { text: '你主动收藏过,Echo 会把它留在代表曲里。', evidenceLevel: 'strong', source: 'favorite', count: feedback.favoriteCount }
+  if ((feedback?.loopCount ?? 0) >= 2) return { text: `你循环过 ${feedback?.loopCount} 次,属于会回头的声音。`, evidenceLevel: 'strong', source: 'loop', count: feedback?.loopCount }
+  if ((feedback?.playCount ?? 0) >= 3) return { text: `你完整听过 ${feedback?.playCount} 次。`, evidenceLevel: 'strong', source: 'played', count: feedback?.playCount }
   const scene = mostFrequent(eventScenes(events))
   if (scene) return { text: `你在${scene}时,它常被 Echo 接上。`, evidenceLevel: 'strong', source: 'scene' }
   const mood = mostFrequent(eventMoods(events)) ?? semanticMood
   if (mood) return { text: `「${mood}」线索`, evidenceLevel: 'medium', source: 'semantic' }
-  return { text: '来自导入歌单的稳定坐标。', evidenceLevel: 'weak', source: 'imported' }
+  return { text: undefined, evidenceLevel: 'weak', source: 'imported' }
 }
 
-function genreNote(weight: number, trend: 'up' | 'down' | 'steady', artists: string[]): { note: string; evidenceLevel: ProfileEvidenceLevel; source: ProfileEvidenceSource } {
+function genreNote(name: string, weight: number, trend: 'up' | 'down' | 'steady', artists: string[]): { note: string; evidenceLevel: ProfileEvidenceLevel; source: ProfileEvidenceSource } {
   const evidenceLevel: ProfileEvidenceLevel = (artists.length >= 2 || weight >= 0.18 || trend !== 'steady') ? 'medium' : 'weak'
   const source: ProfileEvidenceSource = artists.length > 0 ? 'semantic' : 'fallback'
   if (artists.length === 0) {
-    return { note: trend === 'up' ? '最近权重在上来' : '歌单里的稳定区域', evidenceLevel, source }
+    const pct = Math.round(weight * 100)
+    if (trend === 'up') return { note: `${name} 最近上来,占比 ${pct}%`, evidenceLevel, source }
+    if (trend === 'down') return { note: `${name} 占比 ${pct}%,在收`, evidenceLevel, source }
+    return { note: `${name} · ${pct}%`, evidenceLevel, source }
   }
   const top = artists[0]
-  if (trend === 'up') return { note: `${top} 推动`, evidenceLevel, source }
-  if (trend === 'down') return { note: `${top} 权重收了一点`, evidenceLevel, source }
-  return { note: top, evidenceLevel, source }
+  const pct = Math.round(weight * 100)
+  if (trend === 'up') return { note: `${top} 推动 ${name} 上来 · ${pct}%`, evidenceLevel, source }
+  if (trend === 'down') return { note: `${top} 还在,${name} 收了一点 · ${pct}%`, evidenceLevel, source }
+  return { note: `${top} · ${pct}%`, evidenceLevel, source }
 }
 
 function artistEvidence(stats: { imported: number; played: number; skipped: number; looped: number; favorited: number; scenes: string[] }, seed?: ArtistSeed): EvidenceNote {
@@ -329,13 +334,14 @@ function buildProfileFromTracks(tracks: Track[]): TasteProfile {
       return {
         track: { ...track, reason: evidence.text },
         note: evidence.text,
+        count: evidence.count,
         evidenceLevel: evidence.evidenceLevel,
         source: evidence.source,
       }
     }),
     genreItems: topGenres.map((genre) => {
       const representativeArtists = topEntries(genreArtists.get(genre.name) ?? new Map<string, number>(), 3).map(([artist]) => artist)
-      const evidence = genreNote(genre.weight, genre.trend, representativeArtists)
+      const evidence = genreNote(genre.name, genre.weight, genre.trend, representativeArtists)
       return {
         name: genre.name,
         weight: genre.weight,
@@ -409,7 +415,7 @@ function buildFallbackDisplay(profile: TasteProfile): ProfileDisplayModel {
       }
     }),
     genreItems: profile.genres.map((genre) => {
-      const evidence = genreNote(genre.weight, genre.trend, [])
+      const evidence = genreNote(genre.name, genre.weight, genre.trend, [])
       return {
         name: genre.name,
         weight: genre.weight,

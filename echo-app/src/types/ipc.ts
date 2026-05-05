@@ -75,7 +75,7 @@ export type ProfileEvidenceLevel = 'strong' | 'medium' | 'weak'
 export type ProfileEvidenceSource = 'favorite' | 'loop' | 'played' | 'scene' | 'imported' | 'semantic' | 'fallback'
 
 export interface ProfileDisplayModel {
-  signatureItems: Array<{ track: Track; note?: string; evidenceLevel: ProfileEvidenceLevel; source: ProfileEvidenceSource }>
+  signatureItems: Array<{ track: Track; note?: string; count?: number; evidenceLevel: ProfileEvidenceLevel; source: ProfileEvidenceSource }>
   genreItems: Array<{ name: string; weight: number; trend: 'up' | 'down' | 'steady'; representativeArtists: string[]; note?: string; evidenceLevel: ProfileEvidenceLevel; source: ProfileEvidenceSource }>
   artistItems: Array<{ name: string; affinity: number; note?: string; evidenceLevel: ProfileEvidenceLevel; source: ProfileEvidenceSource }>
   moodItems: Array<{ tag: string; frequency: number; evidenceLevel: ProfileEvidenceLevel; source: ProfileEvidenceSource }>

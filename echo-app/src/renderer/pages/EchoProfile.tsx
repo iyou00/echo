@@ -1,6 +1,6 @@
 import { type CSSProperties, useRef, useState } from 'react'
 import { Play, RefreshCw, Settings } from 'lucide-react'
-import type { EchoApi, PlaybackState, ProfileEvidenceSource, TasteProfile, Track } from '../../types/ipc'
+import type { EchoApi, PlaybackState, ProfileEvidenceLevel, ProfileEvidenceSource, TasteProfile, Track } from '../../types/ipc'
 import type { AppPageProps } from '../../App'
 import { BrandLogo, EmptyState, Section } from '../components'
 
@@ -42,6 +42,65 @@ const ARTIST_BADGE_LABELS: Record<ProfileEvidenceSource, string> = {
   fallback: '',
 }
 
+type SignatureDisplayItem = NonNullable<TasteProfile['display']>['signatureItems'][number]
+
+const SIGNATURE_VARIANTS: Record<ProfileEvidenceSource, string[]> = {
+  favorite: [
+    '你亲手收藏过,这首会被我放在前排。',
+    '被你留过心,所以它在这里有位置。',
+    '收藏过的声音,我会记得更牢。',
+    '这首被你标记过,分量比普通播放更重。',
+  ],
+  loop: [
+    '你回头听过这首,它不是路过。',
+    '循环播放过,像一条熟路。',
+    '重复拿起过这首,有回声。',
+    '你反复听过它,像一个稳的回头点。',
+  ],
+  played: [
+    '完整听过,它通过了你的耐心。',
+    '从头听到尾过,这条线索够稳。',
+    '认真听完过,耳朵很少抗拒它。',
+    '完整播放过,不算路过。',
+  ],
+  scene: [
+    '在某个场景里接上过,这条线索很清楚。',
+    '某个场景里出现过,像一枚书签。',
+    '和某个场景贴得比较近。',
+    '在特定时刻被记下过。',
+  ],
+  semantic: [
+    '偏向某种情绪的线索。',
+    '落在情绪光谱的某一侧。',
+    '更像某种心情时会靠近的声音。',
+    '留下了某种情绪的主要轮廓。',
+  ],
+  imported: [
+    '来自你的歌单,先浮上来的那一批。',
+    '歌单里比较稳的一枚锚点。',
+    '导入时就在,是旧歌单的底色之一。',
+    '从你的歌单里留下来的坐标。',
+    '歌单里先被注意到的一首。',
+    '它来自你的旧歌单,有稳定的位置。',
+  ],
+  fallback: [
+    '我还在观察它和你的关系。',
+    '线索还浅,先放在这里。',
+    '暂时是一枚待确认的坐标。',
+    '我会继续听它和你的距离。',
+  ],
+}
+
+function signatureNote(track: Track, source: ProfileEvidenceSource, note?: string, count?: number, evidenceLevel?: ProfileEvidenceLevel): string {
+  if (note && evidenceLevel === 'strong') return note
+  const variants = SIGNATURE_VARIANTS[source] ?? SIGNATURE_VARIANTS.fallback
+  const key = `${track.neteaseId ?? track.id ?? ''}:${track.title}:${track.artist}`
+  const index = stableHash(key) % variants.length
+  let text = variants[index]
+  if (count) text = text.replace('这首', `这首(${count}次)`)
+  return text
+}
+
 function moodCloudStyle(mood: MoodItem, index: number): CSSProperties {
   const percent = asPercent(mood.frequency)
   const shift = (stableHash(`${mood.tag}:${index}`) % 9) - 4
@@ -64,9 +123,13 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
   const [statusMessage, setStatusMessage] = useState('')
   const portraitUpdatedAt = profile?.profile_meta?.updatedAt ?? profile?.profile_meta?.structuredUpdatedAt
   const display = profile?.display
-  const signatureItems = profile
+  const signatureItems: SignatureDisplayItem[] = profile
     ? (display?.signatureItems?.length ? display.signatureItems : profile.signature_tracks.slice(0, 7).map((track) => ({ track, note: track.reason, evidenceLevel: 'weak' as const, source: 'fallback' as const })))
     : []
+  const signatureDisplay = signatureItems.map((item) => ({
+    ...item,
+    displayNote: signatureNote(item.track, item.source, item.note, item.count, item.evidenceLevel),
+  }))
   const genreItems = profile
     ? (display?.genreItems?.length ? display.genreItems : profile.genres.map((genre) => ({ ...genre, representativeArtists: [] as string[], note: undefined, evidenceLevel: 'weak' as const, source: 'fallback' as const })))
     : []
@@ -184,13 +247,13 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
 
             <Section label="S I G N A T U R E · 7">
               <div className="signature-list">
-                {signatureItems.map((item, index) => (
+                {signatureDisplay.map((item, index) => (
                   <div className="sig-track" key={`${item.track.title}-${index}`}>
                     <div className="sig-num">{String(index + 1).padStart(2, '0')}</div>
                     <div className="sig-track-body">
                       <div className="sig-title">{item.track.title}</div>
                       <div className="sig-meta">{item.track.artist}{item.track.year ? ` · ${item.track.year}` : ''}</div>
-                      {item.note && <div className={`sig-reason evidence-${item.evidenceLevel}`}>— {item.note}</div>}
+                      <div className={`sig-reason evidence-${item.evidenceLevel}`}>— {item.displayNote}</div>
                     </div>
                     <button
                       className="sig-play"
