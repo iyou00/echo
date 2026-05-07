@@ -329,6 +329,9 @@ const mockEcho: EchoApi = {
       emitPlayback()
       return { ok: true }
     },
+    onChanged(_listener) {
+      return () => {}
+    },
   },
   health: {
     async get() {
@@ -779,7 +782,7 @@ const mockEcho: EchoApi = {
     },
   },
   listening: {
-    async generateSegment(_options?: { continuation?: boolean }) {
+    async generateSegment() {
       const track = { ...mockTracks[0], playUrl: 'mock://audio', durationMs: 180000, sourceContext: 'voice' as const }
       return {
         text: `下午好。这个时间适合把节奏放轻一点,我给你放${track.artist}的《${track.title}》。先让它垫在后面,你不用急着切走。`,

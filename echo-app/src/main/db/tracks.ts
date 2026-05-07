@@ -10,6 +10,8 @@ export interface TodayTrackEvent {
   listenedAt: string
   queueStatus?: Track['queueStatus']
   echoNote?: string
+  recommendSource?: string
+  reason?: string
 }
 
 export interface ProfileTrackEvent {
@@ -180,6 +182,8 @@ export function loadTodayTrackEvents(limit = 60): TodayTrackEvent[] {
         listenedAt: typed.listened_at,
         queueStatus: parsed?.queueStatus,
         echoNote: parsed?.echoNote ?? parsed?.reason,
+        recommendSource: parsed?.recommendSource,
+        reason: parsed?.reason,
       }
     })
 }

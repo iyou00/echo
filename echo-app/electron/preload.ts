@@ -10,6 +10,11 @@ const echoApi: EchoApi = {
     downloadPlaylistTemplate: () => ipcRenderer.invoke('settings:downloadPlaylistTemplate'),
     exportData: () => ipcRenderer.invoke('settings:exportData'),
     resetData: () => ipcRenderer.invoke('settings:resetData'),
+    onChanged: (listener) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, payload: { path: string; value: unknown }) => listener(payload)
+      ipcRenderer.on('settings:changed', wrapped)
+      return () => ipcRenderer.off('settings:changed', wrapped)
+    },
   },
   health: {
     get: () => ipcRenderer.invoke('health:get'),

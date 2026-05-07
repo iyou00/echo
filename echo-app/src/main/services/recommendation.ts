@@ -510,6 +510,21 @@ function uniqueTracks(tracks: Track[]): Track[] {
   return result
 }
 
+function primaryArtist(artist: string): string {
+  return artist.split(/[/、,，&＋+]| feat\.?| ft\.?| and /i)[0]?.trim().toLowerCase() ?? artist.trim().toLowerCase()
+}
+
+function diversifyByArtist(tracks: Track[], maxPerArtist: number): Track[] {
+  const artistCounts = new Map<string, number>()
+  return tracks.filter((track) => {
+    const key = primaryArtist(track.artist)
+    const count = artistCounts.get(key) ?? 0
+    if (count >= maxPerArtist) return false
+    artistCounts.set(key, count + 1)
+    return true
+  })
+}
+
 function parseTargetCount(text: string): number {
   return parseRequestedTrackCount(text).targetCount
 }
@@ -697,35 +712,37 @@ function isGenericDiscoveryRequest(text: string, intent: RecommendationIntent): 
 function pickWeightedKeywords(): string[] {
   const profile = getTasteProfile()
   const semanticTracks = listSemantics()
-  const weighted: string[] = []
+  const pool: string[] = []
 
-  for (const mood of profile?.moods ?? []) {
-    const keywords = GENERIC_MOOD_KEYWORDS[mood.tag] ?? [mood.tag]
-    const repeat = Math.max(1, Math.min(4, Math.round(mood.frequency * 4)))
-    for (let index = 0; index < repeat; index += 1) weighted.push(...keywords)
-  }
+  // Mood bucket: take up to 3 distinct moods, pick 1 keyword each
+  const moodKeywords = (profile?.moods ?? []).flatMap((mood) => GENERIC_MOOD_KEYWORDS[mood.tag] ?? [mood.tag])
+  const shuffledMoods = shuffleItems(unique(moodKeywords))
+  pool.push(...shuffledMoods.slice(0, 3))
 
-  for (const genre of profile?.genres ?? []) {
-    const keywords = GENERIC_GENRE_KEYWORDS[genre.name] ?? [genre.name]
-    const repeat = Math.max(1, Math.min(4, Math.round(genre.weight * 4)))
-    for (let index = 0; index < repeat; index += 1) weighted.push(...keywords)
-  }
+  // Genre bucket: take up to 3 distinct genres, pick 1 keyword each
+  const genreKeywords = (profile?.genres ?? []).flatMap((genre) => GENERIC_GENRE_KEYWORDS[genre.name] ?? [genre.name])
+  const shuffledGenres = shuffleItems(unique(genreKeywords))
+  pool.push(...shuffledGenres.slice(0, 3))
 
+  // Semantic track bucket: secondary diversity from actual listened tracks
   const semanticMoodCounts = new Map<string, number>()
   const semanticGenreCounts = new Map<string, number>()
   for (const track of semanticTracks) {
     for (const mood of track.semantic.moods) semanticMoodCounts.set(mood, (semanticMoodCounts.get(mood) ?? 0) + 1)
     for (const genre of track.semantic.genres) semanticGenreCounts.set(genre, (semanticGenreCounts.get(genre) ?? 0) + 1)
   }
+  const semanticMoodKeywords = Array.from(semanticMoodCounts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .flatMap(([mood]) => GENERIC_MOOD_KEYWORDS[mood] ?? [mood])
+  pool.push(...shuffleItems(unique(semanticMoodKeywords)).slice(0, 2))
+  const semanticGenreKeywords = Array.from(semanticGenreCounts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .flatMap(([genre]) => GENERIC_GENRE_KEYWORDS[genre] ?? [genre])
+  pool.push(...shuffleItems(unique(semanticGenreKeywords)).slice(0, 2))
 
-  for (const [mood] of Array.from(semanticMoodCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5)) {
-    weighted.push(...(GENERIC_MOOD_KEYWORDS[mood] ?? [mood]))
-  }
-  for (const [genre] of Array.from(semanticGenreCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 4)) {
-    weighted.push(...(GENERIC_GENRE_KEYWORDS[genre] ?? [genre]))
-  }
-
-  return unique(shuffleItems(weighted))
+  return unique(pool)
 }
 
 function genericDiscoveryKeywords(): string[] {
@@ -793,7 +810,7 @@ async function recommendGenericDiscovery(intent: RecommendationIntent): Promise<
   for (const stage of stages) {
     if (stage.length === 0) continue
     const playable = await filterPlayableTracks(shuffleTracks(stage), Math.max(20, intent.targetCount * 8))
-    const picked = uniqueTracks(playable).slice(0, intent.targetCount).map(withGenericReason)
+    const picked = diversifyByArtist(uniqueTracks(playable), 1).slice(0, intent.targetCount).map(withGenericReason)
     if (picked.length) {
       return picked.map((track) => ({
         ...track,
@@ -1221,7 +1238,8 @@ export async function recommendFromNetease(text: string, override?: IntentOverri
   const fallbackPool = allowCooldownFallback ? ranked.filter((track) => matchesIntentFloor(track, intent)) : []
   const primaryPool = intentMatched.length >= intent.targetCount ? intentMatched : cooledPool.length >= intent.targetCount ? cooledPool : fallbackPool
   const playablePool = await filterPlayableTracks(primaryPool, Math.max(20, intent.targetCount * 8))
-  const finalTracks = await selectFinalTracks(text, playablePool, intent)
+  const diversifiedPool = diversifyByArtist(playablePool, 2)
+  const finalTracks = await selectFinalTracks(text, diversifiedPool, intent)
   const evidencedTracks = finalTracks.map((track) => ({
     ...track,
     profileEvidence: {

@@ -217,7 +217,7 @@ async function handleNotificationClick(record: CarePingRecord): Promise<void> {
   markCarePingClicked(record.id)
   if (record.type === 'recommend_track' && record.payload.track) {
     appendRecommendedTracks([record.payload.track])
-    const message = appendConversation('assistant', '来了。', [record.payload.track])
+    const message = appendConversation('assistant', record.body, [record.payload.track])
     BrowserWindow.getAllWindows()[0]?.webContents.send('chat:message-injected', message)
     await play(record.payload.track)
     showMainWindow({ page: 'chat', carePingId: record.id, canMuteToday: true })

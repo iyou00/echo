@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ActiveScene, PlaybackState, SceneDefinition, SceneKey, Settings, TasteProfile, TasteQuestion, Track } from './types/ipc'
+import type { ActiveScene, PlaybackState, SceneDefinition, SceneKey, Settings, TasteProfile, Track } from './types/ipc'
 import { getEchoApi } from './renderer/api'
 import { AboutEchoPage } from './renderer/pages/AboutEcho'
 import { ChatPage } from './renderer/pages/Chat'
@@ -25,7 +25,6 @@ function App() {
   const [settings, setSettings] = useState<Settings | null>(null)
   const [bootReady, setBootReady] = useState(false)
   const [profile, setProfile] = useState<TasteProfile | null>(null)
-  const [questions, setQuestions] = useState<TasteQuestion[]>([])
   const [queue, setQueue] = useState<Track[]>([])
   const [sceneDefinitions, setSceneDefinitions] = useState<SceneDefinition[]>([])
   const [currentScene, setCurrentScene] = useState<ActiveScene | null>(null)
@@ -57,7 +56,6 @@ function App() {
   const refreshProfile = useCallback(async () => {
     const next = await echo.taste.getProfile()
     setProfile(next.profile)
-    setQuestions(next.questions)
   }, [echo])
 
   const refreshQueue = useCallback(async (): Promise<Track[]> => {
@@ -89,7 +87,6 @@ function App() {
       if (!alive) return
       setSettings(nextSettings)
       setProfile(nextTaste.profile)
-      setQuestions(nextTaste.questions)
       setQueue(nextQueue)
       setPlaybackState(nextPlayback)
       setLatestYinyiDate(nextYinyi[0]?.date ?? '')
@@ -100,7 +97,8 @@ function App() {
       setFirstRunWelcomeOpen(shouldShowFirstRunWelcome)
       setOnboardingOpen(!shouldShowFirstRunWelcome && !nextSettings.meta.onboardingCompletedAt && !nextTaste.profile)
       const isRealElectron = Boolean(window.echo)
-      if (isRealElectron && (!nextSettings.llm.baseUrl || !nextSettings.llm.apiKey || !nextSettings.llm.model)) {
+      const needsOnboarding = !shouldShowFirstRunWelcome && !nextSettings.meta.onboardingCompletedAt && !nextTaste.profile
+      if (!needsOnboarding && isRealElectron && (!nextSettings.llm.baseUrl || !nextSettings.llm.apiKey || !nextSettings.llm.model)) {
         setPage('settings')
       }
       // 所有初始数据都到位后才解锁主界面，避免渲染时 settings 还是 null 闪一下"去设置"提示。
@@ -259,12 +257,6 @@ function App() {
     localStorage.setItem('echo:voiceContinuous', value ? '1' : '0')
   }
 
-  async function startScene(key: SceneKey) {
-    const next = await echo.scene.start(key)
-    setCurrentScene(next)
-    return next
-  }
-
   async function playScene(key: SceneKey) {
     const result = await echo.scene.play(key, { appendChatMessage: true })
     if (result.tracks.length > 0 || result.message) {
@@ -388,7 +380,6 @@ function App() {
               restoreOnStart={Boolean(settings?.chat.restoreOnStart)}
               scenes={sceneDefinitions}
               currentScene={currentScene}
-              startScene={startScene}
               playScene={playScene}
               endScene={endScene}
               autoPlayNext={settings?.playback.autoPlayNext ?? true}

@@ -87,8 +87,8 @@ ${recentSeal}
   return messages
 }
 
-export function buildYinyiContext(date: string): LlmMessage[] {
-  const prompt = extractYinyiSystemPrompt(readRootFile('prompts/yinyi-writer-v4.md') || readRootFile('prompts/yinyi-writer.md'))
+export function buildYinyiContext(date: string, weatherSummary?: string): LlmMessage[] {
+  const prompt = extractYinyiSystemPrompt(readRootFile('prompts/yinyi-writer-v5.md') || readRootFile('prompts/yinyi-writer-v4.md'))
   const profile = getTasteProfile()
   const history = loadTodayConversations(20)
   const tracks = loadTodayTrackEvents(60)
@@ -107,7 +107,7 @@ export function buildYinyiContext(date: string): LlmMessage[] {
     {
       role: 'user',
       content: `<date>${date}</date>
-<weather>未知</weather>
+<weather>${weatherSummary ?? '未知'}</weather>
 
 <today_listening>
 ${tracks.length > 0 ? tracks.map((track) => {
@@ -126,7 +126,12 @@ ${history.length > 0 ? history.map((item) => {
 </today_conversations>
 
 <today_recommendations>
-${recommendations.length > 0 ? recommendations.map((track) => `- ${track.artist} / ${track.title}${track.queueStatus ? ` — ${track.queueStatus}` : ''}${track.echoNote ? ` — ${track.echoNote}` : ''}`).join('\n') : '(暂无)'}
+${recommendations.length > 0 ? recommendations.map((track) => {
+  const source = track.recommendSource ? ` · ${track.recommendSource}` : ''
+  const reason = track.reason ? ` · ${track.reason}` : ''
+  const status = track.queueStatus ? ` · ${track.queueStatus}` : ''
+  return `- ${track.artist} / ${track.title}${source}${reason}${status}`
+}).join('\n') : '(暂无)'}
 </today_recommendations>
 
 <active_events>
@@ -140,7 +145,12 @@ ${profile?.echo_portrait ?? '还没有完整画像。'}
 </taste_profile_summary>
 
 <recent_yinyi>
-${recentYinyi.length > 0 ? recentYinyi.map((entry) => `${entry.date}: ${entry.content.slice(0, 260).replace(/\s+/g, ' ')}`).join('\n') : '(暂无)'}
+${recentYinyi.length > 0 ? recentYinyi.map((entry) => {
+  const raw = entry.content.split(/[。！？\n]/).filter(Boolean).slice(0, 2).join('。')
+  const firstSentences = raw.length > 200 ? raw.slice(0, 200) : raw
+  const wc = entry.content.replace(/\s+/g, '').length
+  return `${entry.date}: (${wc}字) ${firstSentences}...`
+}).join('\n') : '(暂无)'}
 </recent_yinyi>
 
 <meta>
@@ -150,11 +160,7 @@ ${recentYinyi.length > 0 ? recentYinyi.map((entry) => `${entry.date}: ${entry.co
 
 <output_contract>
 只输出风信正文。2-4 段,自然分段即可。
-可以使用“· · ·”做留白,但不要强制每段都用它分隔。
 不要标题,不要 bullet,不要 Markdown,不要解释。
-每篇至少有一句“我看到 / 我听到 / 我注意到 / 我看你...”。
-每篇至少有一处“我不知道 / 我说不准 / 我猜不到 / 我没问”。
-每篇至少有一处“我想到 / 我意识到 / 我才发现 / 这让我想到”。
 如果今日素材很少,写短一点。
 </output_contract>`,
     },

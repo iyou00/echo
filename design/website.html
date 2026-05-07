@@ -1,0 +1,1213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Echo · 私人的音乐伙伴</title>
+<style>
+  :root {
+    --ayin-900: #173404;
+    --ayin-800: #27500A;
+    --ayin-700: #3B6D11;
+    --ayin-600: #639922;
+    --ayin-500: #78A943;
+    --ayin-400: #8FBC57;
+    --ayin-300: #C0DD97;
+    --ayin-100: #EAF3DE;
+    --ayin-50: #F5FAED;
+    --paper: #FBFBF6;
+    --paper-2: #F1F2EA;
+    --text: #1A1A1A;
+    --text-2: #5F5E5A;
+    --text-3: #999996;
+    --border: rgba(39, 80, 10, 0.13);
+    --shadow: 0 26px 80px rgba(42, 75, 21, 0.16), 0 8px 24px rgba(42, 75, 21, 0.08);
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", "Cascadia Code", "Courier New", monospace;
+    --serif: "Source Han Serif SC", "Noto Serif CJK SC", "Songti SC", Georgia, serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    margin: 0;
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.7;
+    background:
+      radial-gradient(circle at 18% 12%, rgba(192, 221, 151, 0.22), transparent 30%),
+      radial-gradient(circle at 82% 16%, rgba(234, 243, 222, 0.62), transparent 28%),
+      linear-gradient(180deg, #F6F7F0 0%, #FFFFFF 46%, #F4F6EF 100%);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.42;
+    background-image:
+      linear-gradient(rgba(23, 52, 4, 0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(23, 52, 4, 0.018) 1px, transparent 1px);
+    background-size: 24px 24px, 24px 24px;
+    mask-image: linear-gradient(180deg, black, transparent 82%);
+    z-index: 0;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .site {
+    position: relative;
+    z-index: 1;
+    overflow: hidden;
+  }
+
+  .shell {
+    width: min(1120px, calc(100% - 40px));
+    margin: 0 auto;
+  }
+
+  .nav {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 72px;
+    backdrop-filter: blur(22px);
+    background: rgba(246, 247, 240, 0.72);
+    border-bottom: 0.5px solid rgba(39, 80, 10, 0.08);
+  }
+
+  .nav-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: min(1120px, calc(100% - 40px));
+    margin: 0 auto;
+  }
+
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--mono);
+    color: var(--ayin-900);
+    font-size: 11px;
+    letter-spacing: 2.4px;
+  }
+
+  .brand img {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: block;
+    box-shadow: 0 0 0 1px rgba(39, 80, 10, 0.08);
+  }
+
+  .nav-links {
+    display: flex;
+    align-items: center;
+    gap: 26px;
+    color: var(--text-2);
+    font-size: 12px;
+  }
+
+  .nav-links a {
+    transition: color 160ms ease;
+  }
+
+  .nav-links a:hover {
+    color: var(--ayin-700);
+  }
+
+  .nav-download {
+    border: 0.5px solid rgba(99, 153, 34, 0.34);
+    border-radius: 999px;
+    padding: 7px 13px;
+    color: var(--ayin-700);
+    background: rgba(255, 255, 255, 0.52);
+  }
+
+  .hero {
+    min-height: calc(100vh - 72px);
+    display: grid;
+    grid-template-columns: minmax(0, 0.92fr) minmax(420px, 0.78fr);
+    gap: 72px;
+    align-items: center;
+    padding: 64px 0 80px;
+  }
+
+  .eyebrow {
+    margin-bottom: 18px;
+    color: var(--ayin-700);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 4px;
+  }
+
+  h1 {
+    max-width: 620px;
+    margin: 0;
+    color: var(--ayin-900);
+    font-family: var(--serif);
+    font-size: clamp(48px, 7vw, 86px);
+    font-weight: 500;
+    line-height: 1.05;
+    letter-spacing: 0;
+  }
+
+  .hero-copy {
+    max-width: 560px;
+    margin: 24px 0 0;
+    color: var(--text-2);
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 2;
+  }
+
+  .hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 34px;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 42px;
+    border-radius: 999px;
+    padding: 0 20px;
+    font-size: 13px;
+    transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease;
+  }
+
+  .btn:hover {
+    transform: translateY(-1px);
+  }
+
+  .btn-primary {
+    color: #FFFFFF;
+    background: var(--ayin-600);
+    box-shadow: 0 12px 28px rgba(99, 153, 34, 0.24);
+  }
+
+  .btn-secondary {
+    color: var(--ayin-700);
+    border: 0.5px solid rgba(99, 153, 34, 0.28);
+    background: rgba(255, 255, 255, 0.58);
+  }
+
+  .trust-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 28px;
+  }
+
+  .trust-pill {
+    color: var(--text-3);
+    border: 0.5px solid rgba(39, 80, 10, 0.12);
+    border-radius: 999px;
+    padding: 5px 10px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 1px;
+    background: rgba(255, 255, 255, 0.44);
+  }
+
+  .product-stage {
+    position: relative;
+    min-height: 610px;
+  }
+
+  .product-stage::before {
+    content: "";
+    position: absolute;
+    inset: 52px -28px auto auto;
+    width: 360px;
+    height: 360px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(192, 221, 151, 0.42), transparent 68%);
+    filter: blur(2px);
+    animation: breathe 5.5s ease-in-out infinite;
+  }
+
+  .echo-window {
+    position: relative;
+    width: 430px;
+    min-height: 580px;
+    margin-left: auto;
+    overflow: hidden;
+    border: 0.5px solid rgba(39, 80, 10, 0.12);
+    border-radius: 18px;
+    background: #FFFFFF;
+    box-shadow: var(--shadow);
+  }
+
+  .window-top {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    height: 54px;
+    padding: 0 14px;
+    background: var(--ayin-50);
+    border-bottom: 0.5px solid rgba(0, 0, 0, 0.06);
+  }
+
+  .window-logo {
+    position: relative;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #1F1D1D;
+  }
+
+  .window-logo::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 8px;
+    height: 8px;
+    border: 2px solid var(--ayin-50);
+    border-radius: 50%;
+    background: var(--ayin-600);
+  }
+
+  .window-tabs {
+    display: flex;
+    justify-content: center;
+    flex: 1;
+    gap: 24px;
+    color: var(--text-3);
+    font-size: 12px;
+  }
+
+  .window-tab {
+    position: relative;
+    padding: 2px 0;
+  }
+
+  .window-tab.active {
+    color: var(--ayin-700);
+  }
+
+  .window-tab.active::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: -7px;
+    width: 15px;
+    height: 1.5px;
+    border-radius: 2px;
+    background: var(--ayin-600);
+    transform: translateX(-50%);
+  }
+
+  .window-ctrls {
+    display: flex;
+    gap: 6px;
+  }
+
+  .window-ctrls span {
+    width: 23px;
+    height: 23px;
+    border: 0.5px solid rgba(99, 153, 34, 0.32);
+    border-radius: 50%;
+  }
+
+  .chat-area {
+    min-height: 420px;
+    padding: 26px 18px 124px;
+    background: linear-gradient(180deg, #FFFFFF, #FAFBF7);
+  }
+
+  .bubble {
+    max-width: 315px;
+    margin-bottom: 16px;
+    border-radius: 16px;
+    padding: 13px 15px;
+    font-size: 13px;
+    line-height: 1.8;
+  }
+
+  .bubble.echo {
+    background: #FFFFFF;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.04);
+    border-top-left-radius: 5px;
+  }
+
+  .bubble.user {
+    margin-left: auto;
+    background: var(--ayin-100);
+    border-top-right-radius: 5px;
+  }
+
+  .track-card {
+    display: grid;
+    grid-template-columns: 34px 1fr auto;
+    gap: 10px;
+    align-items: center;
+    margin-top: 12px;
+    border: 0.5px solid rgba(99, 153, 34, 0.22);
+    border-radius: 11px;
+    padding: 13px;
+    background: rgba(245, 250, 237, 0.54);
+  }
+
+  .play-dot {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 31px;
+    height: 31px;
+    border-radius: 50%;
+    color: #FFFFFF;
+    background: var(--ayin-600);
+  }
+
+  .play-dot::before {
+    content: "";
+    width: 0;
+    height: 0;
+    border-top: 6px solid transparent;
+    border-bottom: 6px solid transparent;
+    border-left: 9px solid #FFFFFF;
+    margin-left: 2px;
+  }
+
+  .track-title {
+    font-weight: 600;
+    line-height: 1.2;
+  }
+
+  .track-meta {
+    margin-top: 3px;
+    color: var(--text-3);
+    font-family: var(--mono);
+    font-size: 10px;
+  }
+
+  .track-time {
+    color: var(--text-3);
+    font-family: var(--mono);
+    font-size: 10px;
+  }
+
+  .player {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    padding: 20px 18px 16px;
+    background: rgba(255, 255, 255, 0.92);
+    border-top: 0.5px solid rgba(0, 0, 0, 0.06);
+    backdrop-filter: blur(18px);
+  }
+
+  .wave {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    height: 30px;
+    margin-bottom: 12px;
+  }
+
+  .wave span {
+    width: 3px;
+    border-radius: 4px;
+    background: var(--ayin-300);
+    animation: wave 1.25s ease-in-out infinite;
+  }
+
+  .wave span:nth-child(3n) { background: var(--ayin-600); }
+  .wave span:nth-child(2n) { animation-delay: 120ms; }
+  .wave span:nth-child(4n) { animation-delay: 260ms; }
+
+  .player-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+  }
+
+  .player-title {
+    font-weight: 600;
+  }
+
+  .player-artist {
+    color: var(--text-3);
+    font-family: var(--mono);
+    font-size: 10px;
+  }
+
+  .mini-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .mini-circle {
+    width: 28px;
+    height: 28px;
+    border: 0.5px solid rgba(0, 0, 0, 0.08);
+    border-radius: 50%;
+    color: var(--text-3);
+    display: grid;
+    place-items: center;
+  }
+
+  .mini-play {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--ayin-600);
+  }
+
+  .floating-note {
+    position: absolute;
+    right: 268px;
+    bottom: 74px;
+    width: 210px;
+    border: 0.5px solid rgba(39, 80, 10, 0.12);
+    border-radius: 16px;
+    padding: 18px;
+    background: rgba(255, 255, 255, 0.72);
+    box-shadow: 0 18px 50px rgba(42, 75, 21, 0.12);
+    backdrop-filter: blur(18px);
+  }
+
+  .floating-note .k {
+    margin-bottom: 8px;
+    color: var(--ayin-700);
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 3px;
+  }
+
+  .floating-note p {
+    margin: 0;
+    color: var(--text-2);
+    font-family: var(--serif);
+    font-size: 13px;
+    line-height: 1.85;
+  }
+
+  .section {
+    padding: 96px 0;
+  }
+
+  .section-head {
+    display: grid;
+    grid-template-columns: 0.55fr 1fr;
+    gap: 72px;
+    align-items: end;
+    margin-bottom: 42px;
+  }
+
+  .section-kicker {
+    color: var(--ayin-700);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 4px;
+    margin-bottom: 12px;
+  }
+
+  h2 {
+    margin: 0;
+    color: var(--ayin-900);
+    font-family: var(--serif);
+    font-size: clamp(30px, 4vw, 48px);
+    font-weight: 500;
+    line-height: 1.2;
+  }
+
+  .section-intro {
+    margin: 0;
+    color: var(--text-2);
+    font-family: var(--serif);
+    font-size: 16px;
+    line-height: 2;
+  }
+
+  .feature-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+  }
+
+  .feature-card {
+    min-height: 255px;
+    border: 0.5px solid rgba(39, 80, 10, 0.12);
+    border-radius: 18px;
+    padding: 22px;
+    background: rgba(255, 255, 255, 0.56);
+    box-shadow: 0 12px 40px rgba(42, 75, 21, 0.05);
+  }
+
+  .feature-card:nth-child(2n) {
+    background: rgba(245, 250, 237, 0.66);
+  }
+
+  .feature-label {
+    color: var(--ayin-700);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 3px;
+  }
+
+  .feature-card h3 {
+    margin: 24px 0 12px;
+    font-family: var(--serif);
+    font-size: 21px;
+    font-weight: 500;
+  }
+
+  .feature-card p {
+    margin: 0;
+    color: var(--text-2);
+    font-size: 13px;
+    line-height: 1.9;
+  }
+
+  .profile-showcase {
+    display: grid;
+    grid-template-columns: 0.82fr 1fr;
+    gap: 18px;
+  }
+
+  .profile-paper {
+    border: 0.5px solid rgba(39, 80, 10, 0.13);
+    border-radius: 22px;
+    padding: 34px;
+    background:
+      linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(245, 250, 237, 0.78)),
+      radial-gradient(circle at 80% 16%, rgba(192, 221, 151, 0.2), transparent 30%);
+    box-shadow: var(--shadow);
+  }
+
+  .profile-paper .small {
+    color: var(--ayin-700);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 4px;
+    margin-bottom: 20px;
+  }
+
+  .portrait {
+    margin: 0 0 30px;
+    color: var(--ayin-900);
+    font-family: var(--serif);
+    font-size: 19px;
+    line-height: 2;
+  }
+
+  .signature-list {
+    display: grid;
+    gap: 16px;
+  }
+
+  .signature-item {
+    display: grid;
+    grid-template-columns: 36px 1fr;
+    gap: 12px;
+    align-items: start;
+  }
+
+  .signature-index {
+    color: var(--ayin-700);
+    font-family: var(--serif);
+    font-size: 25px;
+    line-height: 1;
+  }
+
+  .signature-title {
+    font-weight: 600;
+    line-height: 1.3;
+  }
+
+  .signature-note {
+    margin-top: 3px;
+    color: var(--text-2);
+    font-family: var(--serif);
+    font-size: 12px;
+  }
+
+  .memory-panel {
+    display: grid;
+    grid-template-rows: 1fr 0.9fr;
+    gap: 18px;
+  }
+
+  .mood-map,
+  .genre-map {
+    border: 0.5px solid rgba(39, 80, 10, 0.12);
+    border-radius: 22px;
+    padding: 28px;
+    background: rgba(255, 255, 255, 0.58);
+  }
+
+  .panel-title {
+    margin-bottom: 24px;
+    color: var(--ayin-700);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 4px;
+  }
+
+  .mood-cloud {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    min-height: 170px;
+    background-image: radial-gradient(circle, rgba(99, 153, 34, 0.18) 0 1px, transparent 1px);
+    background-size: 18px 18px;
+    border-radius: 16px;
+  }
+
+  .mood-tag {
+    border: 0.5px solid rgba(99, 153, 34, 0.2);
+    border-radius: 999px;
+    padding: 7px 12px;
+    color: var(--ayin-800);
+    background: rgba(255, 255, 255, 0.62);
+    font-family: var(--serif);
+    box-shadow: 0 10px 24px rgba(42, 75, 21, 0.06);
+  }
+
+  .mood-tag.big { font-size: 24px; transform: translate(8px, 2px); }
+  .mood-tag.mid { font-size: 18px; transform: translate(-6px, -8px); opacity: 0.88; }
+  .mood-tag.small { font-size: 14px; opacity: 0.68; }
+
+  .genre-row {
+    margin-bottom: 18px;
+  }
+
+  .genre-line {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 7px;
+    font-size: 12px;
+  }
+
+  .genre-line span:last-child {
+    color: var(--text-3);
+    font-family: var(--mono);
+    font-size: 10px;
+  }
+
+  .genre-bar {
+    overflow: hidden;
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(39, 80, 10, 0.08);
+  }
+
+  .genre-bar i {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--ayin-600);
+  }
+
+  .care-band {
+    position: relative;
+    border: 0.5px solid rgba(39, 80, 10, 0.12);
+    border-radius: 26px;
+    padding: 48px;
+    overflow: hidden;
+    background:
+      linear-gradient(135deg, rgba(245, 250, 237, 0.92), rgba(255, 255, 255, 0.72)),
+      radial-gradient(circle at 80% 20%, rgba(192, 221, 151, 0.26), transparent 32%);
+  }
+
+  .care-band::after {
+    content: "";
+    position: absolute;
+    right: -80px;
+    bottom: -120px;
+    width: 300px;
+    height: 300px;
+    border: 1px solid rgba(99, 153, 34, 0.2);
+    border-radius: 50%;
+  }
+
+  .care-layout {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: 0.88fr 1fr;
+    gap: 64px;
+    align-items: center;
+  }
+
+  .notification {
+    width: min(430px, 100%);
+    border: 0.5px solid rgba(0, 0, 0, 0.08);
+    border-radius: 16px;
+    padding: 18px;
+    background: rgba(255, 255, 255, 0.82);
+    box-shadow: 0 20px 60px rgba(42, 75, 21, 0.1);
+  }
+
+  .notification-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 13px;
+    color: var(--text-3);
+    font-family: var(--mono);
+    font-size: 10px;
+  }
+
+  .notification-body {
+    display: grid;
+    grid-template-columns: 42px 1fr;
+    gap: 14px;
+  }
+
+  .notification-body img {
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+  }
+
+  .notification-title {
+    margin-bottom: 4px;
+    font-weight: 600;
+  }
+
+  .notification-text {
+    color: var(--text-2);
+    line-height: 1.75;
+  }
+
+  .privacy-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+  }
+
+  .privacy-card {
+    min-height: 180px;
+    border-top: 0.5px solid rgba(39, 80, 10, 0.16);
+    padding-top: 18px;
+  }
+
+  .privacy-card h3 {
+    margin: 0 0 12px;
+    font-family: var(--serif);
+    font-size: 20px;
+    font-weight: 500;
+  }
+
+  .privacy-card p {
+    margin: 0;
+    color: var(--text-2);
+  }
+
+  .download {
+    padding: 90px 0 110px;
+  }
+
+  .download-card {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 32px;
+    align-items: center;
+    border: 0.5px solid rgba(39, 80, 10, 0.13);
+    border-radius: 28px;
+    padding: 42px;
+    background: #FFFFFF;
+    box-shadow: var(--shadow);
+  }
+
+  .download-card h2 {
+    font-size: clamp(32px, 4vw, 54px);
+  }
+
+  .download-card p {
+    margin: 15px 0 0;
+    color: var(--text-2);
+    font-family: var(--serif);
+    font-size: 15px;
+  }
+
+  .download-meta {
+    margin-top: 18px;
+    color: var(--text-3);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 1.5px;
+  }
+
+  .footer {
+    padding: 28px 0 48px;
+    color: var(--text-3);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 1.6px;
+    border-top: 0.5px solid rgba(39, 80, 10, 0.1);
+  }
+
+  @keyframes breathe {
+    0%, 100% { transform: scale(0.94); opacity: 0.66; }
+    50% { transform: scale(1.06); opacity: 0.92; }
+  }
+
+  @keyframes wave {
+    0%, 100% { height: 24%; }
+    50% { height: 88%; }
+  }
+
+  @media (max-width: 960px) {
+    .hero,
+    .section-head,
+    .profile-showcase,
+    .care-layout,
+    .download-card {
+      grid-template-columns: 1fr;
+    }
+
+    .hero {
+      gap: 38px;
+      padding-top: 44px;
+    }
+
+    .product-stage {
+      min-height: auto;
+    }
+
+    .echo-window {
+      width: min(430px, 100%);
+      margin: 0 auto;
+    }
+
+    .floating-note {
+      display: none;
+    }
+
+    .feature-grid,
+    .privacy-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (max-width: 640px) {
+    .shell,
+    .nav-inner {
+      width: min(100% - 24px, 1120px);
+    }
+
+    .nav-links a:not(.nav-download) {
+      display: none;
+    }
+
+    .hero {
+      min-height: auto;
+    }
+
+    h1 {
+      font-size: 44px;
+    }
+
+    .feature-grid,
+    .privacy-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .window-tabs {
+      gap: 14px;
+      font-size: 11px;
+    }
+
+    .window-ctrls {
+      display: none;
+    }
+
+    .care-band,
+    .download-card,
+    .profile-paper,
+    .mood-map,
+    .genre-map {
+      padding: 24px;
+      border-radius: 20px;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="site">
+  <header class="nav">
+    <div class="nav-inner">
+      <a class="brand" href="#top">
+        <img src="../specs/brand/icons/logo_64.png" alt="Echo logo" />
+        <span>ECHO</span>
+      </a>
+      <nav class="nav-links">
+        <a href="#features">能力</a>
+        <a href="#memory">记忆</a>
+        <a href="#care">关心</a>
+        <a href="#privacy">隐私</a>
+        <a class="nav-download" href="#download">下载 Windows 版</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="shell hero">
+      <div>
+        <div class="eyebrow">P R I V A T E · M U S I C · C O M P A N I O N</div>
+        <h1>Echo<br />会记住你的音乐口味。</h1>
+        <p class="hero-copy">
+          它陪你聊天,按当下状态找歌,把每天的音乐线索写成风信。你多听一次,多收藏一首,它就更懂一点。
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#download">下载 Windows 版</a>
+          <a class="btn btn-secondary" href="#features">看看 Echo 怎么陪你</a>
+        </div>
+        <div class="trust-row">
+          <span class="trust-pill">LOCAL MEMORY</span>
+          <span class="trust-pill">NETEASE MUSIC</span>
+          <span class="trust-pill">OPENAI COMPATIBLE</span>
+        </div>
+      </div>
+
+      <div class="product-stage" aria-label="Echo app preview">
+        <div class="echo-window">
+          <div class="window-top">
+            <div class="window-logo"></div>
+            <div class="window-tabs">
+              <span class="window-tab active">絮语</span>
+              <span class="window-tab">风信</span>
+              <span class="window-tab">回声</span>
+              <span class="window-tab">拾音</span>
+            </div>
+            <div class="window-ctrls"><span></span><span></span><span></span></div>
+          </div>
+          <div class="chat-area">
+            <div class="bubble user">这个时候有什么值得听的吗</div>
+            <div class="bubble echo">
+              这个点适合一点明亮但不吵的歌。我给你放一首,先把脑子从白天里拎出来。
+              <div class="track-card">
+                <span class="play-dot"></span>
+                <div>
+                  <div class="track-title">Sunny</div>
+                  <div class="track-meta">Boney M. · 1998</div>
+                </div>
+                <div class="track-time">3:59</div>
+              </div>
+            </div>
+          </div>
+          <div class="player">
+            <div class="wave" aria-hidden="true">
+              <span style="height: 38%"></span><span style="height: 70%"></span><span style="height: 52%"></span><span style="height: 84%"></span><span style="height: 44%"></span><span style="height: 64%"></span><span style="height: 36%"></span><span style="height: 78%"></span><span style="height: 46%"></span><span style="height: 88%"></span><span style="height: 58%"></span><span style="height: 34%"></span><span style="height: 76%"></span><span style="height: 42%"></span><span style="height: 62%"></span><span style="height: 82%"></span><span style="height: 40%"></span><span style="height: 70%"></span><span style="height: 48%"></span><span style="height: 86%"></span><span style="height: 54%"></span><span style="height: 38%"></span><span style="height: 74%"></span><span style="height: 46%"></span><span style="height: 64%"></span><span style="height: 80%"></span><span style="height: 36%"></span><span style="height: 72%"></span><span style="height: 52%"></span><span style="height: 84%"></span>
+            </div>
+            <div class="player-row">
+              <div>
+                <div class="player-title">Sunny</div>
+                <div class="player-artist">Boney M.</div>
+              </div>
+              <div class="mini-controls">
+                <span class="mini-circle">‹</span>
+                <span class="mini-play"></span>
+                <span class="mini-circle">›</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <aside class="floating-note">
+          <div class="k">E C H O · M E M O R Y</div>
+          <p>你最近更常在下午接近明亮的老歌,它们像一杯慢慢冷下来的茶。</p>
+        </aside>
+      </div>
+    </section>
+
+    <section id="features" class="shell section">
+      <div class="section-head">
+        <div>
+          <div class="section-kicker">W H A T · E C H O · D O E S</div>
+          <h2>它不是播放器外壳,它是会陪你听歌的人。</h2>
+        </div>
+        <p class="section-intro">
+          Echo 的四个入口对应四种使用状态:想聊、想记、想听一段、想整理。功能很实用,表达要像朋友。
+        </p>
+      </div>
+      <div class="feature-grid">
+        <article class="feature-card">
+          <div class="feature-label">絮语</div>
+          <h3>说一句状态,它给一首刚好的歌。</h3>
+          <p>默认推荐一首。你明确说五首,它才给五首。推荐会接入网易云,过滤可播放链接,再结合你的画像排序。</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-label">风信</div>
+          <h3>每天把音乐线索写成一段日记。</h3>
+          <p>它会看今天听过什么、跳过什么、在哪个场景里停留,写成一段更像朋友的记录。</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-label">回声</div>
+          <h3>让 Echo 说几句,也可以连续回声。</h3>
+          <p>不是每次都等你提问。你想听它说一段时,它会用声音和音乐一起接住当下。</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-label">拾音</div>
+          <h3>今天推荐过的歌,都会被好好放着。</h3>
+          <p>当天推荐、收藏、过往播放和场景队列都在这里,也支持自动连播和本地收藏。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="memory" class="shell section">
+      <div class="section-head">
+        <div>
+          <div class="section-kicker">E C H O · S E E S · Y O U</div>
+          <h2>它对你的理解,来自真实的听歌痕迹。</h2>
+        </div>
+        <p class="section-intro">
+          收藏、循环、完整播放、场景、语义标签会进入本地画像。证据够强才写判断,证据弱时只做轻表达。
+        </p>
+      </div>
+      <div class="profile-showcase">
+        <div class="profile-paper">
+          <div class="small">E C H O · P O R T R A I T</div>
+          <p class="portrait">
+            你喜欢的歌常常先给旋律,再把情绪慢慢推上来。明亮、怀旧、带一点松弛感的声音,更容易被你留下。
+          </p>
+          <div class="signature-list">
+            <div class="signature-item">
+              <div class="signature-index">01</div>
+              <div>
+                <div class="signature-title">Sunny</div>
+                <div class="signature-note">— 完整听过 3 次,这条线索够稳。</div>
+              </div>
+            </div>
+            <div class="signature-item">
+              <div class="signature-index">02</div>
+              <div>
+                <div class="signature-title">一格格</div>
+                <div class="signature-note">— 它先从你的歌单里浮上来。</div>
+              </div>
+            </div>
+            <div class="signature-item">
+              <div class="signature-index">03</div>
+              <div>
+                <div class="signature-title">Cold</div>
+                <div class="signature-note">— 偏向「清醒」的线索。</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="memory-panel">
+          <div class="mood-map">
+            <div class="panel-title">M O O D</div>
+            <div class="mood-cloud">
+              <span class="mood-tag big">松弛</span>
+              <span class="mood-tag mid">明亮</span>
+              <span class="mood-tag small">怀旧</span>
+              <span class="mood-tag mid">陪伴</span>
+              <span class="mood-tag small">清醒</span>
+              <span class="mood-tag small">治愈</span>
+            </div>
+          </div>
+          <div class="genre-map">
+            <div class="panel-title">G E N R E</div>
+            <div class="genre-row">
+              <div class="genre-line"><span>粤语流行</span><span>42%</span></div>
+              <div class="genre-bar"><i style="width: 42%"></i></div>
+            </div>
+            <div class="genre-row">
+              <div class="genre-line"><span>欧美流行</span><span>28%</span></div>
+              <div class="genre-bar"><i style="width: 28%"></i></div>
+            </div>
+            <div class="genre-row">
+              <div class="genre-line"><span>Pop / R&B</span><span>18%</span></div>
+              <div class="genre-bar"><i style="width: 18%"></i></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="care" class="shell section">
+      <div class="care-band">
+        <div class="care-layout">
+          <div>
+            <div class="section-kicker">C A R E · P I N G S</div>
+            <h2>它会轻轻出现,把一首歌递给你。</h2>
+            <p class="section-intro">
+              主动关心按你选择的频率触发。Echo 会结合时段、天气、最近听歌和当前场景,写一条克制的通知。
+            </p>
+          </div>
+          <div class="notification">
+            <div class="notification-head"><span>14:42</span><span>local.echo.app</span></div>
+            <div class="notification-body">
+              <img src="../specs/brand/icons/logo_64.png" alt="Echo" />
+              <div>
+                <div class="notification-title">Echo</div>
+                <div class="notification-text">下午有点容易散,我给你留了一首不太吵的歌。点开就从这里接上。</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="privacy" class="shell section">
+      <div class="section-head">
+        <div>
+          <div class="section-kicker">P R I V A C Y</div>
+          <h2>你的音乐记忆,默认留在本机。</h2>
+        </div>
+        <p class="section-intro">
+          Echo 是个人桌面应用。它需要模型和网易云能力,但核心记忆、收藏、画像和设置都在本地保存。
+        </p>
+      </div>
+      <div class="privacy-grid">
+        <article class="privacy-card">
+          <h3>本地记忆</h3>
+          <p>对话、音忆、收藏、画像、听歌记录存放在本机数据库里,方便 Echo 持续理解你。</p>
+        </article>
+        <article class="privacy-card">
+          <h3>模型配置</h3>
+          <p>支持 OpenAI 兼容接口。API Key 使用系统安全存储能力加密保存。</p>
+        </article>
+        <article class="privacy-card">
+          <h3>网易云播放</h3>
+          <p>登录网易云后, Echo 会读取歌单和获取可播放链接,推荐前会过滤不可播歌曲。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="download" class="shell download">
+      <div class="download-card">
+        <div>
+          <div class="section-kicker">D O W N L O A D</div>
+          <h2>把 Echo 放到桌面上。</h2>
+          <p>当前版本优先支持 Windows。第一次启动后,按引导导入歌单,它会先认识你的音乐口味。</p>
+          <div class="download-meta">WINDOWS · PRIVATE BETA · ECHO V0.5</div>
+        </div>
+        <a class="btn btn-primary" href="#">下载 Windows 版</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="shell footer">
+    ECHO · PRIVATE MUSIC COMPANION · MADE FOR QUIET LISTENING
+  </footer>
+</div>
+</body>
+</html>

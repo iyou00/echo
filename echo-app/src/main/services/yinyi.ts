@@ -6,6 +6,7 @@ import { getSettings } from '../db/settings'
 import { buildYinyiContext } from '../llm/prompt'
 import { completeChat, LlmError } from '../llm/client'
 import { recordHealth } from './health'
+import { getWeather } from '../weather/client'
 
 function todayIso(): string {
   const date = new Date()
@@ -29,17 +30,18 @@ function cleanYinyiContent(content: string): string {
     .replace(/^["“”'‘’]+|["“”'‘’]+$/g, '')
     .trim()
 
-  if (countWords(cleaned) <= 450) return cleaned
-  const sliced = cleaned.slice(0, 450)
+  if (countWords(cleaned) <= 380) return cleaned
+  const sliced = cleaned.slice(0, 380)
   const stop = Math.max(sliced.lastIndexOf('。'), sliced.lastIndexOf('？'), sliced.lastIndexOf('\n\n'))
-  return sliced.slice(0, stop > 180 ? stop + 1 : 450).trim()
+  return sliced.slice(0, stop > 180 ? stop + 1 : 380).trim()
 }
 
-function hasYinyiV4Signals(content: string): boolean {
-  const observer = /我(?:看到|听到|注意到|看你)/.test(content)
-  const restraint = /我(?:不知道|说不准|猜不到|没问)/.test(content)
-  const insight = /我(?:想到|意识到|才发现)|这让我想到/.test(content)
-  return observer && restraint && insight
+function hasYinyiQuality(content: string): boolean {
+  const hasFirstPerson = content.includes('我')
+  const hasUserMention = content.includes('你')
+  const noAIRollup = !/(总共|一共).{0,4}\d+\s*(首|次|条)/.test(content)
+  const noAI = !/(总的来说|由此可见|有什么可以|为您|用户)/.test(content)
+  return hasFirstPerson && hasUserMention && noAIRollup && noAI
 }
 
 function absentEntry(date: string): YinyiEntry {
@@ -71,14 +73,15 @@ export async function generateYinyi(date = todayIso()): Promise<YinyiEntry> {
   const settings = getSettings()
   const started = Date.now()
   try {
-    const messages = buildYinyiContext(date)
+    const weather = await getWeather(settings.user.city).catch(() => null)
+    const messages = buildYinyiContext(date, weather?.summary)
     let content = cleanYinyiContent(await completeChat(settings, messages, { temperature: 0.85 }))
-    if (content && !hasYinyiV4Signals(content)) {
+    if (content && !hasYinyiQuality(content)) {
       const retry = cleanYinyiContent(await completeChat(settings, [
         ...messages,
         {
           role: 'user',
-          content: '上一版没有通过 v4 checklist。请重写:必须有“我看到/我听到/我注意到/我看你”,必须有“我不知道/我说不准/我猜不到/我没问”,必须有“我想到/我意识到/我才发现/这让我想到”。自然分段即可,不用强制“· · ·”。只输出风信正文。',
+          content: '这一版太像报告了。重写:像朋友在台灯下嘀咕,短一点,有自己的想法在里面。只输出风信正文。',
         },
       ], { temperature: 0.85 }))
       if (retry) content = retry

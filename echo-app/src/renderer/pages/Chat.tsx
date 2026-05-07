@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from 'react'
+﻿import { FormEvent, useEffect, useRef, useState } from 'react'
 import { Send, Square } from 'lucide-react'
 import type { ActiveScene, ChatMessage, EchoApi, PlaybackState, SceneDefinition, SceneKey, ScenePlaybackResult, TasteProfile, Track } from '../../types/ipc'
 import type { AppPageProps } from '../../App'
@@ -15,7 +15,6 @@ interface ChatPageProps extends AppPageProps {
   restoreOnStart: boolean
   scenes: SceneDefinition[]
   currentScene: ActiveScene | null
-  startScene: (key: SceneKey) => Promise<ActiveScene>
   playScene: (key: SceneKey) => Promise<ScenePlaybackResult>
   endScene: () => Promise<void>
   autoPlayNext: boolean
@@ -118,7 +117,7 @@ function friendlyChatError(error: unknown) {
   return message || 'Echo 这会儿接不上模型。先去设置里看一眼。'
 }
 
-export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasLlmConfig, profile, refreshQueue, restoreOnStart, scenes, currentScene, startScene, playScene, endScene, autoPlayNext, updateAutoPlayNext }: ChatPageProps) {
+export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasLlmConfig, profile, refreshQueue, restoreOnStart, scenes, currentScene, playScene, endScene, autoPlayNext, updateAutoPlayNext }: ChatPageProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
@@ -200,6 +199,12 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
   useEffect(() => {
     return echo.chat.onMessageInjected((message) => {
       setMessages((items) => items.some((item) => item.id === message.id) ? items : [...items, message])
+    })
+  }, [echo])
+
+  useEffect(() => {
+    return echo.settings.onChanged((payload) => {
+      if (payload.path === '*') setMessages([])
     })
   }, [echo])
 
@@ -463,7 +468,7 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
         <EmptyState
           muted
           icon="…"
-          title="嗨。在我们说话之前, 你得先告诉我从哪儿连过来。"
+          title={"嗨。在我们说话之前,\n你得先告诉我从哪儿连过来。"}
           body="DeepSeek、Kimi、智谱、OpenRouter…… 任何 OpenAI 兼容的服务都行。"
           action={<button className="primary-button empty-cta" type="button" onClick={() => navigate('settings')}>去 设 置 页</button>}
         />
@@ -474,7 +479,7 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
       return (
         <EmptyState
           icon="♪"
-          title="嗨,我醒了——但我还没听过你的歌。给我看看?"
+          title={"嗨,我醒了——但我还没听过你的歌。\n给我看看?"}
           body="从网易云导出的歌单 JSON · 或者直接和我聊几句也行"
           sign="— Echo"
           action={(
@@ -490,9 +495,9 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
     return (
       <EmptyState
         icon={<BrandLogo className="empty-logo" size={56} />}
-        title="我粗看了你的歌单。现在开始,你可以直接问我该听什么。"
-        body="比如“来点慢的”“我想睡了”“这个下午适合什么”。我会先挑能播的歌。"
-        sign="— Echo · 刚读完你的歌单"
+        title={"我粗看了你的歌单。\n现在开始,你可以直接问我该听什么。"}
+        body={'比如“来点慢的”“我想睡了”“这个下午适合什么”。\n我会先挑能播的歌。'}
+        sign="— Echo"
         action={<button className="primary-button empty-cta" type="button" onClick={() => setDraft('这个时候有什么值得听的吗')}>开 始 聊</button>}
       />
     )

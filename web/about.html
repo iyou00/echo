@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>About · 手作札记</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;400;500&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400;1,500&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#0a0a0b; --bg-2:#0e0e10;
+    --ink:#e8e4dd; --ink-2:#b8b3aa; --ink-3:#6e6a63; --ink-4:#3a3833;
+    --rule:rgba(232,228,221,.10);
+    --accent:#c14b3d;
+    --green:#7a8a5b;
+    --serif-cn:"Noto Serif SC",serif;
+    --serif-en:"Cormorant Garamond",serif;
+    --mono:"JetBrains Mono",ui-monospace,monospace;
+  }
+  body.light{
+    --bg:#f4ede1; --bg-2:#ebe2d2;
+    --ink:#1f1c17; --ink-2:#514a3e; --ink-3:#8a8170; --ink-4:#c8bea9;
+    --rule:rgba(31,28,23,.12);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:var(--bg);color:var(--ink);font-family:var(--serif-en),var(--serif-cn);font-weight:300;-webkit-font-smoothing:antialiased;transition:background .4s,color .4s}
+
+  .shell{display:grid;grid-template-columns:340px 1fr;min-height:100vh}
+
+  /* ── SIDEBAR ─────────────────────────── */
+  .sidebar{
+    position:sticky;top:0;height:100vh;
+    background:var(--bg);border-right:1px solid var(--rule);
+    padding:48px 32px 24px;
+    display:flex;flex-direction:column;
+    transition:background .4s;
+    overflow-y:auto;
+  }
+  .sidebar::-webkit-scrollbar{width:4px}
+  .sidebar::-webkit-scrollbar-thumb{background:var(--ink-4)}
+
+  .brand-cn{font-family:var(--serif-cn);font-size:20px;font-weight:400;letter-spacing:.6em;color:var(--ink)}
+  .brand-en{margin-top:12px;font-family:var(--mono);font-size:10px;letter-spacing:.24em;color:var(--ink-3);text-transform:uppercase}
+
+  .back{
+    margin-top:32px;padding:10px 0;
+    display:inline-flex;align-items:center;gap:10px;
+    color:var(--ink-2);text-decoration:none;
+    font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;
+    cursor:pointer;transition:gap .25s,color .25s;
+  }
+  .back:hover{color:var(--ink);gap:14px}
+
+  /* Section nav — new addition */
+  .sb-nav{margin-top:28px;padding-top:24px;border-top:1px solid var(--rule)}
+  .sb-nav-head{font-family:var(--mono);font-size:9px;letter-spacing:.32em;color:var(--ink-4);text-transform:uppercase;margin-bottom:14px}
+  .sb-nav a{
+    display:flex;align-items:center;gap:10px;
+    padding:8px 0;
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--ink-3);text-decoration:none;
+    transition:color .2s,gap .2s;cursor:pointer;
+  }
+  .sb-nav a:hover{color:var(--ink-2);gap:14px}
+  .sb-nav a.cur{color:var(--ink-2)}
+  .sb-nav a .sn-dot{width:4px;height:4px;border-radius:50%;background:var(--ink-4);flex-shrink:0;transition:background .2s}
+  .sb-nav a.cur .sn-dot,.sb-nav a:hover .sn-dot{background:var(--accent)}
+
+  /* Seal */
+  .seal{
+    margin-top:auto;padding-top:24px;
+    display:flex;flex-direction:column;gap:20px;
+  }
+  .seal-sq{
+    display:grid;place-items:center;
+    width:72px;height:72px;
+    border:1px solid var(--accent);
+    color:var(--accent);font-family:var(--serif-cn);font-size:26px;
+  }
+
+  /* Build info — mirrors homepage sb-foot */
+  .sb-build{
+    font-family:var(--mono);font-size:10px;color:var(--ink-3);
+    letter-spacing:.16em;text-transform:uppercase;line-height:1.7;
+    padding-top:16px;border-top:1px solid var(--rule);
+  }
+  .sb-build b{color:var(--ink-2);font-weight:400}
+
+  .quote{font-family:var(--serif-en);font-style:italic;font-size:13.5px;line-height:1.75;color:var(--ink-3);max-width:28ch}
+  .quote-cite{margin-top:10px;font-family:var(--mono);font-size:9.5px;color:var(--ink-4);letter-spacing:.24em;text-transform:uppercase}
+
+  /* ── TOPBAR ──────────────────────────── */
+  .topbar{
+    position:sticky;top:0;z-index:6;height:64px;
+    display:flex;align-items:center;justify-content:space-between;
+    padding:0 56px;
+    background:var(--bg-2);border-bottom:1px solid var(--rule);
+    font-family:var(--mono);font-size:11px;color:var(--ink-3);letter-spacing:.12em;
+  }
+  .topbar-left{display:flex;align-items:center;gap:14px}
+  .crumb b{color:var(--ink-2);font-weight:400}
+  .crumb .sep{color:var(--accent);margin:0 8px}
+  .topbar nav{display:flex;align-items:center;gap:20px;font-family:var(--serif-en);font-style:italic;font-size:13px;letter-spacing:.06em}
+  .topbar nav a{color:var(--ink-2);text-decoration:none;transition:color .2s;cursor:pointer}
+  .topbar nav a.cur{color:var(--accent)}
+
+  /* ── THEME TOGGLE ────────────────────── */
+  .theme-tog{appearance:none;background:transparent;border:1px solid var(--ink-4);width:54px;height:26px;border-radius:13px;position:relative;cursor:pointer;padding:0;transition:border-color .25s}
+  .theme-tog:hover{border-color:var(--ink-3)}
+  .theme-tog .knob{position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:var(--ink-2);transition:left .3s,background .3s;pointer-events:none}
+  body.light .theme-tog .knob{left:30px;background:var(--accent)}
+  .theme-tog .ic{position:absolute;top:50%;transform:translateY(-50%);font-size:8px;font-family:var(--serif-cn);color:var(--ink-3);transition:opacity .25s;letter-spacing:0;pointer-events:none}
+  .theme-tog .ic.moon{left:6px}
+  .theme-tog .ic.sun{right:5px}
+  body.light .theme-tog .ic.moon{opacity:.28}
+  body:not(.light) .theme-tog .ic.sun{opacity:.28}
+
+  /* ── STAGE ───────────────────────────── */
+  .stage{background:var(--bg-2);display:flex;flex-direction:column;min-height:100vh}
+  .stage-inner{flex:1;padding:72px 56px 80px;display:grid;grid-template-columns:96px minmax(0,1fr);gap:48px;max-width:1280px}
+
+  .v-title{writing-mode:vertical-rl;font-family:var(--serif-cn);font-size:48px;font-weight:300;letter-spacing:.1em;line-height:1.18;align-self:start;color:var(--ink)}
+
+  .body-col{padding-top:6px;max-width:62ch}
+
+  .eyebrow{font-family:var(--serif-en);font-style:italic;font-size:14px;color:var(--accent);letter-spacing:.32em;text-transform:uppercase;margin-bottom:18px}
+  .h1{font-family:var(--serif-en);font-weight:400;font-size:54px;line-height:1.15;color:var(--ink);letter-spacing:.01em;margin-bottom:18px;text-wrap:balance}
+  .h1 em{font-style:italic;color:var(--accent)}
+  .h1-cn{font-family:var(--serif-cn);font-weight:300;font-size:18px;color:var(--ink-2);letter-spacing:.24em;margin-bottom:48px}
+
+  .lede{font-family:var(--serif-en);font-size:20px;line-height:1.7;color:var(--ink-2);text-wrap:pretty;margin-bottom:14px}
+  .lede-cn{font-family:var(--serif-cn);font-size:14.5px;line-height:1.95;color:var(--ink-3);letter-spacing:.04em;margin-bottom:48px}
+
+  .section{margin-top:56px;padding-top:32px;border-top:1px solid var(--rule)}
+  .section-h{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:24px}
+  .section-h .h{font-family:var(--serif-cn);font-size:18px;letter-spacing:.32em;color:var(--ink)}
+  .section-h .h-en{font-family:var(--serif-en);font-style:italic;font-size:12px;color:var(--ink-3);letter-spacing:.18em;text-transform:uppercase}
+
+  .p{font-family:var(--serif-en);font-size:17px;line-height:1.75;color:var(--ink-2);margin-bottom:14px;text-wrap:pretty}
+  .p em{color:var(--ink);font-style:italic}
+  .p-cn{font-family:var(--serif-cn);font-size:14px;line-height:1.95;color:var(--ink-3);letter-spacing:.04em;margin-bottom:14px}
+
+  /* Facts table */
+  .facts{display:grid;grid-template-columns:1fr 1fr;gap:0;border-top:1px solid var(--rule)}
+  .fact{padding:18px 0;border-bottom:1px solid var(--rule);display:grid;grid-template-columns:130px 1fr;gap:20px;align-items:baseline}
+  .fact .k{font-family:var(--mono);font-size:9.5px;letter-spacing:.28em;color:var(--ink-3);text-transform:uppercase}
+  .fact .v{font-family:var(--serif-en);font-size:16px;color:var(--ink);letter-spacing:.04em}
+  .fact .v.mono{font-family:var(--mono);font-size:12.5px}
+
+  /* Now list */
+  .now{display:flex;flex-direction:column;gap:12px}
+  .now-row{display:grid;grid-template-columns:14px 100px 1fr;gap:14px;font-family:var(--mono);font-size:12.5px;line-height:1.65;color:var(--ink-2);align-items:baseline}
+  .now-row .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);justify-self:center;margin-top:8px}
+  .now-row .when{font-size:9.5px;letter-spacing:.24em;color:var(--ink-3);text-transform:uppercase;padding-top:3px}
+  .now-row em{font-family:var(--serif-en);font-style:italic;color:var(--ink);font-size:13px}
+
+  /* Projects mini grid */
+  .proj{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--rule);border:1px solid var(--rule)}
+  .pj{background:var(--bg-2);padding:22px}
+  .pj .pj-ver{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.18em;margin-bottom:6px}
+  .pj .pj-name{font-family:var(--serif-cn);font-size:15px;color:var(--ink);letter-spacing:.18em;margin-bottom:6px}
+  .pj .pj-en{font-family:var(--serif-en);font-style:italic;font-size:12.5px;color:var(--ink-3);margin-bottom:10px}
+  .pj .pj-d{font-family:var(--serif-en);font-size:13.5px;line-height:1.55;color:var(--ink-2)}
+
+  /* Contact */
+  .contact{display:flex;flex-wrap:wrap;gap:14px}
+  .contact a{
+    font-family:var(--mono);font-size:11px;padding:13px 22px;
+    border:1px solid var(--ink-3);color:var(--ink);text-decoration:none;
+    letter-spacing:.24em;text-transform:uppercase;
+    display:inline-flex;align-items:center;gap:10px;
+    cursor:pointer;transition:border-color .25s,gap .25s;
+  }
+  .contact a:hover{border-color:var(--accent);gap:14px}
+
+  /* ── FOOTER ──────────────────────────── */
+  .global-foot{
+    border-top:1px solid var(--rule);
+    padding:20px 56px;
+    display:flex;align-items:center;justify-content:space-between;
+    gap:24px;flex-wrap:wrap;
+    background:var(--bg-2);
+  }
+  .gf-brand{display:flex;flex-direction:column;gap:5px}
+  .gf-brand-name{
+    font-family:var(--serif-cn);font-size:14px;font-weight:400;
+    letter-spacing:.5em;color:var(--ink-2);
+  }
+  .gf-brand-sub{
+    font-family:var(--mono);font-size:9.5px;letter-spacing:.18em;
+    color:var(--ink-4);text-transform:uppercase;
+  }
+  .gf-right{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+  .gf-links{display:flex;align-items:center}
+  .gf-links a{
+    font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--ink-3);text-decoration:none;
+    padding:4px 14px;border-left:1px solid var(--rule);
+    transition:color .2s;cursor:pointer;
+  }
+  .gf-links a:first-child{border-left:none;padding-left:0}
+  .gf-links a:hover{color:var(--accent)}
+
+  /* ── BEIAN ───────────────────────────── */
+  .beian{
+    display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end;
+    font-family:var(--mono);font-size:9px;color:var(--ink-4);letter-spacing:.1em;
+  }
+  .beian a{
+    display:inline-flex;align-items:center;gap:5px;
+    color:var(--ink-4);text-decoration:none;transition:color .2s;cursor:pointer;
+  }
+  .beian a:hover{color:var(--ink-3)}
+  .beian .beian-sep{opacity:.35}
+  .beian .beian-icon{
+    display:inline-block;width:10px;height:10px;flex-shrink:0;
+    background:currentColor;
+    -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 14'%3E%3Cpath d='M6 0L0 2.5v4C0 9.9 2.6 13 6 14c3.4-1 6-4.1 6-7.5v-4L6 0z'/%3E%3C/svg%3E") center/contain no-repeat;
+    mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 14'%3E%3Cpath d='M6 0L0 2.5v4C0 9.9 2.6 13 6 14c3.4-1 6-4.1 6-7.5v-4L6 0z'/%3E%3C/svg%3E") center/contain no-repeat;
+  }
+  @media (max-width:960px){
+    .global-foot{padding:18px 28px}
+    .gf-right{align-items:flex-start}
+    .beian{justify-content:flex-start}
+  }
+  @media (max-width:520px){
+    .global-foot{padding:16px 18px;gap:14px}
+    .gf-links a{border-left:none;padding:3px 10px 3px 0}
+  }
+
+  /* ── MOBILE OVERLAY & HAMBURGER ──────── */
+  .sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(10,10,11,.62);z-index:90;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);cursor:pointer}
+  .mob-menu{display:none;appearance:none;background:transparent;border:1px solid var(--ink-4);color:var(--ink-2);width:34px;height:34px;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;gap:4px;transition:border-color .2s,color .2s;flex-shrink:0;padding:0}
+  .mob-menu:hover{border-color:var(--ink-3);color:var(--ink)}
+  .mob-menu span{display:block;width:14px;height:1px;background:currentColor;transition:transform .25s,opacity .25s}
+  .mob-menu.is-open span:nth-child(1){transform:translateY(5px) rotate(45deg)}
+  .mob-menu.is-open span:nth-child(2){opacity:0}
+  .mob-menu.is-open span:nth-child(3){transform:translateY(-5px) rotate(-45deg)}
+
+  /* ── TABLET (≤960px) ─────────────────── */
+  @media (max-width:960px){
+    .shell{display:block;min-height:100vh}
+
+    .sidebar{
+      position:fixed;left:-340px;top:0;bottom:0;z-index:100;
+      width:340px;height:100vh;
+      overflow-y:auto;
+      transition:left .35s cubic-bezier(.4,0,.2,1),box-shadow .35s;
+    }
+    .sidebar.is-open{left:0;box-shadow:8px 0 48px rgba(0,0,0,.6)}
+    .sidebar-overlay.is-open{display:block}
+    .mob-menu{display:flex}
+
+    .topbar{
+      padding:0 24px;
+      background:rgba(14,14,16,.9);
+      backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+    }
+    body.light .topbar{background:rgba(235,226,210,.92)}
+
+    .stage-inner{
+      grid-template-columns:1fr;
+      padding:40px 28px 64px;
+      gap:28px;
+    }
+
+    .v-title{
+      writing-mode:horizontal-tb;
+      font-size:32px;letter-spacing:.12em;
+      align-self:auto;
+      border-bottom:1px solid var(--rule);
+      padding-bottom:20px;
+    }
+
+    .h1{font-size:40px}
+    .lede{font-size:18px}
+
+    .facts{grid-template-columns:1fr}
+    .fact{grid-template-columns:110px 1fr}
+
+    .global-foot{
+      grid-template-columns:1fr 1fr;
+      padding:24px 28px;gap:20px;
+    }
+    .gf-col.right{grid-column:1/-1;text-align:left}
+    .gf-meta{justify-content:flex-start}
+  }
+
+  /* ── MOBILE (≤520px) ─────────────────── */
+  @media (max-width:520px){
+    .topbar{padding:0 18px}
+    .topbar .crumb{
+      font-size:9.5px;letter-spacing:.04em;
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px;
+    }
+
+    .stage-inner{padding:28px 18px 56px;gap:20px}
+    .v-title{font-size:26px}
+    .h1{font-size:32px}
+    .h1-cn{font-size:15px;margin-bottom:32px}
+    .lede{font-size:17px}
+    .lede-cn{font-size:13.5px}
+    .p{font-size:15.5px}
+
+    .facts{grid-template-columns:1fr}
+    .fact{grid-template-columns:90px 1fr;gap:12px}
+
+    .now-row{grid-template-columns:10px 82px 1fr;gap:10px;font-size:11.5px}
+
+    .proj{grid-template-columns:1fr}
+
+    .contact{gap:10px}
+    .contact a{font-size:10px;padding:10px 16px}
+
+    .global-foot{grid-template-columns:1fr;padding:18px;gap:16px}
+    .gf-col.center{text-align:left}
+  }
+</style>
+</head>
+<body>
+
+<div class="sidebar-overlay" id="overlay"></div>
+
+<div class="shell">
+  <aside class="sidebar" id="sidebar">
+    <div>
+      <div class="brand-cn">手 作 札 记</div>
+      <div class="brand-en">SHIP LOG · MMXXVI</div>
+    </div>
+
+    <a href="index.html" class="back">← Return</a>
+
+    <!-- Section navigation — new -->
+    <nav class="sb-nav">
+      <div class="sb-nav-head">On this page</div>
+      <a href="#maker" class="cur"><span class="sn-dot"></span>关 于 我</a>
+      <a href="#facts"><span class="sn-dot"></span>基 本 资 料</a>
+      <a href="#now"><span class="sn-dot"></span>近 况</a>
+      <a href="#projects"><span class="sn-dot"></span>小 工 房</a>
+      <a href="#contact"><span class="sn-dot"></span>联 络</a>
+    </nav>
+
+    <div class="seal">
+      <div class="seal-sq">记</div>
+      <div class="quote">
+        "They are trying to fit the hand."
+        <div class="quote-cite">— maker's note, MMXXVI</div>
+      </div>
+    </div>
+
+    <div class="sb-build" style="margin-top:24px">
+      <div><b>06</b> Projects · <b>14</b> Releases</div>
+      <div style="margin-top:4px">commit a3f9c12</div>
+    </div>
+  </aside>
+
+  <main class="stage">
+    <div class="topbar">
+      <div class="topbar-left">
+        <button class="mob-menu" id="mobMenu" aria-label="Toggle menu">
+          <span></span><span></span><span></span>
+        </button>
+        <div class="crumb">~/<b>about</b><span class="sep">/</span>maker</div>
+      </div>
+      <nav>
+        <a href="about.html" class="cur">About</a>
+        <button class="theme-tog" id="themeTog" aria-label="Toggle theme">
+          <span class="ic moon">暗</span>
+          <span class="ic sun">亮</span>
+          <span class="knob"></span>
+        </button>
+      </nav>
+    </div>
+
+    <div class="stage-inner">
+      <div class="v-title">关 于 札 记</div>
+
+      <div class="body-col">
+        <div class="eyebrow">— Colophon No. 01</div>
+        <h1 class="h1">A workshop, <em>a logbook,</em><br/>and the small things made between.</h1>
+        <div class="h1-cn">一 个 工 房 · 一 本 日 志 · 与 中 间 慢 慢 长 出 来 的 小 软 件</div>
+
+        <p class="lede">My name is here, and this is where I keep records of the small pieces of software I ship — written mostly at night, mostly for myself, occasionally for friends who asked nicely.</p>
+        <p class="lede-cn">这里是我记录每一次软件发布的地方。多数在夜里写成，多数写给自己用，偶尔写给那些客气地问过我的朋友。</p>
+
+        <section class="section" id="maker">
+          <div class="section-h"><span class="h">关 于 我</span><span class="h-en">— About the Maker</span></div>
+          <p class="p">I make small, single-purpose tools — text editors, terminals, clocks, clippers — and I write them slowly, the way one might whittle a spoon. None of them are trying to win. They are trying to <em>fit the hand</em>.</p>
+          <p class="p-cn">我做小工具：编辑器、终端、时钟、剪贴簿。慢慢地做，像削一柄木勺。它们不打算赢，它们打算 <em>合手</em>。</p>
+          <p class="p">This site is the journal that goes with the work. Each entry is a release: what changed, what broke, what I learned this round.</p>
+          <p class="p-cn">这个站点是工作日志。每一条都对应一次发布：改了什么，坏了什么，这一轮学到了什么。</p>
+        </section>
+
+        <section class="section" id="facts">
+          <div class="section-h"><span class="h">基 本 资 料</span><span class="h-en">— Facts on File</span></div>
+          <div class="facts">
+            <div class="fact"><span class="k">Based</span><span class="v">Hangzhou · 杭州</span></div>
+            <div class="fact"><span class="k">Active since</span><span class="v">MMXX</span></div>
+            <div class="fact"><span class="k">Languages</span><span class="v mono">中文 · English</span></div>
+            <div class="fact"><span class="k">Stack</span><span class="v mono">Swift · Rust · Web</span></div>
+            <div class="fact"><span class="k">Hours</span><span class="v">Late, mostly</span></div>
+            <div class="fact"><span class="k">Currency</span><span class="v">Curiosity</span></div>
+          </div>
+        </section>
+
+        <section class="section" id="now">
+          <div class="section-h"><span class="h">近 况</span><span class="h-en">— /now</span></div>
+          <div class="now">
+            <div class="now-row"><span class="dot"></span><span class="when">May 2026</span><span>Polishing <em>微光编辑器</em> v0.5 — finally getting the vertical writing mode right</span></div>
+            <div class="now-row"><span class="dot"></span><span class="when">Apr 2026</span><span>Reading more, shipping less. <em>The Pattern on the Stone</em>, again.</span></div>
+            <div class="now-row"><span class="dot"></span><span class="when">Mar 2026</span><span>Quiet experiments with a tiny RSS reader, codename <em>Bamboo</em></span></div>
+            <div class="now-row"><span class="dot"></span><span class="when">Feb 2026</span><span>Walking. The river is loud after the rain.</span></div>
+          </div>
+        </section>
+
+        <section class="section" id="projects">
+          <div class="section-h"><span class="h">小 工 房</span><span class="h-en">— Active Projects</span></div>
+          <div class="proj">
+            <div class="pj">
+              <div class="pj-ver">v0.4.2 · MACOS</div>
+              <div class="pj-name">微 光 编 辑 器</div>
+              <div class="pj-en">Weiguang — a markdown editor</div>
+              <div class="pj-d">Two-column, no toolbar, breath-paced autosave. Built for long, slow drafts.</div>
+            </div>
+            <div class="pj">
+              <div class="pj-ver">v1.2.0 · CLI</div>
+              <div class="pj-name">夜 航 终 端</div>
+              <div class="pj-en">Yehang — a quieter terminal</div>
+              <div class="pj-d">Minimal ANSI rendering, mono-only, designed for reading log files at 2am.</div>
+            </div>
+            <div class="pj">
+              <div class="pj-ver">v0.9-β · iOS</div>
+              <div class="pj-name">寒 山 笔 记</div>
+              <div class="pj-en">Hanshan — pocket notebook</div>
+              <div class="pj-d">Plain text, daily pages, no folders. Currently in private beta.</div>
+            </div>
+            <div class="pj">
+              <div class="pj-ver">v0.1.0 · WEB</div>
+              <div class="pj-name">浮 世 时 钟</div>
+              <div class="pj-en">Fushi — a slow clock</div>
+              <div class="pj-d">A clock that ticks once per breath. Browser tab; doesn't ask for anything.</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="contact">
+          <div class="section-h"><span class="h">联 络</span><span class="h-en">— Get in Touch</span></div>
+          <p class="p">Letters welcome. I read them in the morning with tea, before code.</p>
+          <p class="p-cn">来信欢迎。我习惯在清晨、写代码之前，配着茶读它们。</p>
+          <div class="contact" style="margin-top:24px">
+            <a href="mailto:hello@example.com">Email <span>→</span></a>
+            <a href="#">GitHub <span>→</span></a>
+            <a href="#">Twitter <span>→</span></a>
+            <a href="#">RSS <span>→</span></a>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <footer class="global-foot">
+      <div class="gf-brand">
+        <div class="gf-brand-name">手 作 札 记</div>
+        <div class="gf-brand-sub">© MMXXVI · Made in Solitude</div>
+      </div>
+      <div class="gf-right">
+        <nav class="gf-links">
+          <a href="mailto:hello@example.com">Email</a>
+          <a href="#">GitHub</a>
+          <a href="#">Twitter</a>
+          <a href="#">RSS</a>
+        </nav>
+        <div class="beian">
+          <a href="https://beian.miit.gov.cn" target="_blank" rel="noopener"
+             data-field="icp_number">浙ICP备XXXXXXXX号-1</a>
+          <span class="beian-sep">·</span>
+          <a href="http://www.beian.gov.cn/portal/registerSystemInfo?recordcode=33XXXXXXXXXX"
+             target="_blank" rel="noopener" data-field="gongan_url">
+            <span class="beian-icon"></span>
+            <span data-field="gongan_number">浙公网安备 33XXXXXXXXXX号</span>
+          </a>
+        </div>
+      </div>
+    </footer>
+  </main>
+</div>
+
+<script>
+  /* ── Theme ── */
+  const themBtn = document.getElementById('themeTog');
+  const applyTheme = (light) => {
+    document.body.classList.toggle('light', light);
+    try { localStorage.setItem('theme', light ? 'light' : 'dark'); } catch(e){}
+  };
+  applyTheme(localStorage.getItem('theme') === 'light');
+  themBtn.addEventListener('click', () => applyTheme(!document.body.classList.contains('light')));
+
+  /* ── Mobile sidebar ── */
+  const sidebar = document.getElementById('sidebar');
+  const overlay = document.getElementById('overlay');
+  const mobMenu = document.getElementById('mobMenu');
+
+  const openSidebar = () => {
+    sidebar.classList.add('is-open');
+    overlay.classList.add('is-open');
+    mobMenu.classList.add('is-open');
+    document.body.style.overflow = 'hidden';
+  };
+  const closeSidebar = () => {
+    sidebar.classList.remove('is-open');
+    overlay.classList.remove('is-open');
+    mobMenu.classList.remove('is-open');
+    document.body.style.overflow = '';
+  };
+
+  mobMenu.addEventListener('click', () =>
+    sidebar.classList.contains('is-open') ? closeSidebar() : openSidebar()
+  );
+  overlay.addEventListener('click', closeSidebar);
+
+  /* ── Sidebar section nav highlight ── */
+  const sections = document.querySelectorAll('.section');
+  const navLinks = document.querySelectorAll('.sb-nav a');
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        navLinks.forEach(l => l.classList.remove('cur'));
+        const link = document.querySelector(`.sb-nav a[href="#${entry.target.id}"]`);
+        if (link) link.classList.add('cur');
+      }
+    });
+  }, { threshold: 0.35 });
+
+  sections.forEach(s => observer.observe(s));
+</script>
+</body>
+</html>

@@ -90,7 +90,7 @@ export function YinyiPage({ echo, isActive, openWithRandom }: YinyiPageProps) {
       return (
         <EmptyState
           icon="…"
-          title={`那天的${pageLabels.yinyi}我没写好——可能是我那时候走神了。要不你让我重写一次?`}
+          title={`那天的${pageLabels.yinyi}我没写好。\n可能是我那时候走神了。\n要不你让我重写一次?`}
           body={entry.meta.error}
           action={<button className="primary-button empty-cta" onClick={generate}>重 新 生 成</button>}
           sign="— E C H O"
@@ -122,7 +122,7 @@ export function YinyiPage({ echo, isActive, openWithRandom }: YinyiPageProps) {
       return (
         <EmptyState
           icon={<BrandLogo className="empty-logo" size={56} />}
-          title={`我还没给你写过${pageLabels.yinyi}。每天 22 点我会坐下来记录关于你的一些小观察——今晚见面。`}
+          title={`我还没给你写过${pageLabels.yinyi}。\n每天 22 点我会坐下来记录关于你的一些小观察。\n今晚见面。`}
           body="(在设置里可以改时间)"
           sign="— E C H O"
         />

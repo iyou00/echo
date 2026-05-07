@@ -82,7 +82,7 @@ export function FirstRunWelcome({ onContinue }: FirstRunWelcomeProps) {
 
   return (
     <div className={leaving ? 'first-run-welcome-layer first-run-leaving' : 'first-run-welcome-layer'}>
-      <audio ref={audioRef} src="/welcome/first-run-welcome.mp3" preload="auto" />
+      <audio ref={audioRef} src="./welcome/first-run-welcome.mp3" preload="auto" />
       <button className="first-run-mute" type="button" onClick={toggleMute} aria-label={muted ? '打开声音' : '静音'}>
         {muted ? <VolumeX size={15} /> : <Volume2 size={15} />}
         <span>{muted ? '打开声音' : '静音'}</span>

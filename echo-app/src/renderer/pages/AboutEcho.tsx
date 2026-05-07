@@ -1,6 +1,7 @@
 import type { AppPageProps } from '../../App'
 
 export function AboutEchoPage({ navigate }: AppPageProps) {
+  void navigate
   return (
     <div className="phone-surface about-page">
       <div className="scroll-panel about-scroll">

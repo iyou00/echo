@@ -1,5 +1,5 @@
 import { Heart, Pause, Play, ThumbsDown, ThumbsUp } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { Fragment, type ReactNode } from 'react'
 import type { ActiveScene, PlaybackStatus, SceneDefinition, SceneKey, Track } from '../types/ipc'
 import { brand } from '../brand'
 
@@ -265,7 +265,7 @@ export function EmptyState({
   return (
     <div className={`empty-state ${muted ? 'muted' : ''} ${className}`}>
       <div className="empty-dot">{icon}</div>
-      <h3>{title}</h3>
+      <h3>{title.split(/\n/).map((line, i, arr) => <Fragment key={i}>{line}{i < arr.length - 1 && <br />}</Fragment>)}</h3>
       {body && <p>{body}</p>}
       {action}
       {sign && <div className="empty-sign">{sign}</div>}

@@ -3,7 +3,8 @@ import path from 'node:path'
 import { app } from 'electron'
 
 export function getDataDir(): string {
-  const dir = path.join(app.getPath('appData'), 'echo')
+  const exeDir = path.dirname(app.getPath('exe'))
+  const dir = path.join(exeDir, 'data')
   fs.mkdirSync(dir, { recursive: true })
   return dir
 }

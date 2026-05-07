@@ -754,7 +754,6 @@ export function SettingsPage({
             )}
           </Section>
 
-          <div ref={importSectionRef} className="import-focus-anchor">
           <Section label="絮 语 与 品 味">
             <label className="toggle-row">
               <div className="toggle-text">
@@ -769,13 +768,76 @@ export function SettingsPage({
                 {chatStatus}
               </div>
             )}
+          </Section>
 
-            <div className="data-line">
-              <div>
-                从文件导入
-                <small>适合其他音乐平台或手工整理的通用歌单 JSON。</small>
+          <div ref={importSectionRef} className="import-focus-anchor">
+          <Section label="让 Echo 认识你的音乐">
+            <p className="import-intro">登录网易云后才能播放歌曲；导入歌单后 Echo 才懂你的口味。</p>
+
+            <div className="import-method">
+              <div className="import-method-title">网易云音乐</div>
+              <div className="import-method-desc">登录后才能播放歌曲。登录后也可以直接导入网易云歌单。</div>
+              <div className="import-method-actions">
+                {neteaseState.loggedIn ? (
+                  <>
+                    <button className="btn" type="button" onClick={loadNeteasePlaylists} disabled={neteaseBusy}>读取歌单</button>
+                    <button className="btn danger" type="button" onClick={logoutNetease} disabled={neteaseBusy}>退出</button>
+                  </>
+                ) : (
+                  <button className="btn" type="button" onClick={startNeteaseLogin} disabled={neteaseBusy}>
+                    {neteaseBusy ? '生成中...' : '扫码登录'}
+                  </button>
+                )}
+                <button className="btn sec" type="button" onClick={refreshNeteaseStatus} disabled={neteaseBusy}>刷新状态</button>
               </div>
-              <div className="inline-actions">
+              <div className="import-method-status">
+                <span className={`status-ind inline ${neteaseState.loggedIn ? 'ok' : 'idle'}`}>
+                  <span className="status-dot" />
+                  {neteaseState.loggedIn ? neteaseState.nickname ?? '已登录' : neteaseState.message}
+                </span>
+              </div>
+              {neteaseQr && (
+                <div className="netease-qr">
+                  <img src={neteaseQr.qrImage} alt="网易云扫码登录二维码" />
+                  <div>
+                    <div className="field-label">用网易云音乐 App 扫码</div>
+                    <div className="field-hint">扫码后在手机上确认，这里会自动更新登录状态。</div>
+                    <div className="status-ind idle">
+                      <span className="status-dot" />
+                      {neteaseQrStatus}
+                    </div>
+                  </div>
+                </div>
+              )}
+              {neteasePlaylists.length > 0 && (
+                <div className="netease-playlists">
+                  {neteasePlaylists.map((playlist) => (
+                    <div className="netease-playlist" key={playlist.id}>
+                      <div>
+                        <div className="np-list-name">{playlist.name}</div>
+                        <div className="np-list-meta">{playlist.trackCount} 首 · {playlist.creator ?? '网易云'}</div>
+                      </div>
+                      <button className="btn sec" type="button" onClick={() => importNeteasePlaylist(playlist.id)} disabled={Boolean(importingNeteaseId)}>
+                        {importingNeteaseId === playlist.id ? '导入中...' : '导入'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {neteasePlaylistStatus && (
+                <div className={`status-ind ${neteasePlaylistStatus.includes('失败') ? 'err' : 'idle'}`}>
+                  <span className="status-dot" />
+                  {neteasePlaylistStatus}
+                </div>
+              )}
+            </div>
+
+            <div className="import-divider"><span>或者</span></div>
+
+            <div className="import-method">
+              <div className="import-method-title">从文件导入</div>
+              <div className="import-method-desc">适合其他音乐平台或手工整理的通用歌单 JSON。</div>
+              <div className="import-method-actions">
                 <button className="btn sec" type="button" onClick={downloadTemplate} disabled={templateState === 'working'}>
                   <Download size={15} />
                   {templateState === 'working' ? '保存中...' : '下载模板'}
@@ -785,19 +847,20 @@ export function SettingsPage({
                   {importState === 'importing' ? '导入中...' : '选择文件'}
                 </button>
               </div>
+              {templateStatus && (
+                <div className={`status-ind ${templateState === 'ok' ? 'ok' : templateState === 'fail' ? 'err' : 'idle'}`}>
+                  <span className="status-dot" />
+                  {templateStatus}
+                </div>
+              )}
+              {importStatus && (
+                <div className={`status-ind ${importState === 'ok' ? 'ok' : importState === 'fail' ? 'err' : 'idle'}`}>
+                  <span className="status-dot" />
+                  {importStatus}
+                </div>
+              )}
             </div>
-            {templateStatus && (
-              <div className={`status-ind ${templateState === 'ok' ? 'ok' : templateState === 'fail' ? 'err' : 'idle'}`}>
-                <span className="status-dot" />
-                {templateStatus}
-              </div>
-            )}
-            {importStatus && (
-              <div className={`status-ind ${importState === 'ok' ? 'ok' : importState === 'fail' ? 'err' : 'idle'}`}>
-                <span className="status-dot" />
-                {importStatus}
-              </div>
-            )}
+
             {importProgress && (
               <div className="import-progress" aria-live="polite">
                 <div className="import-progress-text">{importProgressLine(importProgress)}</div>
@@ -818,72 +881,6 @@ export function SettingsPage({
             </div>
           </Section>
           </div>
-
-          <Section label="网 易 云 · v 0 . 2">
-            <div className="data-line">
-              <div>
-                登录状态
-                <small>扫码后保存加密 cookie，后续用于读取歌单和播放链接。</small>
-              </div>
-              <span className={`status-ind inline ${neteaseState.loggedIn ? 'ok' : 'idle'}`}>
-                <span className="status-dot" />
-                {neteaseState.loggedIn ? neteaseState.nickname ?? '已登录' : '未登录'}
-              </span>
-            </div>
-            <div className="netease-actions">
-              <button className="btn sec" type="button" onClick={refreshNeteaseStatus} disabled={neteaseBusy}>刷新状态</button>
-              {neteaseState.loggedIn ? (
-                <>
-                  <button className="btn" type="button" onClick={loadNeteasePlaylists} disabled={neteaseBusy}>读取歌单</button>
-                  <button className="btn danger" type="button" onClick={logoutNetease} disabled={neteaseBusy}>退出</button>
-                </>
-              ) : (
-                <button className="btn" type="button" onClick={startNeteaseLogin} disabled={neteaseBusy}>
-                  {neteaseBusy ? '生成中...' : '扫码登录'}
-                </button>
-              )}
-            </div>
-            {neteaseQr && (
-              <div className="netease-qr">
-                <img src={neteaseQr.qrImage} alt="网易云扫码登录二维码" />
-                <div>
-                  <div className="field-label">用网易云音乐 App 扫码</div>
-                  <div className="field-hint">扫码后在手机上确认，这里会自动更新登录状态。</div>
-                  <div className="status-ind idle">
-                    <span className="status-dot" />
-                    {neteaseQrStatus}
-                  </div>
-                </div>
-              </div>
-            )}
-            {!neteaseQr && (
-              <div className={`status-ind ${neteaseState.loggedIn ? 'ok' : 'idle'}`}>
-                <span className="status-dot" />
-                {neteaseState.message}
-              </div>
-            )}
-            {neteasePlaylists.length > 0 && (
-              <div className="netease-playlists">
-                {neteasePlaylists.map((playlist) => (
-                  <div className="netease-playlist" key={playlist.id}>
-                    <div>
-                      <div className="np-list-name">{playlist.name}</div>
-                      <div className="np-list-meta">{playlist.trackCount} 首 · {playlist.creator ?? '网易云'}</div>
-                    </div>
-                    <button className="btn sec" type="button" onClick={() => importNeteasePlaylist(playlist.id)} disabled={Boolean(importingNeteaseId)}>
-                      {importingNeteaseId === playlist.id ? '导入中...' : '导入'}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-            {neteasePlaylistStatus && (
-              <div className={`status-ind ${neteasePlaylistStatus.includes('失败') ? 'err' : 'idle'}`}>
-                <span className="status-dot" />
-                {neteasePlaylistStatus}
-              </div>
-            )}
-          </Section>
 
           <Section label="回 声 · v 0 . 3">
             <label className="field">

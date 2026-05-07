@@ -108,6 +108,7 @@ export function VoicePage({
   const audioContextRef = useRef<AudioContext | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null)
+  const ttsGainRef = useRef<GainNode | null>(null)
   const rafRef = useRef<number | null>(null)
   const musicTimerRef = useRef<number | null>(null)
   const restoreVolumeRef = useRef(100)
@@ -223,12 +224,16 @@ export function VoicePage({
       if (context.state === 'suspended') await context.resume()
       if (!sourceRef.current) {
         const source = context.createMediaElementSource(audio)
+        const gainNode = context.createGain()
+        gainNode.gain.value = 1.5
         const analyser = context.createAnalyser()
         analyser.fftSize = 64
         analyser.smoothingTimeConstant = 0.68
-        source.connect(analyser)
+        source.connect(gainNode)
+        gainNode.connect(analyser)
         analyser.connect(context.destination)
         sourceRef.current = source
+        ttsGainRef.current = gainNode
         analyserRef.current = analyser
       }
       const analyser = analyserRef.current

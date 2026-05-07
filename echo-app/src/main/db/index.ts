@@ -301,8 +301,9 @@ export function initializeDatabase(database = getDb()): void {
 export function resetDatabase(): void {
   const database = getDb()
   database.exec(`
-    DELETE FROM taste_questions;
+    PRAGMA foreign_keys = OFF;
     DELETE FROM taste_question_prompts;
+    DELETE FROM taste_questions;
     DELETE FROM playlists_imported;
     DELETE FROM recommendation_cache;
     DELETE FROM track_semantics;
@@ -324,5 +325,6 @@ export function resetDatabase(): void {
     DELETE FROM taste_profile;
     UPDATE netease_auth SET cookie_encrypted = '', profile_json = '{}', updated_at = CURRENT_TIMESTAMP WHERE id = 1;
     UPDATE settings SET data_json = '{}', updated_at = CURRENT_TIMESTAMP WHERE id = 1;
+    PRAGMA foreign_keys = ON;
   `)
 }

@@ -269,6 +269,7 @@ export interface Settings {
     firstRunWelcomeCompletedAt?: string
     onboardingCompletedAt?: string
     onboardingStep?: OnboardingStep
+    lastPrunedAt?: string
   }
 }
 
@@ -354,6 +355,7 @@ export interface EchoApi {
     downloadPlaylistTemplate(): Promise<{ ok: boolean; path?: string; message: string }>
     exportData(): Promise<{ ok: boolean; path?: string; message: string }>
     resetData(): Promise<{ ok: boolean }>
+    onChanged(listener: (payload: { path: string; value: unknown }) => void): () => void
   }
   health: {
     get(): Promise<ServiceHealth[]>

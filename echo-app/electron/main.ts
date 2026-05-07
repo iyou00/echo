@@ -5,6 +5,7 @@ import path from 'node:path'
 import type { AppNavigatePayload, AppPageKey, SceneKey } from '../src/types/ipc'
 import { closeDb } from '../src/main/db'
 import { getSettings, upgradeLegacySettingsSecrets } from '../src/main/db/settings'
+import { pruneOldData } from '../src/main/db/maintenance'
 import { upgradeLegacyNeteaseSecret } from '../src/main/netease/auth'
 import { registerIpc } from '../src/main/ipc'
 import { registerScheduler, runStartupCatchup, stopScheduler } from '../src/main/services/scheduler'
@@ -263,6 +264,7 @@ app.whenReady().then(() => {
   upgradeLegacySettingsSecrets()
   upgradeLegacyNeteaseSecret()
   registerIpc()
+  pruneOldData()
   registerScheduler()
   onPlaybackStateChanged(() => rebuildTrayMenu())
   onSceneChanged(() => rebuildTrayMenu())

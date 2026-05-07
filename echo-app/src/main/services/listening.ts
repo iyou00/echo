@@ -116,6 +116,22 @@ function compactText(value: string): string {
     .replace(/[《》"'“”‘’·.,，。!！?？()（）\-_:：]/g, '')
 }
 
+function artistParts(artist: string): string[] {
+  return artist
+    .split(/[/、,，&＋+]| feat\.?| ft\.?| and /i)
+    .map(compactText)
+    .filter((item) => item.length >= 2)
+}
+
+function songLabel(track: Track): string {
+  return `${track.artist}的《${track.title}》`
+}
+
+function replaceSongSentence(text: string, track: Track): string {
+  const next = text.replace(/[^。！？!?\n]*《[^》]+》[^。！？!?\n]*(?:[。！？!?]|$)/, `我给你接上${songLabel(track)}。`)
+  return next === text ? `${text.replace(/[。！？!?]*$/, '').trim()}。我给你接上${songLabel(track)}。` : next.trim()
+}
+
 function quotedTitles(text: string): string[] {
   return Array.from(text.matchAll(/《([^》]+)》/g))
     .map((match) => match[1]?.trim())
@@ -127,7 +143,9 @@ function textMentionsTrack(text: string, track: Track | null): boolean {
   const compactBody = compactText(text)
   const compactTitle = compactText(track.title)
   if (!compactTitle) return false
-  return compactBody.includes(compactTitle)
+  if (!compactBody.includes(compactTitle)) return false
+  const artists = artistParts(track.artist)
+  return artists.length === 0 || artists.some((artist) => compactBody.includes(artist))
 }
 
 function pickTrackFromText(text: string, candidates: Track[], selectedIndex?: number): Track | null {
@@ -149,15 +167,16 @@ function pickTrackFromText(text: string, candidates: Track[], selectedIndex?: nu
 function alignTextToTrack(text: string, track: Track | null): string {
   if (!track || textMentionsTrack(text, track)) return text
   const quoted = quotedTitles(text)
+  let aligned = text
   if (quoted.length > 0) {
-    // LLM 编了一个不在 candidates 里的歌名——替换成正确的，不扔掉整段文案
-    let aligned = text
     for (const title of quoted) {
-      aligned = aligned.replace(`《${title}》`, `《${track.title}》`)
+      aligned = aligned.split(`《${title}》`).join(`《${track.title}》`)
     }
     if (textMentionsTrack(aligned, track)) return aligned
+    return replaceSongSentence(aligned, track)
   }
-  return `${text}我给你接上${track.artist}的《${track.title}》。`
+  const trimmed = aligned.replace(/[。！？!?]*$/, '').trim()
+  return `${trimmed}。我给你接上${songLabel(track)}。`
 }
 
 function formatConversationTime(createdAt?: string) {
@@ -242,7 +261,14 @@ function buildContext(input: {
     ? `
 
 <continuation>
-你正在连续说话。S1 是你刚刚说的那一段。接着说,像聊天接话。可以换个话题,可以跑题,可以回前面提过的事。选一首不同的歌。不要重复上一段的句式和切入点。
+你正在连续说话。${recentScenarios.slice(0, 3).map((_, index) => `S${index + 1}`).join('、')} 是你刚刚说的段落,接着说。
+
+你最近几次的开头分别是:
+${recentScenarios.slice(0, 3).map((item, index) => `- S${index + 1}: "${item.slice(0, 40)}${item.length > 40 ? '...' : ''}"`).join('\n')}
+
+这些开头方式已经用过了。这次必须换一个完全不同的切入点、不同的句式。
+可以换个话题,可以跑题,可以回前面的话题但用新的角度。
+选一首不同的歌。
 </continuation>`
     : ''
 
@@ -297,7 +323,7 @@ export async function generateListeningSegment(options?: { continuation?: boolea
           role: 'user',
           content: buildContext({ generatedAt, weatherSummary: weather?.summary, conversations, seal, profile, candidates, continuation: options?.continuation }),
         },
-      ], { temperature: 0.85 })
+      ], { temperature: options?.continuation ? 0.95 : 0.85 })
       const parsed = parseJsonObject(response)
       const nextText = parsed?.text ? limitText(parsed.text) : limitText(response)
       if (nextText) text = nextText
@@ -325,4 +351,8 @@ export async function generateListeningSegment(options?: { continuation?: boolea
     return { text, track, audioUrl: audio.audioUrl, generatedAt }
   }
   return { text, track, error: audio.error?.message ?? 'Echo 现在说不出话来', generatedAt }
+}
+
+export const listeningTestHelpers = {
+  alignTextToTrack,
 }

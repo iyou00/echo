@@ -52,6 +52,7 @@ const defaultSettings: Settings = {
     firstUsedAt: new Date().toISOString(),
     lastViewedYinyiAt: '',
     onboardingStep: 'playlist',
+    lastPrunedAt: '',
   },
 }
 
@@ -135,4 +136,10 @@ export function updateSetting(path: string, value: unknown): Settings {
   }
   target[keys[keys.length - 1]] = value
   return saveSettings(settings)
+}
+
+export function updateSettingsSilent(settings: Settings): void {
+  getDb()
+    .prepare('UPDATE settings SET data_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1')
+    .run(JSON.stringify(settings))
 }
