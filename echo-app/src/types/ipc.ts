@@ -137,6 +137,21 @@ export interface ImportProgressPayload {
   startedAt: string
 }
 
+export interface ImportTaskSnapshot {
+  id: string
+  kind: 'playlist-file' | 'netease-playlist' | 'semantic-analysis'
+  status: 'running' | 'succeeded' | 'failed' | 'interrupted'
+  phase: ImportProgressPayload['phase'] | 'preparing'
+  current: number
+  total: number
+  startedAt: string
+  updatedAt: string
+  finishedAt?: string
+  sourceName?: string
+  message?: string
+  error?: string
+}
+
 export interface SchedulerCatchupResult {
   ok: boolean
   job: 'yinyi_daily' | 'taste_profile_structured' | 'taste_profile_portrait'
@@ -412,6 +427,8 @@ export interface EchoApi {
     getSummary(): Promise<SemanticSummary>
   }
   import: {
+    getSnapshot(): Promise<ImportTaskSnapshot | null>
+    onChanged(listener: (snapshot: ImportTaskSnapshot | null) => void): () => void
     onProgress(listener: (payload: ImportProgressPayload) => void): () => void
   }
   recommendation: {

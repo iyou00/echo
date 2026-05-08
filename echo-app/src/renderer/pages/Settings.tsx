@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
 import { Download, Upload } from 'lucide-react'
-import type { CareFrequency, EchoApi, ImportProgressPayload, NeteaseLoginState, NeteasePlaylistSummary, NeteaseQrLogin, ServiceHealth, Settings, Track } from '../../types/ipc'
+import type { CareFrequency, EchoApi, ImportProgressPayload, ImportTaskSnapshot, NeteaseLoginState, NeteasePlaylistSummary, NeteaseQrLogin, ServiceHealth, Settings, Track } from '../../types/ipc'
 import type { AppPageProps } from '../../App'
 import { EmptyState, Section } from '../components'
 import { pageLabels } from '../labels'
@@ -13,6 +13,8 @@ interface SettingsPageProps extends AppPageProps {
   refreshProfile: () => Promise<void>
   refreshQueue: () => Promise<Track[]>
   importFocusToken?: number
+  apiFocusToken?: number
+  importTask: ImportTaskSnapshot | null
 }
 
 const providerPresets: Record<string, { label: string; baseUrl: string; keyHint: string; modelPlaceholder: string; docsUrl: string }> = {
@@ -101,6 +103,8 @@ export function SettingsPage({
   refreshProfile,
   refreshQueue,
   importFocusToken = 0,
+  apiFocusToken = 0,
+  importTask,
 }: SettingsPageProps) {
   const [provider, setProvider] = useState('deepseek')
   const [baseUrl, setBaseUrl] = useState('')
@@ -135,7 +139,6 @@ export function SettingsPage({
   const [testState, setTestState] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle')
   const [importStatus, setImportStatus] = useState('')
   const [importState, setImportState] = useState<'idle' | 'importing' | 'ok' | 'fail'>('idle')
-  const [importProgress, setImportProgress] = useState<ImportProgressPayload | null>(null)
   const [templateStatus, setTemplateStatus] = useState('')
   const [templateState, setTemplateState] = useState<'idle' | 'working' | 'ok' | 'fail'>('idle')
   const [neteaseState, setNeteaseState] = useState<NeteaseLoginState>({ loggedIn: false, message: '正在检查网易云状态...' })
@@ -151,6 +154,7 @@ export function SettingsPage({
   const [resetConfirmChecked, setResetConfirmChecked] = useState(false)
   const skipHydrateRef = useRef(false)
   const importSectionRef = useRef<HTMLDivElement | null>(null)
+  const apiSectionRef = useRef<HTMLDivElement | null>(null)
 
   function commitSettings(next: Settings) {
     skipHydrateRef.current = true
@@ -203,21 +207,18 @@ export function SettingsPage({
   }, [echo])
 
   useEffect(() => {
-    return echo.import.onProgress((payload) => {
-      setImportProgress(payload)
-      if (payload.phase === 'done') {
-        // 让最终进度短暂停留一会儿再隐藏，避免视觉上瞬间跳没。
-        window.setTimeout(() => setImportProgress((current) => (current && current.phase === 'done' ? null : current)), 1200)
-      }
-    })
-  }, [echo])
-
-  useEffect(() => {
     if (!importFocusToken) return
     window.setTimeout(() => {
       importSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
     }, 120)
   }, [importFocusToken])
+
+  useEffect(() => {
+    if (!apiFocusToken) return
+    window.setTimeout(() => {
+      apiSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    }, 120)
+  }, [apiFocusToken])
 
   useEffect(() => {
     if (!neteaseQr) return
@@ -345,15 +346,10 @@ export function SettingsPage({
     setBusy(true)
     setImportState('importing')
     setImportStatus('正在读取通用歌单 JSON、写入本地数据库，并生成你的初始画像...')
-    setImportProgress(null)
     try {
       const result = await echo.settings.importPlaylist()
       setImportState(result.imported ? 'ok' : result.count === 0 && result.message === '导入已取消' ? 'idle' : 'fail')
       setImportStatus(result.imported ? `${result.message ?? `已导入 ${result.count} 首`} · ${result.name ?? '歌单'}` : result.message ?? '导入失败')
-      if (result.imported) {
-        await Promise.all([refreshProfile(), refreshQueue()])
-        await markImportOnboardingDone()
-      }
     } catch (error) {
       setImportState('fail')
       setImportStatus(error instanceof Error ? error.message : '导入失败')
@@ -373,14 +369,6 @@ export function SettingsPage({
       setTemplateState('fail')
       setTemplateStatus(error instanceof Error ? error.message : '模板保存失败')
     }
-  }
-
-  async function markImportOnboardingDone() {
-    let next = await echo.settings.update('meta.onboardingStep', 'done')
-    if (!next.meta.onboardingCompletedAt) {
-      next = await echo.settings.update('meta.onboardingCompletedAt', new Date().toISOString())
-    }
-    commitSettings(next)
   }
 
   function importProgressLine(progress: ImportProgressPayload): string {
@@ -418,6 +406,11 @@ export function SettingsPage({
   }
 
   function requestResetData() {
+    if (activeImportTask) {
+      setDataState('err')
+      setDataStatus('导入任务还在进行，完成后再清空数据。')
+      return
+    }
     setResetConfirmChecked(false)
     setShowResetConfirm(true)
   }
@@ -438,7 +431,6 @@ export function SettingsPage({
       setNeteasePlaylists([])
       setNeteasePlaylistStatus('')
       setImportStatus('')
-      setImportProgress(null)
       setHealth(await echo.health.get().catch(() => []))
       setDataStatus('数据已清空')
       setDataState('ok')
@@ -583,15 +575,10 @@ export function SettingsPage({
 
   async function importNeteasePlaylist(id: string) {
     setImportingNeteaseId(id)
-    setImportProgress(null)
     setNeteasePlaylistStatus('正在导入网易云歌单，并重新生成画像...')
     try {
       const result = await echo.netease.importPlaylist(id)
       setNeteasePlaylistStatus(result.imported ? `${result.message} · ${result.name ?? '歌单'}` : result.message ?? '导入失败')
-      if (result.imported) {
-        await Promise.all([refreshProfile(), refreshQueue()])
-        await markImportOnboardingDone()
-      }
     } catch (error) {
       setNeteasePlaylistStatus(error instanceof Error ? error.message : '导入失败')
     } finally {
@@ -637,6 +624,22 @@ export function SettingsPage({
       : modelStatusText === '已保存' || testState === 'ok'
         ? 'ok'
         : 'idle'
+  const activeImportTask = importTask?.status === 'running'
+  const importProgress: ImportProgressPayload | null = importTask && (importTask.phase === 'semantics' || importTask.phase === 'profile' || importTask.phase === 'done')
+    ? {
+      phase: importTask.phase,
+      current: importTask.current,
+      total: importTask.total,
+      startedAt: importTask.startedAt,
+    }
+    : null
+  const globalImportStatus = importTask?.status === 'succeeded'
+    ? importTask.message ?? `${importTask.sourceName ?? '歌单'}导入完成`
+    : importTask?.status === 'failed'
+      ? importTask.error ?? '导入失败'
+      : activeImportTask
+        ? importTask.sourceName ? `正在处理 ${importTask.sourceName}` : '导入任务正在进行'
+        : ''
 
   return (
     <div className="phone-surface settings-page">
@@ -649,6 +652,7 @@ export function SettingsPage({
         )}
 
         <form onSubmit={(event) => { void save(event) }}>
+          <div ref={apiSectionRef}>
           <Section label="A I 模 型">
             {storageDegraded && (
               <div className="status-ind err" role="alert">
@@ -729,6 +733,7 @@ export function SettingsPage({
               </p>
             )}
           </Section>
+          </div>
 
           <Section label="风 信">
             <label className="field">
@@ -781,7 +786,7 @@ export function SettingsPage({
                 {neteaseState.loggedIn ? (
                   <>
                     <button className="btn" type="button" onClick={loadNeteasePlaylists} disabled={neteaseBusy}>读取歌单</button>
-                    <button className="btn danger" type="button" onClick={logoutNetease} disabled={neteaseBusy}>退出</button>
+                    <button className="btn danger" type="button" onClick={logoutNetease} disabled={neteaseBusy || activeImportTask}>退出</button>
                   </>
                 ) : (
                   <button className="btn" type="button" onClick={startNeteaseLogin} disabled={neteaseBusy}>
@@ -817,7 +822,7 @@ export function SettingsPage({
                         <div className="np-list-name">{playlist.name}</div>
                         <div className="np-list-meta">{playlist.trackCount} 首 · {playlist.creator ?? '网易云'}</div>
                       </div>
-                      <button className="btn sec" type="button" onClick={() => importNeteasePlaylist(playlist.id)} disabled={Boolean(importingNeteaseId)}>
+                      <button className="btn sec" type="button" onClick={() => importNeteasePlaylist(playlist.id)} disabled={Boolean(importingNeteaseId) || activeImportTask}>
                         {importingNeteaseId === playlist.id ? '导入中...' : '导入'}
                       </button>
                     </div>
@@ -842,9 +847,9 @@ export function SettingsPage({
                   <Download size={15} />
                   {templateState === 'working' ? '保存中...' : '下载模板'}
                 </button>
-                <button className="btn sec" type="button" onClick={importPlaylist} disabled={busy}>
+                <button className="btn sec" type="button" onClick={importPlaylist} disabled={busy || activeImportTask}>
                   <Upload size={15} />
-                  {importState === 'importing' ? '导入中...' : '选择文件'}
+                  {activeImportTask || importState === 'importing' ? '导入中...' : '选择文件'}
                 </button>
               </div>
               {templateStatus && (
@@ -861,12 +866,15 @@ export function SettingsPage({
               )}
             </div>
 
-            {importProgress && (
+            {(globalImportStatus || importProgress) && (
               <div className="import-progress" aria-live="polite">
-                <div className="import-progress-text">{importProgressLine(importProgress)}</div>
-                <div className="import-progress-bar">
-                  <span style={{ width: `${importProgressPercent(importProgress)}%` }} />
-                </div>
+                <div className="import-progress-text">{importProgress ? importProgressLine(importProgress) : globalImportStatus}</div>
+                {importProgress && (
+                  <div className="import-progress-bar">
+                    <span style={{ width: `${importProgressPercent(importProgress)}%` }} />
+                  </div>
+                )}
+                {globalImportStatus && importProgress && <div className="field-hint">{globalImportStatus}</div>}
               </div>
             )}
 
@@ -875,7 +883,7 @@ export function SettingsPage({
                 重新认识你
                 <small>基于已导入歌单重新初始化画像。</small>
               </div>
-              <button className="btn warn" type="button" onClick={regenerateProfile} disabled={busy}>
+              <button className="btn warn" type="button" onClick={regenerateProfile} disabled={busy || activeImportTask}>
                 重新生成
               </button>
             </div>
@@ -1024,7 +1032,7 @@ export function SettingsPage({
                 清空所有数据
                 <small>回到第一次打开 Echo 的状态。</small>
               </div>
-              <button className="btn danger" type="button" onClick={requestResetData} disabled={busy}>清 空</button>
+              <button className="btn danger" type="button" onClick={requestResetData} disabled={busy || activeImportTask}>清 空</button>
             </div>
             {dataStatus && (
               <div className={`status-ind ${dataState === 'ok' ? 'ok' : dataState === 'err' ? 'err' : 'idle'}`}>
@@ -1062,7 +1070,7 @@ export function SettingsPage({
               <button className="btn close-quit-btn" type="button" onClick={() => setShowResetConfirm(false)} disabled={busy}>
                 先不清
               </button>
-              <button className="btn settings-reset-confirm" type="button" onClick={resetData} disabled={busy || !resetConfirmChecked}>
+              <button className="btn settings-reset-confirm" type="button" onClick={resetData} disabled={busy || activeImportTask || !resetConfirmChecked}>
                 {busy ? '清空中' : '清空 Echo'}
               </button>
             </div>

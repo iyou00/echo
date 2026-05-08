@@ -3,6 +3,7 @@ import { getSettings, importPlaylistFromDialog, testLlm, updateSetting, download
 import { StorageUnavailableError } from '../utils/secureStorage'
 import { resetPlaybackState } from '../services/playback'
 import { rescheduleCarePings, rescheduleYinyi } from '../services/scheduler'
+import { getImportTaskSnapshot } from '../services/importTasks'
 import { broadcast, maskSettings } from './shared'
 
 export function registerSettingsIpc(): void {
@@ -24,6 +25,7 @@ export function registerSettingsIpc(): void {
   })
   ipcMain.handle('settings:testLlm', () => testLlm())
   ipcMain.handle('settings:importPlaylist', () => importPlaylistFromDialog())
+  ipcMain.handle('import:getSnapshot', () => getImportTaskSnapshot())
   ipcMain.handle('settings:downloadPlaylistTemplate', () => downloadPlaylistTemplate())
   ipcMain.handle('settings:exportData', () => exportData())
   ipcMain.handle('settings:resetData', () => {

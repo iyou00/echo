@@ -5,7 +5,8 @@ import { getDb, resetDatabase } from '../db'
 import { getSettings, saveSettings, updateSetting } from '../db/settings'
 import { importPlaylist as savePlaylist, type PlaylistPayload } from '../db/playlists'
 import { buildInitialProfile } from './taste'
-import { broadcastImportProgress, buildSemanticsForTracks } from './semantics'
+import { buildSemanticsForTracks } from './semantics'
+import { clearImportTaskSnapshot, hasRunningImportTask, runImportTask } from './importTasks'
 import { completeChat, LlmError } from '../llm/client'
 import type { ImportPlaylistResult, LlmTestResult } from '../../types/ipc'
 import { recordHealth } from './health'
@@ -110,6 +111,8 @@ function normalizePlaylist(payload: unknown): PlaylistPayload {
 }
 
 export async function importPlaylistFromDialog(): Promise<ImportPlaylistResult> {
+  if (hasRunningImportTask()) throw new Error('已有导入任务正在进行，请稍后再试。')
+
   const result = await dialog.showOpenDialog({
     title: '导入歌单 JSON',
     filters: [{ name: 'JSON', extensions: ['json'] }],
@@ -124,19 +127,20 @@ export async function importPlaylistFromDialog(): Promise<ImportPlaylistResult> 
     if (payload.tracks.length === 0) {
       return { imported: false, count: 0, name: payload.name, message: '没有识别到有效歌曲。每首歌至少需要 title 和 artist。' }
     }
-    savePlaylist(payload)
-    const startedAt = new Date().toISOString()
-    const semantics = await buildSemanticsForTracks(payload.tracks)
-    broadcastImportProgress({ phase: 'profile', current: 0, total: 1, startedAt })
-    const profile = await buildInitialProfile(payload.tracks)
-    broadcastImportProgress({ phase: 'done', current: 1, total: 1, startedAt })
-    return {
-      imported: true,
-      count: payload.tracks.length,
-      name: payload.name,
-      profile,
-      message: `已导入 ${payload.tracks.length} 首，新增语义标签 ${semantics.tagged} 首`,
-    }
+    return await runImportTask('playlist-file', payload.name, async (report) => {
+      savePlaylist(payload)
+      const semantics = await buildSemanticsForTracks(payload.tracks, report)
+      report({ phase: 'profile', current: 0, total: 1 })
+      const profile = await buildInitialProfile(payload.tracks)
+      report({ phase: 'done', current: 1, total: 1 })
+      return {
+        imported: true,
+        count: payload.tracks.length,
+        name: payload.name,
+        profile,
+        message: `已导入 ${payload.tracks.length} 首，新增语义标签 ${semantics.tagged} 首`,
+      }
+    })
   } catch (error) {
     return {
       imported: false,
@@ -189,6 +193,8 @@ export async function exportData(): Promise<{ ok: boolean; path?: string; messag
 }
 
 export function resetAllData(): { ok: boolean } {
+  if (hasRunningImportTask()) throw new Error('导入任务还在进行，完成后再清空数据。')
+  clearImportTaskSnapshot()
   resetDatabase()
   return { ok: true }
 }

@@ -1,14 +1,12 @@
-import { BrowserWindow } from 'electron'
 import type { ImportProgressPayload, SemanticSummary, Track, TrackSemantic } from '../../types/ipc'
 import { getAllImportedTracks } from '../db/playlists'
 import { getSemanticSummary as readSemanticSummary, splitMissingSemantics, upsertTrackSemantic } from '../db/semantics'
 import { completeChat, LlmError } from '../llm/client'
 import { getSettings } from '../db/settings'
+import { reportStandaloneImportProgress, runImportTask } from './importTasks'
 
 export function broadcastImportProgress(payload: ImportProgressPayload): void {
-  for (const window of BrowserWindow.getAllWindows()) {
-    window.webContents.send('import:progress', payload)
-  }
+  reportStandaloneImportProgress(payload)
 }
 
 const GENRES = ['华语流行', '粤语流行', '欧美流行', 'R&B', '民谣', '摇滚', '说唱', '电子', 'K-pop', '日语流行', '轻音乐']
@@ -140,15 +138,25 @@ energy/confidence 是 0-1 数字。tempo 是 slow/medium/fast。familiarity 对�
   }
 }
 
-export async function buildSemanticsForTracks(tracks: Track[]): Promise<{ tagged: number; skipped: number }> {
+export async function buildSemanticsForTracks(
+  tracks: Track[],
+  reportProgress?: (payload: Omit<ImportProgressPayload, 'startedAt'>) => void,
+): Promise<{ tagged: number; skipped: number }> {
   const valid = tracks.filter((track) => track.title && track.artist)
   const { missing, skipped } = splitMissingSemantics(valid)
   const startedAt = new Date().toISOString()
   const total = missing.length
   let tagged = 0
+  const report = (payload: Omit<ImportProgressPayload, 'startedAt'>) => {
+    if (reportProgress) {
+      reportProgress(payload)
+      return
+    }
+    broadcastImportProgress({ ...payload, startedAt })
+  }
 
   if (total > 0) {
-    broadcastImportProgress({ phase: 'semantics', current: 0, total, startedAt })
+    report({ phase: 'semantics', current: 0, total })
   }
 
   for (let index = 0; index < total; index += 25) {
@@ -158,13 +166,13 @@ export async function buildSemanticsForTracks(tracks: Track[]): Promise<{ tagged
       upsertTrackSemantic(track, semantics[itemIndex] ?? inferTrackSemanticFallback(track))
       tagged += 1
     })
-    broadcastImportProgress({ phase: 'semantics', current: tagged, total, startedAt })
+    report({ phase: 'semantics', current: tagged, total })
   }
   return { tagged, skipped }
 }
 
 export function buildForImportedTracks(): Promise<{ tagged: number; skipped: number }> {
-  return buildSemanticsForTracks(getAllImportedTracks())
+  return runImportTask('semantic-analysis', '已导入歌曲', (report) => buildSemanticsForTracks(getAllImportedTracks(), report))
 }
 
 export function getSummary(): SemanticSummary {

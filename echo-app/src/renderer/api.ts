@@ -20,6 +20,7 @@ import type {
   TasteQuestion,
   Track,
   YinyiEntry,
+  ImportTaskSnapshot,
 } from '../types/ipc'
 
 const now = new Date().toISOString()
@@ -179,6 +180,8 @@ let urlRefreshListeners: Array<(payload: { trackId: string; url: string; expires
 let cookieExpiredListeners: Array<(message: string) => void> = []
 let closeRequestListeners: Array<() => void> = []
 let navigateListeners: Array<Parameters<EchoApi['app']['onNavigate']>[0]> = []
+let importTaskState: ImportTaskSnapshot | null = null
+let importTaskListeners: Array<(snapshot: ImportTaskSnapshot | null) => void> = []
 
 function wait(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
@@ -253,6 +256,12 @@ function emitPlayback() {
   return next
 }
 
+function setMockImportTask(snapshot: ImportTaskSnapshot | null) {
+  importTaskState = snapshot ? structuredClone(snapshot) : null
+  const next = importTaskState ? structuredClone(importTaskState) : null
+  importTaskListeners.forEach((listener) => listener(next))
+}
+
 const yinyiEntries: YinyiEntry[] = [
   {
     id: 1,
@@ -292,6 +301,32 @@ const mockEcho: EchoApi = {
       }
     },
     async importPlaylist(): Promise<ImportPlaylistResult> {
+      const startedAt = new Date().toISOString()
+      setMockImportTask({
+        id: `mock-${Date.now()}`,
+        kind: 'playlist-file',
+        status: 'running',
+        phase: 'semantics',
+        current: 0,
+        total: mockTracks.length,
+        startedAt,
+        updatedAt: startedAt,
+        sourceName: 'Echo mock playlist',
+      })
+      await wait(240)
+      setMockImportTask({
+        id: importTaskState?.id ?? `mock-${Date.now()}`,
+        kind: 'playlist-file',
+        status: 'succeeded',
+        phase: 'done',
+        current: 1,
+        total: 1,
+        startedAt,
+        updatedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        sourceName: 'Echo mock playlist',
+        message: 'Echo mock playlist 导入完成',
+      })
       profileState = structuredClone(mockProfile)
       queueState = structuredClone(mockTracks)
       return { imported: true, count: mockTracks.length, name: 'Echo mock playlist', profile: structuredClone(mockProfile), message: `已导入 ${mockTracks.length} 首` }
@@ -326,6 +361,7 @@ const mockEcho: EchoApi = {
         { service: 'weather', status: 'unknown', message: '天气状态还没检查。' },
         { service: 'scheduler', status: 'unknown', message: '定时任务状态还没检查。' },
       ]
+      setMockImportTask(null)
       emitPlayback()
       return { ok: true }
     },
@@ -599,6 +635,15 @@ const mockEcho: EchoApi = {
     },
   },
   import: {
+    async getSnapshot() {
+      return importTaskState ? structuredClone(importTaskState) : null
+    },
+    onChanged(listener) {
+      importTaskListeners.push(listener)
+      return () => {
+        importTaskListeners = importTaskListeners.filter((item) => item !== listener)
+      }
+    },
     onProgress() {
       return () => undefined
     },
@@ -848,12 +893,39 @@ const mockEcho: EchoApi = {
     },
     async importPlaylist(id: string): Promise<ImportPlaylistResult> {
       const playlist = neteasePlaylists.find((item) => item.id === id)
+      const name = playlist?.name ?? '网易云预览歌单'
+      const startedAt = new Date().toISOString()
+      setMockImportTask({
+        id: `mock-${Date.now()}`,
+        kind: 'netease-playlist',
+        status: 'running',
+        phase: 'semantics',
+        current: 0,
+        total: mockTracks.length,
+        startedAt,
+        updatedAt: startedAt,
+        sourceName: name,
+      })
+      await wait(240)
+      setMockImportTask({
+        id: importTaskState?.id ?? `mock-${Date.now()}`,
+        kind: 'netease-playlist',
+        status: 'succeeded',
+        phase: 'done',
+        current: 1,
+        total: 1,
+        startedAt,
+        updatedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        sourceName: name,
+        message: `${name} 导入完成`,
+      })
       profileState = structuredClone(mockProfile)
       queueState = structuredClone(mockTracks)
       return {
         imported: true,
         count: mockTracks.length,
-        name: playlist?.name ?? '网易云预览歌单',
+        name,
         profile: structuredClone(mockProfile),
         message: `已从网易云导入 ${mockTracks.length} 首`,
       }

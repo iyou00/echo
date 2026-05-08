@@ -19,6 +19,7 @@ interface ChatPageProps extends AppPageProps {
   endScene: () => Promise<void>
   autoPlayNext: boolean
   updateAutoPlayNext: (value: boolean) => Promise<void>
+  focusApiSettings?: () => void
 }
 
 const WAITING_LINES = [
@@ -117,7 +118,7 @@ function friendlyChatError(error: unknown) {
   return message || 'Echo 这会儿接不上模型。先去设置里看一眼。'
 }
 
-export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasLlmConfig, profile, refreshQueue, restoreOnStart, scenes, currentScene, playScene, endScene, autoPlayNext, updateAutoPlayNext }: ChatPageProps) {
+export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasLlmConfig, profile, refreshQueue, restoreOnStart, scenes, currentScene, playScene, endScene, autoPlayNext, updateAutoPlayNext, focusApiSettings }: ChatPageProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
@@ -506,7 +507,7 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
   return (
     <div className="phone-surface chat-page">
       {!hasLlmConfig && (
-        <button className="setup-banner" onClick={() => navigate('settings')}>
+        <button className="setup-banner" onClick={() => { focusApiSettings?.(); navigate('settings') }}>
           先填好模型设置，Echo 才能开口。
         </button>
       )}

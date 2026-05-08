@@ -31,6 +31,8 @@ function assertConfig(settings: Settings): void {
 
 export async function* streamChat(settings: Settings, messages: LlmMessage[]): AsyncIterable<LlmChunk> {
   assertConfig(settings)
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 30_000)
   const response = await fetch(endpoint(settings.llm.baseUrl), {
     method: 'POST',
     headers: {
@@ -43,9 +45,13 @@ export async function* streamChat(settings: Settings, messages: LlmMessage[]): A
       stream: true,
       temperature: 0.8,
     }),
+    signal: controller.signal,
   }).catch((error) => {
+    clearTimeout(timer)
+    if (error instanceof DOMException && error.name === 'AbortError') throw new LlmError('请求超时（30 秒），请检查网络或换一个端点', 'network')
     throw new LlmError(error instanceof Error ? error.message : '网络请求失败', 'network')
   })
+  clearTimeout(timer)
 
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) throw new LlmError('鉴权失败', 'auth')
@@ -83,6 +89,8 @@ export async function* streamChat(settings: Settings, messages: LlmMessage[]): A
 
 export async function completeChat(settings: Settings, messages: LlmMessage[], options?: { temperature?: number }): Promise<string> {
   assertConfig(settings)
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 30_000)
   const response = await fetch(endpoint(settings.llm.baseUrl), {
     method: 'POST',
     headers: {
@@ -95,9 +103,13 @@ export async function completeChat(settings: Settings, messages: LlmMessage[], o
       stream: false,
       temperature: options?.temperature ?? 0.8,
     }),
+    signal: controller.signal,
   }).catch((error) => {
+    clearTimeout(timer)
+    if (error instanceof DOMException && error.name === 'AbortError') throw new LlmError('请求超时（30 秒），请检查网络或换一个端点', 'network')
     throw new LlmError(error instanceof Error ? error.message : '网络请求失败', 'network')
   })
+  clearTimeout(timer)
 
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) throw new LlmError('鉴权失败', 'auth')

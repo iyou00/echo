@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ActiveScene, PlaybackState, SceneDefinition, SceneKey, Settings, TasteProfile, Track } from './types/ipc'
+import type { ActiveScene, ImportTaskSnapshot, PlaybackState, SceneDefinition, SceneKey, Settings, TasteProfile, Track } from './types/ipc'
 import { getEchoApi } from './renderer/api'
 import { AboutEchoPage } from './renderer/pages/AboutEcho'
 import { ChatPage } from './renderer/pages/Chat'
@@ -28,6 +28,8 @@ function App() {
   const [queue, setQueue] = useState<Track[]>([])
   const [sceneDefinitions, setSceneDefinitions] = useState<SceneDefinition[]>([])
   const [currentScene, setCurrentScene] = useState<ActiveScene | null>(null)
+  const [importTask, setImportTask] = useState<ImportTaskSnapshot | null>(null)
+  const handledImportTaskIdsRef = useRef(new Set<string>())
   const currentSceneRef = useRef(currentScene)
   useEffect(() => { currentSceneRef.current = currentScene }, [currentScene])
   const [playbackNotice, setPlaybackNotice] = useState('')
@@ -41,6 +43,7 @@ function App() {
   const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [firstRunWelcomeOpen, setFirstRunWelcomeOpen] = useState(false)
   const [settingsImportFocusToken, setSettingsImportFocusToken] = useState(0)
+  const [settingsApiFocusToken, setSettingsApiFocusToken] = useState(0)
   const [playbackState, setPlaybackState] = useState<PlaybackState>({
     current: null,
     position: 0,
@@ -74,7 +77,7 @@ function App() {
     let alive = true
 
     async function boot() {
-      const [nextSettings, nextTaste, nextQueue, nextPlayback, nextYinyi, nextScenes, nextScene] = await Promise.all([
+      const [nextSettings, nextTaste, nextQueue, nextPlayback, nextYinyi, nextScenes, nextScene, nextImportTask] = await Promise.all([
         echo.settings.get(),
         echo.taste.getProfile(),
         echo.queue.get(),
@@ -82,6 +85,7 @@ function App() {
         echo.yinyi.getRange(1).catch(() => []),
         echo.scene.definitions(),
         echo.scene.getCurrent(),
+        echo.import.getSnapshot(),
       ])
 
       if (!alive) return
@@ -92,6 +96,7 @@ function App() {
       setLatestYinyiDate(nextYinyi[0]?.date ?? '')
       setSceneDefinitions(nextScenes)
       setCurrentScene(nextScene)
+      setImportTask(nextImportTask)
       const isExistingUser = Boolean(nextSettings.meta.onboardingCompletedAt) || Boolean(nextTaste.profile)
       const shouldShowFirstRunWelcome = !isExistingUser && !nextSettings.meta.firstRunWelcomeCompletedAt
       setFirstRunWelcomeOpen(shouldShowFirstRunWelcome)
@@ -133,6 +138,27 @@ function App() {
       }
     })
   }, [echo, refreshQueue])
+
+  useEffect(() => {
+    return echo.import.onChanged((next) => {
+      setImportTask(next)
+    })
+  }, [echo])
+
+  useEffect(() => {
+    if (!settings) return
+    if (importTask?.status !== 'succeeded') return
+    if (handledImportTaskIdsRef.current.has(importTask.id)) return
+    handledImportTaskIdsRef.current.add(importTask.id)
+    refreshProfile().catch(() => undefined)
+    refreshQueue().catch(() => undefined)
+    if (settings.meta.onboardingStep === 'playlist' || !settings.meta.onboardingCompletedAt) {
+      echo.settings.update('meta.onboardingStep', 'done')
+        .then((next) => next.meta.onboardingCompletedAt ? next : echo.settings.update('meta.onboardingCompletedAt', new Date().toISOString()))
+        .then(setSettings)
+        .catch(() => undefined)
+    }
+  }, [echo, importTask, refreshProfile, refreshQueue, settings])
 
   useEffect(() => {
     return echo.playback.onCookieExpired((message) => {
@@ -235,6 +261,14 @@ function App() {
     setSettings(next)
     setFirstRunWelcomeOpen(false)
     setOnboardingOpen(!next.meta.onboardingCompletedAt && !profile)
+  }
+
+  async function startOnboardingApi() {
+    const next = await echo.settings.update('meta.onboardingCompletedAt', new Date().toISOString())
+    setSettings(next)
+    setOnboardingOpen(false)
+    setPage('settings')
+    setSettingsApiFocusToken((value) => value + 1)
   }
 
   async function startOnboardingImport() {
@@ -384,6 +418,7 @@ function App() {
               endScene={endScene}
               autoPlayNext={settings?.playback.autoPlayNext ?? true}
               updateAutoPlayNext={updateAutoPlayNext}
+              focusApiSettings={() => setSettingsApiFocusToken((v) => v + 1)}
             />
           </div>
           <div className="shell-page" style={{ display: page === 'yinyi' ? 'flex' : 'none' }}>
@@ -439,6 +474,8 @@ function App() {
               refreshProfile={refreshProfile}
               refreshQueue={refreshQueue}
               importFocusToken={settingsImportFocusToken}
+              apiFocusToken={settingsApiFocusToken}
+              importTask={importTask}
             />
           )}
           {page === 'about' && (
@@ -487,16 +524,33 @@ function App() {
           <div className="onboarding-layer" role="presentation">
             <section className="onboarding-card" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
               <div className="onboarding-kicker">E C H O · F I R S T</div>
-              <h2 id="onboarding-title">先让我认识你的歌</h2>
-              <p>
-                导入一份歌单后，我会先读懂你的口味、常听情绪和安全区。后面推荐、风信、画像和主动关心都会从这里长出来。
-              </p>
-              <button className="btn onboarding-primary" type="button" onClick={() => { void startOnboardingImport() }}>
-                开始导入歌单
-              </button>
-              <button className="btn sec onboarding-skip" type="button" onClick={() => { void skipOnboarding() }}>
-                先逛逛
-              </button>
+              {!hasLlmConfig ? (
+                <>
+                  <h2 id="onboarding-title">先给我一颗大脑</h2>
+                  <p>
+                    填好 AI 模型的地址和密钥后，我才能真正理解你的音乐——标签、情绪、场景都会更准。
+                  </p>
+                  <button className="btn onboarding-primary" type="button" onClick={() => { void startOnboardingApi() }}>
+                    去填写模型设置
+                  </button>
+                  <button className="btn sec onboarding-skip" type="button" onClick={() => { void skipOnboarding() }}>
+                    先逛逛
+                  </button>
+                </>
+              ) : (
+                <>
+                  <h2 id="onboarding-title">先让我认识你的歌</h2>
+                  <p>
+                    导入一份歌单后，我会先读懂你的口味、常听情绪和安全区。后面推荐、风信、画像和主动关心都会从这里长出来。
+                  </p>
+                  <button className="btn onboarding-primary" type="button" onClick={() => { void startOnboardingImport() }}>
+                    开始导入歌单
+                  </button>
+                  <button className="btn sec onboarding-skip" type="button" onClick={() => { void skipOnboarding() }}>
+                    先逛逛
+                  </button>
+                </>
+              )}
             </section>
           </div>
         )}

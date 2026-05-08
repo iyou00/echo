@@ -87,6 +87,12 @@ const echoApi: EchoApi = {
     getSummary: () => ipcRenderer.invoke('semantics:getSummary'),
   },
   import: {
+    getSnapshot: () => ipcRenderer.invoke('import:getSnapshot'),
+    onChanged: (listener) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload)
+      ipcRenderer.on('import:changed', wrapped)
+      return () => ipcRenderer.off('import:changed', wrapped)
+    },
     onProgress: (listener) => {
       const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload)
       ipcRenderer.on('import:progress', wrapped)

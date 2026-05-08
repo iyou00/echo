@@ -2,7 +2,8 @@ import { createRequire } from 'node:module'
 import type { ImportPlaylistResult, NeteasePlaylistSummary, Track } from '../../types/ipc'
 import { importPlaylist as savePlaylist } from '../db/playlists'
 import { buildInitialProfile } from '../services/taste'
-import { broadcastImportProgress, buildSemanticsForTracks } from '../services/semantics'
+import { buildSemanticsForTracks } from '../services/semantics'
+import { runImportTask } from '../services/importTasks'
 import { getNeteaseLoginState, readNeteaseCookie } from './auth'
 
 const require = createRequire(import.meta.url)
@@ -81,13 +82,14 @@ export async function importNeteasePlaylist(id: string): Promise<ImportPlaylistR
     return { imported: false, count: 0, name, message: '这个歌单没有识别到可导入歌曲' }
   }
 
-  savePlaylist({ name, tracks, source: 'netease' })
-  const startedAt = new Date().toISOString()
-  const semantics = await buildSemanticsForTracks(tracks)
-  broadcastImportProgress({ phase: 'profile', current: 0, total: 1, startedAt })
-  const profile = await buildInitialProfile(tracks)
-  broadcastImportProgress({ phase: 'done', current: 1, total: 1, startedAt })
-  return { imported: true, count: tracks.length, name, profile, message: `已从网易云导入 ${tracks.length} 首，新增语义标签 ${semantics.tagged} 首` }
+  return runImportTask('netease-playlist', name, async (report) => {
+    savePlaylist({ name, tracks, source: 'netease' })
+    const semantics = await buildSemanticsForTracks(tracks, report)
+    report({ phase: 'profile', current: 0, total: 1 })
+    const profile = await buildInitialProfile(tracks)
+    report({ phase: 'done', current: 1, total: 1 })
+    return { imported: true, count: tracks.length, name, profile, message: `已从网易云导入 ${tracks.length} 首，新增语义标签 ${semantics.tagged} 首` }
+  })
 }
 
 function firstSearchSong(body: Record<string, unknown> | undefined): Record<string, unknown> {
