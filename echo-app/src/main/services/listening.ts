@@ -4,6 +4,7 @@ import { appendRecommendedTracks, loadListenedTracksSince, loadRecentRecommended
 import { getAllImportedTracks } from '../db/playlists'
 import { getTasteProfile } from '../db/taste'
 import { getSettings } from '../db/settings'
+import { getTrackSemantic } from '../db/semantics'
 import { completeChat, LlmError } from '../llm/client'
 import { filterPlayableTracks } from '../netease/music'
 import { synthesize } from '../tts/client'
@@ -12,6 +13,7 @@ import { getMostRecentSeal } from './daySeal'
 import { getWeather } from '../weather/client'
 import { recordHealth } from './health'
 import { recommendFromNetease } from './recommendation'
+import { inferTrackSemanticFallback } from './semantics'
 
 interface ListeningText {
   text?: string
@@ -20,6 +22,23 @@ interface ListeningText {
 
 const recentScenarios: string[] = []
 const recentTrackKeys: string[] = []
+
+interface SegmentSemantic {
+  moods: string[]
+  genres: string[]
+  energy: number
+  tempo: string
+  artist: string
+}
+
+const recentSegmentSemantics: SegmentSemantic[] = []
+const recentArtists: string[] = []
+
+let lastConversationFingerprint = ''
+
+function primaryArtist(artist: string): string {
+  return artist.split(/[/、,，&＋+]| feat\.?| ft\.?| and /i)[0]?.trim().toLowerCase() ?? artist.trim().toLowerCase()
+}
 
 function trackKey(track: Track): string {
   return String(track.neteaseId ?? track.id ?? `${track.title}::${track.artist}`).toLowerCase()
@@ -61,12 +80,27 @@ function recentBlockedKeys(): Set<string> {
   return keys
 }
 
+function semanticForTrack(track: Track): SegmentSemantic {
+  const semantic = track.semantic ?? getTrackSemantic(track) ?? inferTrackSemanticFallback(track)
+  return {
+    moods: semantic.moods,
+    genres: semantic.genres,
+    energy: semantic.energy,
+    tempo: semantic.tempo,
+    artist: track.artist.split(/[/、,，&＋+]| feat\.?| ft\.?| and /i)[0]?.trim() ?? track.artist,
+  }
+}
+
 function rememberScenario(text: string, track: Track | null) {
   recentScenarios.unshift(text)
   recentScenarios.splice(8)
   if (track) {
     recentTrackKeys.unshift(...trackIdentityKeys(track))
     recentTrackKeys.splice(36)
+    recentSegmentSemantics.unshift(semanticForTrack(track))
+    recentSegmentSemantics.splice(8)
+    recentArtists.unshift(primaryArtist(track.artist))
+    recentArtists.splice(8)
   }
 }
 
@@ -216,12 +250,58 @@ async function getFallbackCandidates(): Promise<Track[]> {
   return filterPlayableTracks(candidates, 5)
 }
 
-async function getCandidates(): Promise<Track[]> {
+function diversifyCandidatesByArtist(candidates: Track[], maxPerArtist: number): Track[] {
+  const artistCounts = new Map<string, number>()
+  return candidates.filter((track) => {
+    const key = primaryArtist(track.artist)
+    const count = artistCounts.get(key) ?? 0
+    if (count >= maxPerArtist) return false
+    artistCounts.set(key, count + 1)
+    return true
+  })
+}
+
+function uniqueTracksByKey(tracks: Track[]): Track[] {
+  const seen = new Set<string>()
+  return tracks.filter((track) => {
+    const key = trackKey(track)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+const DIVERSITY_DIMENSIONS = [
+  { label: '热烈', keywords: ['热烈', '激昂'] },
+  { label: '轻快', keywords: ['轻快', '清新'] },
+  { label: '放松', keywords: ['放松', '舒缓'] },
+  { label: '治愈', keywords: ['治愈', '暖心'] },
+  { label: '怀旧', keywords: ['怀旧', '经典'] },
+  { label: '孤独', keywords: ['孤独', '安静'] },
+  { label: '清醒', keywords: ['清醒', '提神'] },
+  { label: '松弛', keywords: ['松弛', '慵懒'] },
+]
+
+function pickUncoveredDimension(): string {
+  const coveredMoods = new Set(recentSegmentSemantics.flatMap((s) => s.moods))
+  const uncovered = DIVERSITY_DIMENSIONS.filter((d) => !d.keywords.some((k) => coveredMoods.has(k)))
+  const pool = uncovered.length > 0 ? uncovered : DIVERSITY_DIMENSIONS
+  const pick = pool[Math.floor(Math.random() * pool.length)]
+  return pick.keywords[Math.floor(Math.random() * pick.keywords.length)]
+}
+
+async function getCandidates(continuation?: boolean): Promise<Track[]> {
   const blocked = recentBlockedKeys()
-  const fromNetease = await recommendFromNetease('回声里随机给我一首适合现在听的歌', undefined, { ignoreScene: true }).catch(() => [])
+  const query = continuation && recentSegmentSemantics.length > 0
+    ? `回声里给我一首${pickUncoveredDimension()}的、适合现在听的歌`
+    : '回声里随机给我一首适合现在听的歌'
+  const fromNetease = await recommendFromNetease(query, undefined, { ignoreScene: true, candidateCount: 8 }).catch(() => [])
   const fresh = fromNetease.filter((track) => !hasTrackIdentity(blocked, track))
-  if (fresh.length > 0) return fresh.slice(0, 5)
-  return getFallbackCandidates()
+  const diversified = diversifyCandidatesByArtist(fresh, 2)
+  if (diversified.length >= 3) return diversified.slice(0, 5)
+  const fallback = await getFallbackCandidates()
+  const mixed = diversifyCandidatesByArtist(uniqueTracksByKey([...diversified, ...fallback.filter((t) => !hasTrackIdentity(blocked, t))]), 2)
+  return mixed.slice(0, 5)
 }
 
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
@@ -265,10 +345,17 @@ function buildContext(input: {
 
 你最近几次的开头分别是:
 ${recentScenarios.slice(0, 3).map((item, index) => `- S${index + 1}: "${item.slice(0, 40)}${item.length > 40 ? '...' : ''}"`).join('\n')}
+${recentSegmentSemantics.length > 0 ? `
+最近几段的音乐特征:
+${recentSegmentSemantics.slice(0, 3).map((s, index) => `- S${index + 1}: ${s.artist} 气质[${s.moods.slice(0, 3).join('/')}] 流派[${s.genres.slice(0, 2).join('/')}] 节奏[${s.tempo}] 能量[${s.energy > 0.65 ? '高' : s.energy > 0.4 ? '中' : '低'}]`).join('\n')}
+
+你已经覆盖了这些音乐方向。这次从 candidates 里选一首气质或流派不同的歌。
+如果前几首偏安静,这次挑一首节奏感强一点的;如果前几首偏热烈,这次挑一首放松的。` : ''}
+${recentArtists.length > 0 ? `最近推荐的歌手: ${[...new Set(recentArtists.slice(0, 3))].join('、')}
+${new Set(recentArtists.slice(0, 3)).size < 3 ? '你已经连续推荐了同一个歌手。这次必须从 candidates 里选一首不同歌手的。' : '这次换一个歌手。'}` : ''}
 
 这些开头方式已经用过了。这次必须换一个完全不同的切入点、不同的句式。
 可以换个话题,可以跑题,可以回前面的话题但用新的角度。
-选一首不同的歌。
 </continuation>`
     : ''
 
@@ -305,11 +392,19 @@ ${input.candidates.map((item, index) => `- C${index + 1}: ${item.artist} / ${ite
 export async function generateListeningSegment(options?: { continuation?: boolean }): Promise<{ text: string; track: Track | null; audioUrl?: string; error?: string; generatedAt: string }> {
   const generatedAt = new Date().toISOString()
   const settings = getSettings()
-  const conversations = loadRecentConversations(5)
+  const limit = options?.continuation ? 2 : 5
+  const conversations = loadRecentConversations(limit)
+  if (options?.continuation && conversations.length > 0) {
+    const fp = String(conversations[conversations.length - 1].id ?? '')
+    if (fp === lastConversationFingerprint) conversations.length = 0
+    lastConversationFingerprint = fp
+  } else if (conversations.length > 0) {
+    lastConversationFingerprint = String(conversations[conversations.length - 1].id ?? '')
+  }
   const seal = getMostRecentSeal()
   const profile = getTasteProfile()
   const weather = await getWeather(settings.user.city)
-  const candidates = await getCandidates()
+  const candidates = await getCandidates(options?.continuation)
   const prompt = readRootFile('prompts/scenario-100.md')
 
   let text = fallbackText(candidates[0] ?? null)

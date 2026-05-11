@@ -68,6 +68,7 @@ export interface IntentOverride {
 
 export interface RecommendationOptions {
   ignoreScene?: boolean
+  candidateCount?: number
 }
 
 interface IntentRejectIf {
@@ -1052,13 +1053,14 @@ function scoreCandidateWithFeedback(
   if (intent.familiarity === 'safe' && semantic.familiarity === 'safe') score += 1.5
   if (intent.familiarity === 'explore' && track.recommendSource === 'new_song') score += 1.5
   if (intent.artistQuery && normalizeText(track.artist).includes(normalizeText(intent.artistQuery))) score += 8
+  if (intent.seedTitle && normalizeText(track.title).includes(normalizeText(intent.seedTitle))) score += 10
   if (track.recommendSource === 'similar') score += 1.2
   if (track.recommendSource === 'artist') score += 0.9
   if (track.recommendSource === 'playlist') score += 0.7
   if (track.recommendSource === 'daily' || track.recommendSource === 'fm') score += 0.8
   score += Math.max(-5, Math.min(5, feedbackScore(track)))
   score += directionMemoryScore(track, semantic, memory)
-  if (hasTrackIdentity(recentKeys, track)) score -= 12
+  if (hasTrackIdentity(recentKeys, track) && !(intent.seedTitle && normalizeText(track.title).includes(normalizeText(intent.seedTitle)))) score -= 12
   if (profile?.energy_preference != null && intent.energy == null) {
     const gap = Math.abs(semantic.energy - profile.energy_preference)
     if (gap <= 0.15) score += 1.0
@@ -1188,10 +1190,15 @@ export async function recommendFromNetease(text: string, override?: IntentOverri
   if (!readNeteaseCookie()) throw new NeteaseAuthRequiredError()
   const baseIntent = mergeIntent(parseIntent(text), options.ignoreScene ? undefined : sceneIntentOverride())
   const intent = mergeIntent(baseIntent, validateIntentOverride(text, override ?? null) ?? undefined)
+  if (options.candidateCount) intent.targetCount = options.candidateCount
   if (isGenericDiscoveryRequest(text, intent)) {
     return recommendGenericDiscovery(intent)
   }
   const allowCooldownFallback = Boolean(intent.seedTitle || intent.artistQuery || intent.sceneKey)
+  function matchesSeedTitle(track: Track): boolean {
+    if (!intent.seedTitle) return false
+    return normalizeText(track.title).includes(normalizeText(intent.seedTitle))
+  }
   const cacheKey = buildCacheKey(intent)
   const profile = getTasteProfile()
   const memory = buildDirectionMemory()
@@ -1200,7 +1207,7 @@ export async function recommendFromNetease(text: string, override?: IntentOverri
   const cached = getRecommendationCache(cacheKey)
   if (cached?.tracks.length) {
     const cachedFresh = cached.tracks
-      .filter((track) => !hasTrackIdentity(hardCooldownKeys, track) && !hasTrackIdentity(recentKeys, track))
+      .filter((track) => !hasTrackIdentity(hardCooldownKeys, track) && (matchesSeedTitle(track) || !hasTrackIdentity(recentKeys, track)))
       .map((track) => ({ ...track, semantic: track.semantic ?? semanticForCandidate(track), playUrl: undefined, urlExpiresAt: undefined }))
       .filter((track) => matchesIntentFloor(track, intent))
     const playable = await filterPlayableTracks(cachedFresh, intent.targetCount)
@@ -1233,15 +1240,17 @@ export async function recommendFromNetease(text: string, override?: IntentOverri
     .map((track) => ({ track: { ...track, semantic: semanticForCandidate(track) }, score: scoreCandidate(track, intent, recentKeys, memory, profile) }))
     .sort((a, b) => b.score - a.score)
     .map((item) => item.track)
-  const intentMatched = ranked.filter((track) => !hasTrackIdentity(hardCooldownKeys, track) && !hasTrackIdentity(recentKeys, track) && matchesIntentFloor(track, intent))
+  const intentMatched = ranked.filter((track) => !hasTrackIdentity(hardCooldownKeys, track) && (matchesSeedTitle(track) || !hasTrackIdentity(recentKeys, track)) && (matchesSeedTitle(track) || matchesIntentFloor(track, intent)))
   const cooledPool = ranked.filter((track) => !hasTrackIdentity(hardCooldownKeys, track) && matchesIntentFloor(track, intent))
   const fallbackPool = allowCooldownFallback ? ranked.filter((track) => matchesIntentFloor(track, intent)) : []
   const primaryPool = intentMatched.length >= intent.targetCount ? intentMatched : cooledPool.length >= intent.targetCount ? cooledPool : fallbackPool
   const playablePool = await filterPlayableTracks(primaryPool, Math.max(20, intent.targetCount * 8))
   const diversifiedPool = diversifyByArtist(playablePool, 2)
+  if (options.candidateCount) return diversifiedPool.slice(0, options.candidateCount)
   const finalTracks = await selectFinalTracks(text, diversifiedPool, intent)
   const evidencedTracks = finalTracks.map((track) => ({
     ...track,
+    reason: matchesSeedTitle(track) ? `你点名要听的。` : track.reason,
     profileEvidence: {
       moods: intent.moods,
       scenes: intent.scenes,

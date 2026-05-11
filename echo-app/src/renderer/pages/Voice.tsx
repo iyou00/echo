@@ -164,8 +164,8 @@ export function VoicePage({
     if (fadeVolumeRef.current) return
     const current = playbackState.current
 
-    // 连续回声：检测背景音乐播完（track 变了或变成 null）→ 触发下一段
-    if (voiceContinuous && (statusRef.current === 'done' || statusRef.current === 'text-only-done') && musicStartedRef.current) {
+    // 连续回声：检测背景音乐播完（track 变了或变成 null）→ 触发下一段（仅回声页面）
+    if (isActive && voiceContinuous && (statusRef.current === 'done' || statusRef.current === 'text-only-done') && musicStartedRef.current) {
       const baselineKey = voiceBaselinePlaybackKeyRef.current
       const stillSameTrack = (baselineKey && current && trackIdentity(current) === baselineKey) || current?.sourceContext === 'voice'
       if (!stillSameTrack) {
@@ -196,7 +196,7 @@ export function VoicePage({
     setNotice('')
     setStatus('idle')
     echo.playback.setVolume(restoreVolumeRef.current).then(setPlaybackState).catch(() => undefined)
-  }, [echo, playbackState, setPlaybackState, setVoiceContinuous, voiceContinuous])
+  }, [echo, isActive, playbackState, setPlaybackState, setVoiceContinuous, voiceContinuous])
 
   useEffect(() => () => {
     fadeRunRef.current += 1
@@ -362,6 +362,7 @@ export function VoicePage({
   // 音乐在播时由 playbackState effect 检测音乐播完再触发
   useEffect(() => {
     if (!voiceContinuous) return
+    if (!isActive) return
     if (status !== 'done' && status !== 'text-only-done') return
     const timer = window.setTimeout(() => {
       if (statusRef.current !== 'done' && statusRef.current !== 'text-only-done') return
@@ -369,7 +370,7 @@ export function VoicePage({
       speakRef.current?.(true).catch(() => undefined)
     }, 2000)
     return () => window.clearTimeout(timer)
-  }, [status, voiceContinuous])
+  }, [isActive, status, voiceContinuous])
 
   function backToChat() {
     setVoiceContinuous(false)
