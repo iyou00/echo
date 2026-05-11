@@ -61,14 +61,14 @@ export async function testLlm(): Promise<LlmTestResult> {
     saveSettings({
       ...settings,
       llm: { ...settings.llm, lastTestedAt: new Date().toISOString(), lastTestedOk: true },
-    })
+    }, true)
     recordHealth('llm', 'ok', '模型连接正常。')
     return { ok: true, latencyMs: Date.now() - started, message: `连接正常 ${Date.now() - started} ms` }
   } catch (error) {
     saveSettings({
       ...settings,
       llm: { ...settings.llm, lastTestedAt: new Date().toISOString(), lastTestedOk: false },
-    })
+    }, true)
     const message = error instanceof LlmError ? error.message : '连接失败'
     recordHealth('llm', error instanceof LlmError && (error.kind === 'auth' || error.kind === 'config') ? 'error' : 'degraded', 'Echo 连不上模型。去设置里检查 API key。', message)
     return { ok: false, message }

@@ -1,5 +1,5 @@
 import { getDb } from './index'
-import { getSettings, updateSettingsSilent } from './settings'
+import { getStoredSettingsRaw, updateSettingsSilent } from './settings'
 
 const PRUNE_TABLES: Array<{ table: string; dateColumn: string; retentionDays: number; extraWhere?: string }> = [
   { table: 'tracks_listened', dateColumn: 'listened_at', retentionDays: 60 },
@@ -17,9 +17,9 @@ const PRUNE_TABLES: Array<{ table: string; dateColumn: string; retentionDays: nu
 ]
 
 export function pruneOldData(): void {
-  const settings = getSettings()
+  const raw = getStoredSettingsRaw()
   const today = new Date().toISOString().slice(0, 10)
-  if (settings.meta.lastPrunedAt === today) return
+  if (raw.meta.lastPrunedAt === today) return
 
   const db = getDb()
   for (const { table, dateColumn, retentionDays, extraWhere } of PRUNE_TABLES) {
@@ -34,5 +34,5 @@ export function pruneOldData(): void {
     db.pragma('incremental_vacuum')
   }
 
-  updateSettingsSilent({ ...settings, meta: { ...settings.meta, lastPrunedAt: today } })
+  updateSettingsSilent({ ...raw, meta: { ...raw.meta, lastPrunedAt: today } })
 }

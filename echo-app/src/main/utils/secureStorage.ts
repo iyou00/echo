@@ -57,10 +57,14 @@ export function encryptSecret(value: string): string {
 export function decryptSecret(value: string): string {
   if (!value) return ''
   if (value.startsWith('safe:')) {
-    if (!isSecureStorageAvailable()) return ''
+    if (!isSecureStorageAvailable()) {
+      console.warn('[secureStorage] decrypt failed: safeStorage unavailable')
+      return ''
+    }
     try {
       return safeStorage.decryptString(Buffer.from(value.slice(5), 'base64'))
-    } catch {
+    } catch (err) {
+      console.warn('[secureStorage] decrypt failed:', err instanceof Error ? err.message : err)
       return ''
     }
   }

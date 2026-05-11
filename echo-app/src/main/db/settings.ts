@@ -86,13 +86,22 @@ export function getStoredSettingsRaw(): Settings {
   return mergeDefaults(row ? JSON.parse(row.data_json || '{}') : {})
 }
 
-export function saveSettings(settings: Settings): Settings {
+export function saveSettings(settings: Settings, preserveEncryptedKey = false): Settings {
   const copy = structuredClone(settings)
   if (copy.llm.apiKey) {
     if (!isSecureStorageAvailable()) {
       throw new StorageUnavailableError('当前系统未启用加密存储，无法保存 API Key。请检查系统的密钥环服务后重试。')
     }
     copy.llm.apiKey = encryptSecret(copy.llm.apiKey)
+  } else if (preserveEncryptedKey) {
+    const existingRow = getDb().prepare('SELECT data_json FROM settings WHERE id = 1').get() as { data_json: string } | undefined
+    const existingKey = existingRow ? (JSON.parse(existingRow.data_json || '{}')?.llm?.apiKey ?? '') as string : ''
+    if (existingKey.startsWith('safe:')) {
+      console.warn('[settings] saveSettings: apiKey 为空但数据库存在加密值，保留加密值防止丢失')
+      copy.llm.apiKey = existingKey
+    } else {
+      copy.llm.apiKey = ''
+    }
   } else {
     copy.llm.apiKey = ''
   }
@@ -125,17 +134,27 @@ export function upgradeLegacySettingsSecrets(): void {
   }
 }
 
-export function updateSetting(path: string, value: unknown): Settings {
-  const settings = getSettings()
-  const keys = path.split('.')
-  let target: Record<string, unknown> = settings as unknown as Record<string, unknown>
+function setNestedValue(obj: Record<string, unknown>, dotPath: string, value: unknown): void {
+  const keys = dotPath.split('.')
+  let target = obj
   for (const key of keys.slice(0, -1)) {
     const existing = target[key]
     if (!existing || typeof existing !== 'object') target[key] = {}
     target = target[key] as Record<string, unknown>
   }
   target[keys[keys.length - 1]] = value
-  return saveSettings(settings)
+}
+
+export function updateSetting(path: string, value: unknown): Settings {
+  if (path === 'llm.apiKey') {
+    const settings = getSettings()
+    setNestedValue(settings as unknown as Record<string, unknown>, path, value)
+    return saveSettings(settings)
+  }
+  const raw = getStoredSettingsRaw()
+  setNestedValue(raw as unknown as Record<string, unknown>, path, value)
+  updateSettingsSilent(raw)
+  return getSettings()
 }
 
 export function updateSettingsSilent(settings: Settings): void {
