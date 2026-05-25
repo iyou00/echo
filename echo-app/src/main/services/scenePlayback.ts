@@ -1,13 +1,19 @@
+import { BrowserWindow } from 'electron'
 import type { ActiveScene, ChatMessage, PlaybackState, SceneKey, ScenePlaybackOptions, Track } from '../../types/ipc'
 import { appendConversation } from '../db/conversations'
-import { appendRecommendedTracks, skipTodayRecommendedTracks } from '../db/tracks'
+import { appendRecommendedTracks, loadListenedTracksSince, loadRecentRecommendedTracks, skipTodayRecommendedTracks } from '../db/tracks'
 import { getDb } from '../db'
 import { getTasteProfile } from '../db/taste'
 import { getSettings } from '../db/settings'
 import { completeChat } from '../llm/client'
-import { recommendFromNetease } from './recommendation'
+import { stripKnownSystemBlocks } from '../llm/outputSanitize'
+import { primaryArtist, trackKey } from '../skills/music/identity'
+import { searchMusic } from '../skills/music/search'
+import { selectDiverseTracks } from '../skills/music/selection'
+import { buildSoulPolicyPrompt } from '../skills/soul/policy'
 import { clearQueue, enqueue, getState, play } from './playback'
-import { endCurrentScene, hasNewerSceneSession, isSceneSessionCurrent, startScene } from './scene'
+import { markQueueStatus } from './queue'
+import { endCurrentScene, getCurrentScene, isSceneSessionCurrent, startScene } from './scene'
 
 export interface ScenePlaybackResult {
   scene: ActiveScene
@@ -16,17 +22,19 @@ export interface ScenePlaybackResult {
   message?: ChatMessage
 }
 
-function trackKey(track: Track): string {
-  const neteaseId = String(track.neteaseId ?? '').trim()
-  if (neteaseId) return `netease:${neteaseId}`
-  const id = String(track.id ?? '').trim()
-  if (id) return `id:${id}`
-  return `name:${track.title.trim().toLowerCase()}::${track.artist.trim().toLowerCase()}`
+export interface ScenePlaybackRuntimeOptions {
+  signal?: AbortSignal
+  report?: (patch: { phase?: string; current?: number; total?: number; message?: string }) => void
+}
+
+function assertScenePlaybackActive(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException('任务已取消', 'AbortError')
 }
 
 function attachScene(scene: ActiveScene, tracks: Track[]): Track[] {
   return tracks.map((track) => ({
     ...track,
+    sourceContext: 'scene',
     sceneKey: scene.key,
     sceneLabel: scene.label,
     sceneLine: scene.line,
@@ -41,7 +49,35 @@ function attachScene(scene: ActiveScene, tracks: Track[]): Track[] {
 }
 
 function isSuperseded(scene: ActiveScene): boolean {
-  return !isSceneSessionCurrent(scene.id) && hasNewerSceneSession(scene)
+  return !isSceneSessionCurrent(scene.id)
+}
+
+function broadcastChatMessage(message: ChatMessage): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send('chat:message-injected', message)
+  }
+}
+
+function recentArtistSet(): Set<string> {
+  const tracks = [
+    ...loadRecentRecommendedTracks(80),
+    ...loadListenedTracksSince(48, 240),
+  ]
+  return new Set(tracks.map((track) => primaryArtist(track.artist)).filter(Boolean))
+}
+
+function pickSceneTracks(candidates: Track[], targetCount: number): Track[] {
+  const excluded = [
+    ...loadRecentRecommendedTracks(120),
+    ...loadListenedTracksSince(24 * 7, 500),
+  ]
+  return selectDiverseTracks(candidates, {
+    targetCount,
+    maxPerArtist: 1,
+    avoidArtists: recentArtistSet(),
+    excludeTracks: excluded,
+    allowAvoidedArtistFallback: true,
+  })
 }
 
 function getTimeLabel(): string {
@@ -79,7 +115,9 @@ function getSceneTransition(currentKey: SceneKey): string {
     : `${row.label} → ${currentKey}`
 }
 
-const SCENE_LINE_SYSTEM = `你是 Echo，用户的朋友。你正在帮 TA 开始一个听歌场景。
+const SCENE_LINE_SYSTEM = `${buildSoulPolicyPrompt('scene')}
+
+你是 Echo，用户的朋友。你正在帮 TA 开始一个听歌场景。
 
 要求：
 - 只说一句话，20 字左右，不超过 30 字
@@ -88,7 +126,7 @@ const SCENE_LINE_SYSTEM = `你是 Echo，用户的朋友。你正在帮 TA 开�
 - 不要用"接住""安排""安排上"这类套话
 - 直接输出那句话，不要解释，不要多余内容`
 
-async function generateSceneLine(scene: ActiveScene, first: Track): Promise<string | null> {
+async function generateSceneLine(scene: ActiveScene, first: Track, signal?: AbortSignal): Promise<string | null> {
   try {
     const settings = getSettings()
     if (!settings.llm.baseUrl || !settings.llm.apiKey || !settings.llm.model) return null
@@ -112,10 +150,10 @@ async function generateSceneLine(scene: ActiveScene, first: Track): Promise<stri
         { role: 'system', content: SCENE_LINE_SYSTEM },
         { role: 'user', content: lines.join('\n') },
       ],
-      { temperature: 0.7 },
+      { temperature: 0.7, signal },
     )
 
-    const trimmed = content.replace(/^[""「]|[""」]$/g, '').trim()
+    const trimmed = stripKnownSystemBlocks(content).replace(/^[""「]|[""」]$/g, '').trim()
     if (!trimmed) return null
     // 兜底截断：LLM 偶尔会啰嗦
     if (trimmed.length > 50) return trimmed.slice(0, 50)
@@ -143,21 +181,37 @@ function fallbackSceneLine(scene: ActiveScene, tracks: Track[]): string {
   return first ? template.withTrack(first.title) : template.noTrack
 }
 
-async function buildSceneChatLine(scene: ActiveScene, tracks: Track[]): Promise<string> {
+async function buildSceneChatLine(scene: ActiveScene, tracks: Track[], signal?: AbortSignal): Promise<string> {
   const first = tracks.find((track) => track.playUrl) ?? tracks[0]
-  const llmLine = first ? await generateSceneLine(scene, first) : null
+  const llmLine = first ? await generateSceneLine(scene, first, signal) : null
   return llmLine ?? fallbackSceneLine(scene, tracks)
 }
 
-export async function startScenePlayback(key: SceneKey, options: ScenePlaybackOptions = {}): Promise<ScenePlaybackResult> {
-  const scene = startScene(key)
+export async function startScenePlayback(key: SceneKey, options: ScenePlaybackOptions = {}, runtime: ScenePlaybackRuntimeOptions = {}): Promise<ScenePlaybackResult> {
+  assertScenePlaybackActive(runtime.signal)
+  const currentScene = options.continueSession ? getCurrentScene() : null
+  const scene = currentScene?.key === key ? currentScene : startScene(key)
   try {
-    const recommended = await recommendFromNetease(scene.prompt)
+    runtime.report?.({ phase: 'recommend', current: 1, total: 4, message: scene.label })
+    const targetCount = Math.max(1, Math.min(scene.targetCount, options.targetCount ?? scene.targetCount))
+    const recommended = await searchMusic({
+      query: scene.prompt,
+      mode: 'scene',
+      targetCount,
+      signal: runtime.signal,
+      onProgress: (patch) => runtime.report?.({
+        ...patch,
+        phase: patch.phase ? `recommend-${patch.phase}` : 'recommend',
+        current: 1,
+        total: 4,
+      }),
+    })
+    assertScenePlaybackActive(runtime.signal)
     if (isSuperseded(scene)) {
       return { scene, tracks: [], state: getState() }
     }
 
-    const tracks = attachScene(scene, recommended).slice(0, scene.targetCount)
+    const tracks = attachScene(scene, pickSceneTracks(recommended, targetCount))
     if (tracks.length === 0) {
       throw new Error('Echo 这次没找到能播的歌。')
     }
@@ -166,22 +220,25 @@ export async function startScenePlayback(key: SceneKey, options: ScenePlaybackOp
       return { scene, tracks: [], state: getState() }
     }
 
-    // LLM 生成开场白和播放并行执行
-    const chatLinePromise = options.appendChatMessage ? buildSceneChatLine(scene, tracks) : Promise.resolve('')
+    const first = tracks.find((track) => track.playUrl) ?? tracks[0]
+    runtime.report?.({ phase: 'play', current: 2, total: 4, message: `播放《${first.title}》` })
+    let state = await play(first)
+    assertScenePlaybackActive(runtime.signal)
+    if (isSuperseded(scene)) {
+      return { scene, tracks: [], state: getState() }
+    }
 
+    runtime.report?.({ phase: 'queue', current: 3, total: 4, message: `准备 ${tracks.length} 首场景歌曲` })
     clearQueue()
     skipTodayRecommendedTracks()
     appendRecommendedTracks(tracks)
+    markQueueStatus(first, 'playing')
 
     if (isSuperseded(scene)) {
       return { scene, tracks: [], state: getState() }
     }
 
-    const first = tracks.find((track) => track.playUrl) ?? tracks[0]
-    let state = await play(first)
-    if (isSuperseded(scene)) {
-      return { scene, tracks: [], state: getState() }
-    }
+    const chatLinePromise = options.appendChatMessage ? buildSceneChatLine(scene, tracks, runtime.signal) : Promise.resolve('')
 
     const firstKey = trackKey(first)
     const seen = new Set<string>([firstKey])
@@ -206,7 +263,10 @@ export async function startScenePlayback(key: SceneKey, options: ScenePlaybackOp
     }
 
     const chatLine = await chatLinePromise
+    assertScenePlaybackActive(runtime.signal)
+    runtime.report?.({ phase: 'chat-line', current: 4, total: 4, message: scene.label })
     const message = options.appendChatMessage ? appendConversation('assistant', chatLine, tracks) : undefined
+    if (message) broadcastChatMessage(message)
     return { scene, tracks, state, message }
   } catch (error) {
     if (isSceneSessionCurrent(scene.id)) endCurrentScene()

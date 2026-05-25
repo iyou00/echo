@@ -12,6 +12,7 @@ import {
   prev,
   refreshUrl,
   removeFromQueue,
+  removeTrackFromQueue,
   reorderQueue,
   resume,
   seek,
@@ -30,6 +31,7 @@ export function registerPlaybackIpc(): void {
   ipcMain.handle('playback:getVolume', () => getVolume())
   ipcMain.handle('playback:seek', (_event, positionMs: number) => seek(positionMs))
   ipcMain.handle('playback:removeFromQueue', (_event, index: number) => removeFromQueue(index))
+  ipcMain.handle('playback:removeTrackFromQueue', (_event, track) => removeTrackFromQueue(track))
   ipcMain.handle('playback:clearQueue', () => clearQueue())
   ipcMain.handle('playback:reorderQueue', (_event, fromIndex: number, toIndex: number) => reorderQueue(fromIndex, toIndex))
   ipcMain.handle('playback:heartbeat', (_event, state) => heartbeat(state))

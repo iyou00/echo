@@ -1,14 +1,15 @@
 import type { Track } from '../../types/ipc'
 import type { QueueHistoryDay } from '../../types/ipc'
+import { trackIdentity } from '../../shared/trackIdentity'
 import { hideRecommendedTrackHistoryDates, loadRecentTracks, loadRecommendedTrackHistory, updateRecommendedTrackStatus } from '../db/tracks'
 
 function trackKey(track: Track): string {
-  return `${track.title.trim().toLowerCase()}::${track.artist.trim().toLowerCase()}`
+  return trackIdentity(track)
 }
 
 export function getQueue(limit = 30): Track[] {
   const seen = new Set<string>()
-  const tracks = loadRecentTracks(limit)
+  const tracks = loadRecentTracks(limit * 4)
   const queue: Track[] = []
 
   for (const track of tracks) {

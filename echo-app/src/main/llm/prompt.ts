@@ -10,6 +10,9 @@ import { readRootFile } from '../utils/paths'
 import { getMostRecentSeal } from '../services/daySeal'
 import { buildTodayMusicSessionSummary } from '../services/musicSession'
 import { buildCurrentSceneContext, buildTodaySceneContext } from '../services/scene'
+import { buildMemoryEvidencePrompt } from '../services/memoryEvidence'
+import { buildSoulPolicyPrompt } from '../skills/soul/policy'
+import { memoryPolicySummary } from '../skills/memory/policy'
 
 export interface ChatContextOptions {
   recommendationCandidates?: Track[]
@@ -57,14 +60,35 @@ ${formatCandidates(candidates)}
 </taste_curiosity>`
     : ''
 
+  const chatContract = [
+    '输出像即时聊天,保持短句。',
+    '画像、记忆、候选来源和策略只用于内部判断,不要直接说给用户。',
+    '不要 Markdown、加粗、标题、编号或列表。',
+    '不要用“收到”做默认开头。',
+    '有 recommendation_candidates 时,只说候选里的歌名和艺人。',
+    '没有候选时不要编歌名。',
+  ].map((line) => `- ${line}`).join('\n')
+
   const messages: LlmMessage[] = [
     {
       role: 'system',
-      content: `${system}
+      content: `${buildSoulPolicyPrompt('chat')}
+
+${system}
+
+<chat_output_contract>
+${chatContract}
+</chat_output_contract>
 
 <taste_profile_summary>
 ${profile?.echo_portrait ?? '用户还没有导入歌单，Echo 对 Ta 的品味只有很少线索。'}
 </taste_profile_summary>
+
+<memory_policy>
+${memoryPolicySummary()}
+</memory_policy>
+
+${buildMemoryEvidencePrompt(profile)}
 
 <current_context>
 - 当前时间:${(() => { const n = new Date(); const w = ['周日','周一','周二','周三','周四','周五','周六']; return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')} ${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')} ${w[n.getDay()]}` })()}
@@ -103,7 +127,7 @@ export function buildYinyiContext(date: string, weatherSummary?: string): LlmMes
     : Math.max(1, Math.ceil((Date.now() - firstUsedAt.getTime()) / 86400000))
 
   return [
-    { role: 'system', content: prompt },
+    { role: 'system', content: `${buildSoulPolicyPrompt('yinyi')}\n\n${prompt}` },
     {
       role: 'user',
       content: `<date>${date}</date>
@@ -144,6 +168,12 @@ ${todaySceneContext}
 ${profile?.echo_portrait ?? '还没有完整画像。'}
 </taste_profile_summary>
 
+<memory_policy>
+${memoryPolicySummary()}
+</memory_policy>
+
+${buildMemoryEvidencePrompt(profile)}
+
 <recent_yinyi>
 ${recentYinyi.length > 0 ? recentYinyi.map((entry) => {
   const raw = entry.content.split(/[。！？\n]/).filter(Boolean).slice(0, 2).join('。')
@@ -162,6 +192,8 @@ ${recentYinyi.length > 0 ? recentYinyi.map((entry) => {
 只输出风信正文。2-4 段,自然分段即可。
 不要标题,不要 bullet,不要 Markdown,不要解释。
 如果今日素材很少,写短一点。
+记忆只用于校准判断边界,不要复述“我记得你纠正过我”。
+把单日行为写成今天的状态,把多日重复和明确反馈写成稳定倾向。
 </output_contract>`,
     },
   ]

@@ -36,6 +36,36 @@ export type OnboardingStep = 'playlist' | 'done'
 export type AppPageKey = 'chat' | 'profile' | 'yinyi' | 'voice' | 'queue' | 'settings'
 export type ServiceHealthKind = 'llm' | 'netease' | 'tts' | 'weather' | 'scheduler' | 'storage'
 export type ServiceHealthStatus = 'ok' | 'degraded' | 'error' | 'unknown'
+export type RuntimeTaskStatus = 'running' | 'succeeded' | 'failed' | 'canceled'
+export type RuntimeErrorKind = 'config' | 'network' | 'auth' | 'rate_limit' | 'server' | 'timeout' | 'canceled' | 'unknown'
+export const RUNTIME_TASK_RECENT_LIMIT = 50
+
+export interface RuntimeTaskSnapshot {
+  id: string
+  parentTaskId?: string
+  kind: string
+  status: RuntimeTaskStatus
+  phase: string
+  current: number
+  total: number
+  startedAt: string
+  updatedAt: string
+  finishedAt?: string
+  sourceName?: string
+  message?: string
+  error?: string
+  errorKind?: RuntimeErrorKind
+  cancellable: boolean
+}
+
+export interface RuntimeEvent {
+  id: string
+  taskId?: string
+  kind: string
+  channel: string
+  payload: unknown
+  createdAt: string
+}
 
 export interface ServiceHealth {
   service: ServiceHealthKind
@@ -123,6 +153,8 @@ export interface ScenePlaybackResult {
 
 export interface ScenePlaybackOptions {
   appendChatMessage?: boolean
+  continueSession?: boolean
+  targetCount?: number
 }
 
 export interface SemanticSummary {
@@ -199,6 +231,12 @@ export interface QueueHistoryDay {
   tracks: Track[]
 }
 
+export interface FavoriteListOptions {
+  limit?: number
+  offset?: number
+  query?: string
+}
+
 export interface ChatMessage {
   id: number
   role: Role
@@ -236,6 +274,39 @@ export interface TasteQuestion {
   status: 'pending' | 'answered' | 'skipped' | 'expired'
   answered_content?: string
   context?: Record<string, unknown>
+}
+
+export type MemoryAuditKind =
+  | 'correction'
+  | 'favorite'
+  | 'loop'
+  | 'played'
+  | 'skip'
+  | 'explicit_like'
+  | 'explicit_miss'
+
+export interface MemoryAuditItem {
+  id: string
+  kind: MemoryAuditKind
+  label: string
+  title: string
+  detail?: string
+  createdAt?: string
+  track?: Track
+  weight?: number
+}
+
+export interface MemoryAuditSummary {
+  updatedAt: string
+  counts: {
+    corrections: number
+    favorites: number
+    explicitLikes: number
+    explicitMisses: number
+    loops: number
+    repeatedSkips: number
+  }
+  items: MemoryAuditItem[]
 }
 
 export interface Settings {
@@ -297,6 +368,12 @@ export interface YinyiEntry {
     tracks?: Track[]
     status?: 'ok' | 'absent' | 'failed'
     error?: string
+    word_count?: number
+    conversations_count?: number
+    duration_ms?: number
+    model?: string
+    fallback?: boolean
+    fallback_error?: string
   }
   createdAt?: string
 }
@@ -362,6 +439,13 @@ export interface VoiceLine {
 }
 
 export interface EchoApi {
+  runtime: {
+    getTask(id: string): Promise<RuntimeTaskSnapshot | null>
+    getRecentTasks(): Promise<RuntimeTaskSnapshot[]>
+    cancelTask(id: string): Promise<{ ok: boolean }>
+    onTaskChanged(listener: (snapshot: RuntimeTaskSnapshot) => void): () => void
+    onEvent(listener: (event: RuntimeEvent) => void): () => void
+  }
   settings: {
     get(): Promise<Settings>
     update(path: string, value: unknown): Promise<Settings>
@@ -388,8 +472,10 @@ export interface EchoApi {
   }
   taste: {
     getProfile(): Promise<{ profile: TasteProfile | null; questions: TasteQuestion[] }>
+    getMemoryAudit(): Promise<MemoryAuditSummary>
     regeneratePortrait(): Promise<TasteProfile | null>
     applySignal(kind: string, payload: Record<string, unknown>): Promise<TasteProfile | null>
+    correctMemory(note: string): Promise<{ ok: boolean; message: string }>
     answerQuestion(id: number, answer: string): Promise<{ ok: boolean }>
   }
   yinyi: {
@@ -406,9 +492,12 @@ export interface EchoApi {
     markStatus(track: Track, status: Track['queueStatus']): Promise<Track[]>
   }
   favorites: {
-    list(): Promise<Track[]>
+    list(options?: FavoriteListOptions): Promise<Track[]>
+    count(query?: string): Promise<number>
+    listKeys(): Promise<string[]>
     toggle(track: Track): Promise<{ favorited: boolean; favorites: Track[] }>
     isFavorite(track: Track): Promise<boolean>
+    onChanged(listener: (payload: { track: Track; favorited: boolean; total: number }) => void): () => void
   }
   feedback: {
     record(track: Track, action: ExplicitTrackFeedbackAction, context?: string): Promise<{ ok: boolean; message: string }>
@@ -446,6 +535,7 @@ export interface EchoApi {
     getVolume(): Promise<number>
     seek(positionMs: number): Promise<PlaybackState>
     removeFromQueue(index: number): Promise<PlaybackState>
+    removeTrackFromQueue(track: Track): Promise<PlaybackState>
     clearQueue(): Promise<PlaybackState>
     reorderQueue(fromIndex: number, toIndex: number): Promise<PlaybackState>
     heartbeat(state: PlaybackHeartbeat): Promise<PlaybackState>

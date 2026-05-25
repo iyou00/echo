@@ -1,5 +1,6 @@
 import type { Track } from '../../types/ipc'
 import type { ExplicitTrackFeedbackAction } from '../../types/ipc'
+import { trackIdentity } from '../../shared/trackIdentity'
 import { clearRecommendationCache } from './recommendationCache'
 import { getDb } from './index'
 
@@ -26,11 +27,7 @@ export interface ExplicitTrackFeedback {
 }
 
 export function feedbackTrackKey(track: Track): string {
-  const neteaseId = String(track.neteaseId ?? '').trim()
-  if (neteaseId) return `netease:${neteaseId}`
-  const id = String(track.id ?? '').trim()
-  if (id) return `id:${id}`
-  return `name:${track.title.trim().toLowerCase()}::${track.artist.trim().toLowerCase()}`
+  return trackIdentity(track)
 }
 
 function weightedScore(row: { play_count: number; skip_count: number; loop_count: number; favorite_count: number; last_completion?: number | null }): number {

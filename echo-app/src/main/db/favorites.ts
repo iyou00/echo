@@ -1,12 +1,10 @@
 import type { Track } from '../../types/ipc'
+import type { FavoriteListOptions } from '../../types/ipc'
+import { trackIdentity } from '../../shared/trackIdentity'
 import { getDb } from './index'
 
 export function favoriteTrackKey(track: Track): string {
-  const neteaseId = String(track.neteaseId ?? '').trim()
-  if (neteaseId) return `netease:${neteaseId}`
-  const id = String(track.id ?? '').trim()
-  if (id) return `id:${id}`
-  return `name:${track.title.trim().toLowerCase()}::${track.artist.trim().toLowerCase()}`
+  return trackIdentity(track)
 }
 
 function toTrack(row: { track_json: string }): Track {
@@ -16,16 +14,60 @@ function toTrack(row: { track_json: string }): Track {
   }
 }
 
-export function listFavoriteTracks(): Track[] {
+export function listFavoriteTracks(options: FavoriteListOptions = {}): Track[] {
+  const limit = Math.max(1, Math.min(200, Math.floor(options.limit ?? 200)))
+  const offset = Math.max(0, Math.floor(options.offset ?? 0))
+  const query = options.query?.trim()
+  const rows = query
+    ? getDb()
+      .prepare(
+        `SELECT track_json
+         FROM favorite_tracks
+         WHERE user_id = 1
+           AND (title LIKE ? OR artist LIKE ? OR album LIKE ?)
+         ORDER BY favorited_at DESC, id DESC
+         LIMIT ? OFFSET ?`,
+      )
+      .all(`%${query}%`, `%${query}%`, `%${query}%`, limit, offset) as Array<{ track_json: string }>
+    : getDb()
+      .prepare(
+        `SELECT track_json
+         FROM favorite_tracks
+         WHERE user_id = 1
+         ORDER BY favorited_at DESC, id DESC
+         LIMIT ? OFFSET ?`,
+      )
+      .all(limit, offset) as Array<{ track_json: string }>
+  return rows.map(toTrack)
+}
+
+export function countFavoriteTracks(query?: string): number {
+  const normalized = query?.trim()
+  const row = normalized
+    ? getDb()
+      .prepare(
+        `SELECT COUNT(*) AS count
+         FROM favorite_tracks
+         WHERE user_id = 1
+           AND (title LIKE ? OR artist LIKE ? OR album LIKE ?)`,
+      )
+      .get(`%${normalized}%`, `%${normalized}%`, `%${normalized}%`) as { count: number }
+    : getDb()
+      .prepare('SELECT COUNT(*) AS count FROM favorite_tracks WHERE user_id = 1')
+      .get() as { count: number }
+  return row.count
+}
+
+export function listFavoriteTrackKeys(): string[] {
   const rows = getDb()
     .prepare(
-      `SELECT track_json
+      `SELECT track_key
        FROM favorite_tracks
        WHERE user_id = 1
        ORDER BY favorited_at DESC, id DESC`,
     )
-    .all() as Array<{ track_json: string }>
-  return rows.map(toTrack)
+    .all() as Array<{ track_key: string }>
+  return rows.map((row) => row.track_key)
 }
 
 export function isFavoriteTrack(track: Track): boolean {

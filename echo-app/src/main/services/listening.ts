@@ -1,23 +1,52 @@
 import type { Track } from '../../types/ipc'
 import { loadRecentConversations } from '../db/conversations'
-import { appendRecommendedTracks, loadListenedTracksSince, loadRecentRecommendedTracks } from '../db/tracks'
+import { appendRecommendedTracks, loadListenedTracksSince, loadRecentRecommendedTracks, loadRecentTracks } from '../db/tracks'
 import { getAllImportedTracks } from '../db/playlists'
 import { getTasteProfile } from '../db/taste'
 import { getSettings } from '../db/settings'
 import { getTrackSemantic } from '../db/semantics'
 import { completeChat, LlmError } from '../llm/client'
+import { stripKnownSystemBlocks } from '../llm/outputSanitize'
 import { filterPlayableTracks } from '../netease/music'
 import { synthesize } from '../tts/client'
 import { readRootFile } from '../utils/paths'
 import { getMostRecentSeal } from './daySeal'
 import { getWeather } from '../weather/client'
 import { recordHealth } from './health'
-import { recommendFromNetease } from './recommendation'
 import { inferTrackSemanticFallback } from './semantics'
+import { chineseDayPeriodLabel } from '../../shared/dayPeriod'
+import {
+  diversifyByArtist,
+  hasTrackIdentity,
+  primaryArtist,
+  trackIdentityKeys,
+  trackIdentitySet,
+  uniqueTracks,
+} from '../skills/music/identity'
+import { searchMusic } from '../skills/music/search'
+import { buildSoulPolicyPrompt } from '../skills/soul/policy'
 
 interface ListeningText {
   text?: string
   selectedIndex?: number
+}
+
+export interface ListeningSegmentOptions {
+  continuation?: boolean
+  signal?: AbortSignal
+  onProgress?: (patch: { phase?: string; current?: number; total?: number; message?: string }) => void
+}
+
+export type ListeningSegmentResult = {
+  text: string
+  track: Track | null
+  audioUrl?: string
+  error?: string
+  generatedAt: string
+}
+
+function assertListeningActive(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException('任务已取消', 'AbortError')
 }
 
 const recentScenarios: string[] = []
@@ -31,45 +60,29 @@ interface SegmentSemantic {
   artist: string
 }
 
+type VoiceMomentState =
+  | 'fresh_install'
+  | 'post_import_first_use'
+  | 'daily_first'
+  | 'after_tracks'
+  | 'continuation'
+  | 'emotion_context'
+
+interface VoiceMoment {
+  state: VoiceMomentState
+  reason: string
+  playedToday: number
+  importedTrackCount: number
+  hasRecommendationHistory: boolean
+  hasTasteProfile: boolean
+  isContinuation: boolean
+  suggestedLength: string
+}
+
 const recentSegmentSemantics: SegmentSemantic[] = []
 const recentArtists: string[] = []
 
 let lastConversationFingerprint = ''
-
-function primaryArtist(artist: string): string {
-  return artist.split(/[/、,，&＋+]| feat\.?| ft\.?| and /i)[0]?.trim().toLowerCase() ?? artist.trim().toLowerCase()
-}
-
-function trackKey(track: Track): string {
-  return String(track.neteaseId ?? track.id ?? `${track.title}::${track.artist}`).toLowerCase()
-}
-
-function nameTrackKey(track: Track): string {
-  return `name:${compactText(track.title)}::${compactText(track.artist)}`
-}
-
-function trackIdentityKeys(track: Track): string[] {
-  const keys = new Set<string>()
-  const neteaseId = String(track.neteaseId ?? '').trim()
-  const id = String(track.id ?? '').trim()
-  if (neteaseId) keys.add(`netease:${neteaseId}`)
-  if (id) keys.add(`id:${id}`)
-  keys.add(nameTrackKey(track))
-  keys.add(trackKey(track))
-  return Array.from(keys).filter(Boolean)
-}
-
-function trackIdentitySet(tracks: Track[]): Set<string> {
-  const keys = new Set<string>()
-  for (const track of tracks) {
-    for (const key of trackIdentityKeys(track)) keys.add(key)
-  }
-  return keys
-}
-
-function hasTrackIdentity(keys: Set<string>, track: Track): boolean {
-  return trackIdentityKeys(track).some((key) => keys.has(key))
-}
 
 function recentBlockedKeys(): Set<string> {
   const keys = trackIdentitySet([
@@ -124,7 +137,7 @@ function parseJsonObject(content: string): ListeningText | null {
 }
 
 function normalizeText(content: string): string {
-  return content
+  return stripKnownSystemBlocks(content)
     .replace(/```[\s\S]*?```/g, (block) => block.replace(/```[a-z]*|```/gi, ''))
     .split(/\r?\n/)
     .map((line) => line.trim().replace(/^>\s*/, ''))
@@ -137,10 +150,33 @@ function normalizeText(content: string): string {
 
 function limitText(text: string): string {
   const trimmed = normalizeText(text)
-  if (trimmed.length <= 220) return trimmed
-  const sliced = trimmed.slice(0, 220)
+  if (trimmed.length <= 180) return trimmed
+  const sliced = trimmed.slice(0, 180)
   const lastStop = Math.max(sliced.lastIndexOf('。'), sliced.lastIndexOf('，'), sliced.lastIndexOf('、'), sliced.lastIndexOf('——'))
-  return sliced.slice(0, lastStop > 120 ? lastStop + 1 : 220).trim()
+  return sliced.slice(0, lastStop > 90 ? lastStop + 1 : 180).trim()
+}
+
+const BANNED_LISTENING_TEXT_PATTERN = /我给你接上|给你安排|安排上|给你放一首|稳稳的|接住|撑住|沉淀|治愈的力量|完全理解你的心情|根据你的画像|根据你的轨迹|根据你的数据|太满|太猛|上头|燃爆|往里收|松开一点|空间感|音乐颜色|声音质地|情绪流动|拉你回来|缓一会儿|放下来/
+
+function sentenceCount(text: string): number {
+  return text
+    .split(/[。！？!?]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .length
+}
+
+function hasListeningTextQuality(text: string): boolean {
+  const compact = text.replace(/\s+/g, '')
+  if (compact.length < 18 || compact.length > 180) return false
+  if (sentenceCount(text) > 4) return false
+  const firstTitleIndex = text.indexOf('《')
+  if (firstTitleIndex < 0 || firstTitleIndex > 90) return false
+  if (!text.includes('我') && !text.includes('你')) return false
+  if (/(总的来说|由此可见|为您|用户|画像|轨迹|轮廓|数据|算法|记忆策略|纠正过|说明你|你其实|你总是|你一直|人格|诊断|标签)/.test(text)) return false
+  if (BANNED_LISTENING_TEXT_PATTERN.test(text)) return false
+  if (/[-*#]|^\d+[\.、]/m.test(text)) return false
+  return true
 }
 
 function compactText(value: string): string {
@@ -162,8 +198,8 @@ function songLabel(track: Track): string {
 }
 
 function replaceSongSentence(text: string, track: Track): string {
-  const next = text.replace(/[^。！？!?\n]*《[^》]+》[^。！？!?\n]*(?:[。！？!?]|$)/, `我给你接上${songLabel(track)}。`)
-  return next === text ? `${text.replace(/[。！？!?]*$/, '').trim()}。我给你接上${songLabel(track)}。` : next.trim()
+  const next = text.replace(/[^。！？!?\n]*《[^》]+》[^。！？!?\n]*(?:[。！？!?]|$)/, `那就听${songLabel(track)}。`)
+  return next === text ? `${text.replace(/[。！？!?]*$/, '').trim()}。那就听${songLabel(track)}。` : next.trim()
 }
 
 function quotedTitles(text: string): string[] {
@@ -210,7 +246,7 @@ function alignTextToTrack(text: string, track: Track | null): string {
     return replaceSongSentence(aligned, track)
   }
   const trimmed = aligned.replace(/[。！？!?]*$/, '').trim()
-  return `${trimmed}。我给你接上${songLabel(track)}。`
+  return `${trimmed}。那就听${songLabel(track)}。`
 }
 
 function formatConversationTime(createdAt?: string) {
@@ -221,22 +257,21 @@ function formatConversationTime(createdAt?: string) {
 }
 
 function fallbackText(track: Track | null): string {
-  const hour = new Date().getHours()
-  const time = hour < 11 ? '早上' : hour < 18 ? '下午' : '晚上'
-  if (!track) return `${time}好。我先不急着推歌，你先听点什么，或者跟我聊两句，我慢慢跟上你的节奏。`
+  const time = chineseDayPeriodLabel()
+  if (!track) return `${time}好。我先不急着推歌。你可以先听点什么，或者跟我聊两句，我慢慢记住你的习惯。`
   const profile = getTasteProfile()
   const topArtist = profile?.artists?.[0]?.name
   const variants = [
-    `${time}这个点,我猜你可能只是想让旁边有点声音。我也没打算讲大道理,就给你接一首${track.artist}的《${track.title}》。它不会太抢,先垫着,你手上的事可以慢慢做。`,
-    `我刚刚在想,你这会儿点回声,大概不是想听我分析什么,就是想有个人先开个头。那我给你放${track.artist}的《${track.title}》,旋律先进来,你跟着缓一会儿。`,
-    `现在这个点挺适合换一口气。你不用马上进入什么状态,先听${track.artist}的《${track.title}》。这首入口轻,能把刚才那点绷着的感觉慢慢放下来。`,
-    `${time}了,${topArtist ? `你之前听过不少${topArtist}的歌,` : ''}我猜这会儿需要的是一首不那么抢的歌。${track.artist}的《${track.title}》刚好,先让它走一遍。`,
-    `这会儿没什么特别要做的对吧。我给你放${track.artist}的《${track.title}》,旋律进去以后,手上的事可以慢一点做。`,
+    `${time}这个点，我想到${track.artist}的《${track.title}》。这首开头比较好进，声音可以开小一点。你先听半分钟。`,
+    `我刚刚在想，先试试${track.artist}的《${track.title}》。它开头不吵，放着做点别的也行。不合适我再换。`,
+    `现在先放${track.artist}的《${track.title}》吧。你不用认真听，等副歌出来再说。`,
+    `${time}了，${topArtist ? `你之前听过不少${topArtist}，` : ''}这次换到${track.artist}的《${track.title}》。先听半分钟，不合适我再换。`,
+    `这会儿先听${track.artist}的《${track.title}》。声音可以开小一点，手上的事慢慢做。`,
   ]
   return variants[Math.floor(Math.random() * variants.length)]
 }
 
-async function getFallbackCandidates(): Promise<Track[]> {
+async function getFallbackCandidates(signal?: AbortSignal): Promise<Track[]> {
   const imported = getAllImportedTracks()
   const blocked = recentBlockedKeys()
   const fresh = imported.filter((track) => !hasTrackIdentity(blocked, track))
@@ -247,28 +282,7 @@ async function getFallbackCandidates(): Promise<Track[]> {
     pool = relaxed.length >= fresh.length ? relaxed : imported
   }
   const candidates = shuffled(pool).slice(0, 24)
-  return filterPlayableTracks(candidates, 5)
-}
-
-function diversifyCandidatesByArtist(candidates: Track[], maxPerArtist: number): Track[] {
-  const artistCounts = new Map<string, number>()
-  return candidates.filter((track) => {
-    const key = primaryArtist(track.artist)
-    const count = artistCounts.get(key) ?? 0
-    if (count >= maxPerArtist) return false
-    artistCounts.set(key, count + 1)
-    return true
-  })
-}
-
-function uniqueTracksByKey(tracks: Track[]): Track[] {
-  const seen = new Set<string>()
-  return tracks.filter((track) => {
-    const key = trackKey(track)
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
+  return filterPlayableTracks(candidates, 5, signal)
 }
 
 const DIVERSITY_DIMENSIONS = [
@@ -290,21 +304,139 @@ function pickUncoveredDimension(): string {
   return pick.keywords[Math.floor(Math.random() * pick.keywords.length)]
 }
 
-async function getCandidates(continuation?: boolean): Promise<Track[]> {
+async function getCandidates(continuation?: boolean, signal?: AbortSignal): Promise<Track[]> {
   const blocked = recentBlockedKeys()
   const query = continuation && recentSegmentSemantics.length > 0
     ? `回声里给我一首${pickUncoveredDimension()}的、适合现在听的歌`
     : '回声里随机给我一首适合现在听的歌'
-  const fromNetease = await recommendFromNetease(query, undefined, { ignoreScene: true, candidateCount: 8 }).catch(() => [])
+  const fromNetease = await searchMusic({ query, mode: 'voice', signal }).catch(() => [])
+  assertListeningActive(signal)
   const fresh = fromNetease.filter((track) => !hasTrackIdentity(blocked, track))
-  const diversified = diversifyCandidatesByArtist(fresh, 2)
+  const diversified = diversifyByArtist(fresh, 2)
   if (diversified.length >= 3) return diversified.slice(0, 5)
-  const fallback = await getFallbackCandidates()
-  const mixed = diversifyCandidatesByArtist(uniqueTracksByKey([...diversified, ...fallback.filter((t) => !hasTrackIdentity(blocked, t))]), 2)
+  const fallback = await getFallbackCandidates(signal)
+  const mixed = diversifyByArtist(uniqueTracks([...diversified, ...fallback.filter((t) => !hasTrackIdentity(blocked, t))]), 2)
   return mixed.slice(0, 5)
 }
 
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+
+function stripQuotedSongTitles(text: string): string {
+  return text.replace(/《[^》]+》/g, '')
+}
+
+function hasEmotionConversation(conversations: ReturnType<typeof loadRecentConversations>): boolean {
+  const emotionPattern = /有点冷|觉得冷|身上冷|心里冷|好冷|太冷|冷得|好累|有点累|累了|累死|很累|疲惫|困了|睡不着|失眠|很烦|有点烦|烦躁|焦虑|压力|压抑|难过|伤心|想哭|emo|不舒服|开心|兴奋/i
+  return conversations.some((item) => {
+    const content = stripQuotedSongTitles(item.content)
+    if (!emotionPattern.test(content)) return false
+    if (/冷夜|冷门|冷色|冷感|冷歌/.test(content)) return false
+    return true
+  })
+}
+
+function buildVoiceMoment(input: {
+  continuation?: boolean
+  conversations: ReturnType<typeof loadRecentConversations>
+  profile: ReturnType<typeof getTasteProfile>
+  importedTrackCount: number
+  playedToday: number
+  hasRecommendationHistory: boolean
+}): VoiceMoment {
+  const hasTasteProfile = Boolean(input.profile?.echo_portrait || input.profile?.artists?.length || input.profile?.moods?.length)
+  if (input.continuation) {
+    return {
+      state: 'continuation',
+      reason: '用户正在连续点击回声',
+      playedToday: input.playedToday,
+      importedTrackCount: input.importedTrackCount,
+      hasRecommendationHistory: input.hasRecommendationHistory,
+      hasTasteProfile,
+      isContinuation: true,
+      suggestedLength: '70-110',
+    }
+  }
+  if (hasEmotionConversation(input.conversations)) {
+    return {
+      state: 'emotion_context',
+      reason: '最近对话里有明确情绪线索',
+      playedToday: input.playedToday,
+      importedTrackCount: input.importedTrackCount,
+      hasRecommendationHistory: input.hasRecommendationHistory,
+      hasTasteProfile,
+      isContinuation: false,
+      suggestedLength: '80-140',
+    }
+  }
+  if (input.importedTrackCount === 0 && !hasTasteProfile) {
+    return {
+      state: 'fresh_install',
+      reason: '还没有导入歌单和稳定画像',
+      playedToday: input.playedToday,
+      importedTrackCount: input.importedTrackCount,
+      hasRecommendationHistory: input.hasRecommendationHistory,
+      hasTasteProfile,
+      isContinuation: false,
+      suggestedLength: '60-100',
+    }
+  }
+  if (input.importedTrackCount > 0 && !input.hasRecommendationHistory) {
+    return {
+      state: 'post_import_first_use',
+      reason: '已有导入歌单，还没有回声推荐历史',
+      playedToday: input.playedToday,
+      importedTrackCount: input.importedTrackCount,
+      hasRecommendationHistory: input.hasRecommendationHistory,
+      hasTasteProfile,
+      isContinuation: false,
+      suggestedLength: '80-120',
+    }
+  }
+  if (input.playedToday === 0) {
+    return {
+      state: 'daily_first',
+      reason: '今天第一次打开回声',
+      playedToday: input.playedToday,
+      importedTrackCount: input.importedTrackCount,
+      hasRecommendationHistory: input.hasRecommendationHistory,
+      hasTasteProfile,
+      isContinuation: false,
+      suggestedLength: '70-120',
+    }
+  }
+  return {
+    state: 'after_tracks',
+    reason: '今天已经有播放中的或听完的歌曲',
+    playedToday: input.playedToday,
+    importedTrackCount: input.importedTrackCount,
+    hasRecommendationHistory: input.hasRecommendationHistory,
+    hasTasteProfile,
+    isContinuation: false,
+    suggestedLength: '80-130',
+  }
+}
+
+function formatVoiceMoment(moment: VoiceMoment): string {
+  return `state: ${moment.state}
+reason: ${moment.reason}
+playedToday: ${moment.playedToday}
+importedTrackCount: ${moment.importedTrackCount}
+hasRecommendationHistory: ${moment.hasRecommendationHistory ? 'true' : 'false'}
+hasTasteProfile: ${moment.hasTasteProfile ? 'true' : 'false'}
+isContinuation: ${moment.isContinuation ? 'true' : 'false'}
+suggestedLength: ${moment.suggestedLength}`
+}
+
+function buildVoiceMemoryHints(profile: ReturnType<typeof getTasteProfile>): string {
+  if (!profile) return '(暂无)'
+  const artists = profile.artists?.slice(0, 3).map((item) => item.name).filter(Boolean) ?? []
+  const moods = profile.moods?.slice(0, 3).map((item) => item.tag).filter(Boolean) ?? []
+  const lines = [
+    artists.length > 0 ? `常见艺人线索: ${artists.join('、')}` : '',
+    moods.length > 0 ? `常见听感线索: ${moods.join('、')}` : '',
+  ].filter(Boolean)
+  return lines.length > 0 ? lines.join('\n') : '(暂无)'
+}
 
 function buildContext(input: {
   generatedAt: string
@@ -313,6 +445,7 @@ function buildContext(input: {
   seal: string
   profile: ReturnType<typeof getTasteProfile>
   candidates: Track[]
+  voiceMoment: VoiceMoment
   continuation?: boolean
 }) {
   const now = new Date(input.generatedAt)
@@ -329,13 +462,7 @@ function buildContext(input: {
   const recentSegments = recentScenarios.length > 0
     ? recentScenarios.map((item, index) => `- S${index + 1}: ${item}`).join('\n')
     : '(暂无)'
-  const tasteSignals = input.profile
-    ? [
-      input.profile.echo_portrait,
-      input.profile.moods?.slice(0, 4).map((item) => `${item.tag} ${Math.round(item.frequency * 100)}%`).join(' / '),
-      input.profile.artists?.slice(0, 5).map((item) => `${item.name} affinity ${Math.round(item.affinity * 100)}%`).join(' / '),
-    ].filter(Boolean).join('\n')
-    : '(暂无)'
+  const tasteSignals = buildVoiceMemoryHints(input.profile)
 
   const continuationBlock = input.continuation && recentScenarios.length > 0
     ? `
@@ -359,7 +486,11 @@ ${new Set(recentArtists.slice(0, 3)).size < 3 ? '你已经连续推荐了同一�
 </continuation>`
     : ''
 
-  return `<current_time>${currentTime}</current_time>
+  return `<voice_moment>
+${formatVoiceMoment(input.voiceMoment)}
+</voice_moment>
+
+<current_time>${currentTime}</current_time>
 
 <weather>${input.weatherSummary ?? '未知'}</weather>
 
@@ -385,14 +516,19 @@ ${input.candidates.map((item, index) => `- C${index + 1}: ${item.artist} / ${ite
 
 <output_contract>
 只输出最终要朗读的一段话。不要 JSON,不要 Markdown,不要编号,不要解释。
-必须从 candidates 里选一首,并在文案里写成《歌名》。
+必须从 candidates 里选一首,并在前两句写成《歌名》。
+整体 70-160 字,最多 4 句。TTS 开头不要空转。
+记忆只用于挑歌和语气边界,不要说画像、轨迹、数据、纠正、策略。
+像朋友临时发来一段语音,少下结论,多给一个具体听法。
 </output_contract>`
 }
 
-export async function generateListeningSegment(options?: { continuation?: boolean }): Promise<{ text: string; track: Track | null; audioUrl?: string; error?: string; generatedAt: string }> {
+export async function generateListeningSegment(options: ListeningSegmentOptions = {}): Promise<ListeningSegmentResult> {
+  assertListeningActive(options.signal)
   const generatedAt = new Date().toISOString()
   const settings = getSettings()
   const limit = options?.continuation ? 2 : 5
+  options.onProgress?.({ phase: 'context', current: 1, total: 4, message: '整理回声上下文' })
   const conversations = loadRecentConversations(limit)
   if (options?.continuation && conversations.length > 0) {
     const fp = String(conversations[conversations.length - 1].id ?? '')
@@ -403,9 +539,23 @@ export async function generateListeningSegment(options?: { continuation?: boolea
   }
   const seal = getMostRecentSeal()
   const profile = getTasteProfile()
-  const weather = await getWeather(settings.user.city)
-  const candidates = await getCandidates(options?.continuation)
-  const prompt = readRootFile('prompts/scenario-100.md')
+  const importedTrackCount = getAllImportedTracks().length
+  const playedToday = loadRecentTracks(40).filter((track) => track.queueStatus === 'playing' || track.queueStatus === 'completed').length
+  const hasRecommendationHistory = loadRecentRecommendedTracks(1).length > 0
+  const voiceMoment = buildVoiceMoment({
+    continuation: options?.continuation,
+    conversations,
+    profile,
+    importedTrackCount,
+    playedToday,
+    hasRecommendationHistory,
+  })
+  const weather = await getWeather(settings.user.city, { signal: options.signal })
+  assertListeningActive(options.signal)
+  options.onProgress?.({ phase: 'candidates', current: 2, total: 4, message: '挑选回声歌曲' })
+  const candidates = await getCandidates(options?.continuation, options.signal)
+  const prompt = `${buildSoulPolicyPrompt('voice')}\n\n${readRootFile('prompts/scenario-100.md')}`
+  const context = buildContext({ generatedAt, weatherSummary: weather?.summary, conversations, seal, profile, candidates, voiceMoment, continuation: options?.continuation })
 
   let text = fallbackText(candidates[0] ?? null)
   let track: Track | null = candidates[0] ?? null
@@ -416,13 +566,34 @@ export async function generateListeningSegment(options?: { continuation?: boolea
         { role: 'system', content: prompt },
         {
           role: 'user',
-          content: buildContext({ generatedAt, weatherSummary: weather?.summary, conversations, seal, profile, candidates, continuation: options?.continuation }),
+          content: context,
         },
-      ], { temperature: options?.continuation ? 0.95 : 0.85 })
+      ], { temperature: options?.continuation ? 0.95 : 0.85, signal: options.signal })
+      assertListeningActive(options.signal)
       const parsed = parseJsonObject(response)
       const nextText = parsed?.text ? limitText(parsed.text) : limitText(response)
-      if (nextText) text = nextText
-      track = pickTrackFromText(text, candidates, parsed?.selectedIndex)
+      let selectedIndex = parsed?.selectedIndex
+      if (nextText && hasListeningTextQuality(nextText)) {
+        text = nextText
+      } else if (nextText) {
+        const retry = await completeChat(settings, [
+          { role: 'system', content: prompt },
+          {
+            role: 'user',
+            content: `${context}
+
+上一版不适合 TTS。重写成一段能直接朗读的话: 70-160 字,最多 4 句,歌名出现在前两句,保留一首候选歌名,用具体听法,不要解释机制。`,
+          },
+        ], { temperature: options?.continuation ? 0.95 : 0.85, signal: options.signal })
+        assertListeningActive(options.signal)
+        const retryParsed = parseJsonObject(retry)
+        const retryText = retryParsed?.text ? limitText(retryParsed.text) : limitText(retry)
+        if (retryText && hasListeningTextQuality(retryText)) {
+          text = retryText
+          selectedIndex = retryParsed?.selectedIndex
+        }
+      }
+      track = pickTrackFromText(text, candidates, selectedIndex)
       text = alignTextToTrack(text, track)
     } catch (error) {
       if (error instanceof LlmError) {
@@ -432,19 +603,23 @@ export async function generateListeningSegment(options?: { continuation?: boolea
     }
   }
 
-  const audio = await synthesize(text)
+  options.onProgress?.({ phase: 'tts', current: 3, total: 4, message: '合成回声音频' })
+  const audio = await synthesize(text, { signal: options.signal })
+  assertListeningActive(options.signal)
   rememberScenario(text, track)
   if (track) {
     track = {
       ...track,
       sourceContext: 'voice',
-      reason: track.reason ?? '回声里 Echo 给你接上的这首。',
+      reason: track.reason ?? '回声里 Echo 想到的这首。',
     }
     appendRecommendedTracks([track])
   }
   if (audio.ok && audio.audioUrl) {
+    options.onProgress?.({ phase: 'done', current: 4, total: 4, message: '回声片段已生成。' })
     return { text, track, audioUrl: audio.audioUrl, generatedAt }
   }
+  options.onProgress?.({ phase: 'done', current: 4, total: 4, message: audio.error?.message ?? 'Echo 现在说不出话来' })
   return { text, track, error: audio.error?.message ?? 'Echo 现在说不出话来', generatedAt }
 }
 

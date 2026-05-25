@@ -6,12 +6,13 @@ export interface ActiveEvent {
   confidence?: number
   weight?: number
   startedAt?: string
+  createdAt?: string
 }
 
 export function loadActiveEvents(limit = 8): ActiveEvent[] {
   return getDb()
     .prepare(`
-      SELECT kind, content, confidence, weight, started_at
+      SELECT kind, content, confidence, weight, started_at, created_at
       FROM events
       WHERE user_id = 1
         AND (expected_end_at IS NULL OR expected_end_at > datetime('now', 'localtime'))
@@ -21,13 +22,37 @@ export function loadActiveEvents(limit = 8): ActiveEvent[] {
     `)
     .all(limit)
     .map((row) => {
-      const typed = row as { kind: string; content: string; confidence?: number; weight?: number; started_at?: string }
+      const typed = row as { kind: string; content: string; confidence?: number; weight?: number; started_at?: string; created_at?: string }
       return {
         kind: typed.kind,
         content: typed.content,
         confidence: typed.confidence,
         weight: typed.weight,
         startedAt: typed.started_at,
+        createdAt: typed.created_at,
+      }
+    })
+}
+
+export function loadRecentEvents(kind: string, limit = 8): ActiveEvent[] {
+  return getDb()
+    .prepare(`
+      SELECT kind, content, confidence, weight, started_at, created_at
+      FROM events
+      WHERE user_id = 1 AND kind = ?
+      ORDER BY created_at DESC, id DESC
+      LIMIT ?
+    `)
+    .all(kind, limit)
+    .map((row) => {
+      const typed = row as { kind: string; content: string; confidence?: number; weight?: number; started_at?: string; created_at?: string }
+      return {
+        kind: typed.kind,
+        content: typed.content,
+        confidence: typed.confidence,
+        weight: typed.weight,
+        startedAt: typed.started_at,
+        createdAt: typed.created_at,
       }
     })
 }

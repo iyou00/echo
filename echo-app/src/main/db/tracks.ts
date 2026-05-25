@@ -1,5 +1,6 @@
 import type { Track } from '../../types/ipc'
 import type { QueueHistoryDay } from '../../types/ipc'
+import { trackIdentity } from '../../shared/trackIdentity'
 import { getDb } from './index'
 
 export interface TodayTrackEvent {
@@ -22,11 +23,7 @@ export interface ProfileTrackEvent {
 }
 
 function queueTrackKey(track: Track): string {
-  const neteaseId = String(track.neteaseId ?? '').trim()
-  if (neteaseId) return `netease:${neteaseId}`
-  const id = String(track.id ?? '').trim()
-  if (id) return `id:${id}`
-  return `name:${track.title.trim().toLowerCase()}::${track.artist.trim().toLowerCase()}`
+  return trackIdentity(track)
 }
 
 function parseTrack(row: { title: string; artist: string; album?: string; source?: string; meta_json?: string }): Track {
@@ -98,6 +95,7 @@ export function skipTodayRecommendedTracks(): void {
       if (!row.meta_json) continue
       try {
         const parsed = JSON.parse(row.meta_json) as Track
+        if (parsed.queueStatus === 'completed') continue
         update.run(JSON.stringify({ ...parsed, queueStatus: 'skipped' }), row.id)
       } catch {
         continue
@@ -189,9 +187,10 @@ export function loadTodayTrackEvents(limit = 60): TodayTrackEvent[] {
 }
 
 export function loadRecommendedTrackHistory(limitDays = 7): QueueHistoryDay[] {
-  const rows = getDb()
+  const safeLimitDays = Math.max(1, Math.min(30, Math.floor(limitDays)))
+  const dayRows = getDb()
     .prepare(`
-      SELECT date(listened_at, 'localtime') AS day, title, artist, album, source, meta_json
+      SELECT DISTINCT date(listened_at, 'localtime') AS day
       FROM tracks_listened
       WHERE user_id = 1
         AND source = 'recommended_by_echo'
@@ -199,25 +198,37 @@ export function loadRecommendedTrackHistory(limitDays = 7): QueueHistoryDay[] {
         AND date(listened_at, 'localtime') NOT IN (
           SELECT date FROM queue_history_hidden_dates WHERE user_id = 1
         )
-      ORDER BY listened_at DESC, id DESC
-      LIMIT 300
+      ORDER BY day DESC
+      LIMIT ?
     `)
-    .all() as Array<{ day: string; title: string; artist: string; album?: string; source?: string; meta_json?: string }>
+    .all(safeLimitDays) as Array<{ day: string }>
 
-  const groups = new Map<string, Track[]>()
-  const seenByDay = new Map<string, Set<string>>()
-  for (const row of rows) {
-    if (!groups.has(row.day) && groups.size >= limitDays) continue
-    const track = parseTrack(row)
-    const seen = seenByDay.get(row.day) ?? new Set<string>()
-    const key = queueTrackKey(track)
-    if (seen.has(key)) continue
-    seen.add(key)
-    seenByDay.set(row.day, seen)
-    groups.set(row.day, [...(groups.get(row.day) ?? []), track])
+  const selectTracks = getDb().prepare(`
+    SELECT title, artist, album, source, meta_json
+    FROM tracks_listened
+    WHERE user_id = 1
+      AND source = 'recommended_by_echo'
+      AND date(listened_at, 'localtime') = ?
+    ORDER BY listened_at DESC, id DESC
+    LIMIT 80
+  `)
+
+  const groups: QueueHistoryDay[] = []
+  for (const { day } of dayRows) {
+    const rows = selectTracks.all(day) as Array<{ title: string; artist: string; album?: string; source?: string; meta_json?: string }>
+    const tracks: Track[] = []
+    const seen = new Set<string>()
+    for (const row of rows) {
+      const track = parseTrack(row)
+      const key = queueTrackKey(track)
+      if (seen.has(key)) continue
+      seen.add(key)
+      tracks.push(track)
+    }
+    groups.push({ date: day, tracks })
   }
 
-  return Array.from(groups.entries()).map(([date, tracks]) => ({ date, tracks }))
+  return groups
 }
 
 export function hideRecommendedTrackHistoryDates(dates: string[]): void {

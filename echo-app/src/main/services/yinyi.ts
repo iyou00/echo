@@ -5,6 +5,7 @@ import { getRandomYinyi, getYinyiByDate, getYinyiRange, upsertYinyi } from '../d
 import { getSettings } from '../db/settings'
 import { buildYinyiContext } from '../llm/prompt'
 import { completeChat, LlmError } from '../llm/client'
+import { stripKnownSystemBlocks } from '../llm/outputSanitize'
 import { recordHealth } from './health'
 import { getWeather } from '../weather/client'
 
@@ -16,12 +17,20 @@ function todayIso(): string {
   return `${year}-${month}-${day}`
 }
 
+export interface GenerateYinyiOptions {
+  signal?: AbortSignal
+}
+
+function assertYinyiActive(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException('任务已取消', 'AbortError')
+}
+
 function countWords(content: string): number {
   return content.replace(/\s+/g, '').length
 }
 
 function cleanYinyiContent(content: string): string {
-  const cleaned = content
+  const cleaned = stripKnownSystemBlocks(content)
     .replace(/```[\s\S]*?```/g, (block) => block.replace(/```[a-z]*|```/gi, ''))
     .split(/\r?\n/)
     .map((line) => line.trim().replace(/^>\s*/, ''))
@@ -41,7 +50,19 @@ function hasYinyiQuality(content: string): boolean {
   const hasUserMention = content.includes('你')
   const noAIRollup = !/(总共|一共).{0,4}\d+\s*(首|次|条)/.test(content)
   const noAI = !/(总的来说|由此可见|有什么可以|为您|用户)/.test(content)
-  return hasFirstPerson && hasUserMention && noAIRollup && noAI
+  const noOverread = !/(从你这几天|从你的轨迹|从画像|你的轮廓|说明你|你其实|你总是|你一直|潜意识|人格|诊断|标签|算法|数据)/.test(content)
+  const noMemoryLeak = !/(记忆策略|memory|纠正过|用户纠正|画像证据|信号审计)/i.test(content)
+  return hasFirstPerson && hasUserMention && noAIRollup && noAI && noOverread && noMemoryLeak
+}
+
+function yinyiQualityRetryInstruction(): string {
+  return [
+    '这一版有报告感或过度解读。重写:',
+    '像朋友在台灯下嘀咕,短一点,有自己的想法在里面。',
+    '可以引用今天真实发生的歌和话,不要提画像、轨迹、数据、记忆策略。',
+    '把判断写得轻一点,多用“我猜”“像是”“也许”。',
+    '只输出风信正文。',
+  ].join('\n')
 }
 
 function absentEntry(date: string): YinyiEntry {
@@ -62,7 +83,44 @@ function failedEntry(date: string, message: string): YinyiEntry {
   }
 }
 
-export async function generateYinyi(date = todayIso()): Promise<YinyiEntry> {
+function compactLine(value: string, max = 42): string {
+  const clean = value.replace(/\s+/g, ' ').trim()
+  return clean.length > max ? `${clean.slice(0, max)}...` : clean
+}
+
+function fallbackYinyiEntry(date: string, messages: ReturnType<typeof loadRecentConversations>, tracks: ReturnType<typeof loadRecentTracks>, error: string): YinyiEntry {
+  const lastUserMessage = [...messages].reverse().find((item) => item.role === 'user')?.content
+  const firstTrack = tracks[0]
+  const secondTrack = tracks.find((track) => track.title !== firstTrack?.title || track.artist !== firstTrack?.artist)
+  const opening = lastUserMessage
+    ? `今天先写短一点。你最后留在我这里的一句是“${compactLine(lastUserMessage)}”,像把一天的声音轻轻按住了一下。`
+    : '今天先写短一点。你留下的声音不多,我就按最近这一点余温往下写。'
+  const musicLine = firstTrack
+    ? `耳边还放着${firstTrack.artist}的《${firstTrack.title}》${secondTrack ? `,后面又接过${secondTrack.artist}的《${secondTrack.title}》` : ''}。我喜欢这种不急着解释的时刻,歌先在旁边放着。`
+    : '今天没有新的歌落下来,但空白也算一种记录。它说明有些时候你只是路过,没有非要把什么说完整。'
+
+  return {
+    date,
+    content: `${opening}\n\n${musicLine}`,
+    style: 'dialogue',
+    meta: {
+      status: 'ok',
+      tracks: tracks.slice(0, 5),
+      word_count: countWords(`${opening}${musicLine}`),
+      conversations_count: messages.length,
+      fallback: true,
+      fallback_error: error,
+    } as YinyiEntry['meta'],
+  }
+}
+
+function shouldUseFallback(error: unknown): boolean {
+  if (!(error instanceof LlmError)) return false
+  return error.kind !== 'config' && error.kind !== 'auth'
+}
+
+export async function generateYinyi(date = todayIso(), options: GenerateYinyiOptions = {}): Promise<YinyiEntry> {
+  assertYinyiActive(options.signal)
   const recentMessages = loadRecentConversations(20)
   const recentTracks = loadRecentTracks(20)
 
@@ -73,20 +131,35 @@ export async function generateYinyi(date = todayIso()): Promise<YinyiEntry> {
   const settings = getSettings()
   const started = Date.now()
   try {
-    const weather = await getWeather(settings.user.city).catch(() => null)
+    const weather = await getWeather(settings.user.city, { signal: options.signal })
+    assertYinyiActive(options.signal)
     const messages = buildYinyiContext(date, weather?.summary)
-    let content = cleanYinyiContent(await completeChat(settings, messages, { temperature: 0.85 }))
-    if (content && !hasYinyiQuality(content)) {
-      const retry = cleanYinyiContent(await completeChat(settings, [
-        ...messages,
-        {
-          role: 'user',
-          content: '这一版太像报告了。重写:像朋友在台灯下嘀咕,短一点,有自己的想法在里面。只输出风信正文。',
-        },
-      ], { temperature: 0.85 }))
-      if (retry) content = retry
+    let content = cleanYinyiContent(await completeChat(settings, messages, { temperature: 0.85, signal: options.signal }))
+    assertYinyiActive(options.signal)
+    let qualityPassed = Boolean(content && hasYinyiQuality(content))
+    if (content && !qualityPassed) {
+      try {
+        const retry = cleanYinyiContent(await completeChat(settings, [
+          ...messages,
+          {
+            role: 'user',
+            content: yinyiQualityRetryInstruction(),
+          },
+        ], { temperature: 0.85, signal: options.signal }))
+        assertYinyiActive(options.signal)
+        if (retry && hasYinyiQuality(retry)) {
+          content = retry
+          qualityPassed = true
+        }
+      } catch (retryError) {
+        assertYinyiActive(options.signal)
+        if (retryError instanceof LlmError) {
+          recordHealth('llm', retryError.kind === 'auth' || retryError.kind === 'config' ? 'error' : 'degraded', '风信重写失败，已保留第一版。', retryError.message)
+        }
+      }
     }
     if (!content) return upsertYinyi(failedEntry(date, 'LLM 返回空内容'))
+    if (!qualityPassed) return upsertYinyi(fallbackYinyiEntry(date, recentMessages, recentTracks, '风信质量检查未通过'))
 
     return upsertYinyi({
       date,
@@ -102,9 +175,13 @@ export async function generateYinyi(date = todayIso()): Promise<YinyiEntry> {
       } as YinyiEntry['meta'],
     })
   } catch (error) {
+    assertYinyiActive(options.signal)
     const message = error instanceof LlmError ? error.message : '风信生成失败'
     if (error instanceof LlmError) {
       recordHealth('llm', error.kind === 'auth' || error.kind === 'config' ? 'error' : 'degraded', 'Echo 连不上模型。去设置里检查 API key。', error.message)
+    }
+    if (shouldUseFallback(error)) {
+      return upsertYinyi(fallbackYinyiEntry(date, recentMessages, recentTracks, message))
     }
     return upsertYinyi(failedEntry(date, message))
   }

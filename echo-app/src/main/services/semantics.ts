@@ -110,7 +110,12 @@ function normalizeSemantic(value: unknown, fallback: TrackSemantic): TrackSemant
   }
 }
 
-async function tagBatchWithLlm(tracks: Track[]): Promise<TrackSemantic[]> {
+function assertSemanticsActive(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException('任务已取消', 'AbortError')
+}
+
+async function tagBatchWithLlm(tracks: Track[], signal?: AbortSignal): Promise<TrackSemantic[]> {
+  assertSemanticsActive(signal)
   const settings = getSettings()
   const fallbacks = tracks.map(inferTrackSemanticFallback)
   try {
@@ -128,7 +133,8 @@ energy/confidence 是 0-1 数字。tempo 是 slow/medium/fast。familiarity 对�
         role: 'user',
         content: tracks.map((track, index) => `${index + 1}. ${track.title} - ${track.artist}${track.album ? ` / ${track.album}` : ''}${track.year ? ` / ${track.year}` : ''}`).join('\n'),
       },
-    ], { temperature: 0.2 })
+    ], { temperature: 0.2, signal })
+    assertSemanticsActive(signal)
     const parsed = parseJsonArray(response)
     if (!parsed || parsed.length !== tracks.length) return fallbacks
     return parsed.map((item, index) => normalizeSemantic(item, fallbacks[index]))
@@ -141,7 +147,9 @@ energy/confidence 是 0-1 数字。tempo 是 slow/medium/fast。familiarity 对�
 export async function buildSemanticsForTracks(
   tracks: Track[],
   reportProgress?: (payload: Omit<ImportProgressPayload, 'startedAt'>) => void,
+  options: { signal?: AbortSignal } = {},
 ): Promise<{ tagged: number; skipped: number }> {
+  assertSemanticsActive(options.signal)
   const valid = tracks.filter((track) => track.title && track.artist)
   const { missing, skipped } = splitMissingSemantics(valid)
   const startedAt = new Date().toISOString()
@@ -160,8 +168,10 @@ export async function buildSemanticsForTracks(
   }
 
   for (let index = 0; index < total; index += 25) {
+    assertSemanticsActive(options.signal)
     const batch = missing.slice(index, index + 25)
-    const semantics = await tagBatchWithLlm(batch)
+    const semantics = await tagBatchWithLlm(batch, options.signal)
+    assertSemanticsActive(options.signal)
     batch.forEach((track, itemIndex) => {
       upsertTrackSemantic(track, semantics[itemIndex] ?? inferTrackSemanticFallback(track))
       tagged += 1

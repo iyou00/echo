@@ -3,7 +3,10 @@ import { Download, Upload } from 'lucide-react'
 import type { CareFrequency, EchoApi, ImportProgressPayload, ImportTaskSnapshot, NeteaseLoginState, NeteasePlaylistSummary, NeteaseQrLogin, ServiceHealth, Settings, Track } from '../../types/ipc'
 import type { AppPageProps } from '../../App'
 import { EmptyState, Section } from '../components'
+import { RuntimeTaskList } from '../components/RuntimeTaskNotice'
+import { latestRunningRuntimeTask, useRuntimeTasks } from '../hooks/useRuntimeTasks'
 import { pageLabels } from '../labels'
+import { serviceHealthLabel, serviceRecoveryHint } from '../../shared/runtimeRecovery'
 
 interface SettingsPageProps extends AppPageProps {
   echo: EchoApi
@@ -68,6 +71,7 @@ function detectProvider(baseUrl: string): string {
   }
   return 'custom'
 }
+
 const defaultTtsBaseUrl = 'https://tts.wangwangit.com'
 const ttsVoices = [
   ['zh-CN-XiaochenNeural', '晓辰 · 知性'],
@@ -149,12 +153,14 @@ export function SettingsPage({
   const [importingNeteaseId, setImportingNeteaseId] = useState('')
   const [neteaseBusy, setNeteaseBusy] = useState(false)
   const [health, setHealth] = useState<ServiceHealth[]>([])
+  const [healthChecking, setHealthChecking] = useState(false)
   const [busy, setBusy] = useState(false)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
   const [resetConfirmChecked, setResetConfirmChecked] = useState(false)
   const skipHydrateRef = useRef(false)
   const importSectionRef = useRef<HTMLDivElement | null>(null)
   const apiSectionRef = useRef<HTMLDivElement | null>(null)
+  const runtimeTasks = useRuntimeTasks(echo)
 
   function commitSettings(next: Settings) {
     skipHydrateRef.current = true
@@ -389,6 +395,7 @@ export function SettingsPage({
   }
 
   async function regenerateProfile() {
+    if (profileRefreshRunning) return
     setBusy(true)
     setImportState('importing')
     setImportStatus('Echo 正在重新整理你的画像...')
@@ -406,9 +413,9 @@ export function SettingsPage({
   }
 
   function requestResetData() {
-    if (activeImportTask) {
+    if (anyRuntimeTaskRunning) {
       setDataState('err')
-      setDataStatus('导入任务还在进行，完成后再清空数据。')
+      setDataStatus('运行任务还在进行，完成后再清空数据。')
       return
     }
     setResetConfirmChecked(false)
@@ -479,6 +486,7 @@ export function SettingsPage({
   }
 
   async function testCarePing() {
+    if (carePingRunning) return
     setCareStatus('正在发一条测试通知...')
     try {
       const result = await echo.carePings.test()
@@ -573,6 +581,19 @@ export function SettingsPage({
     }
   }
 
+  async function cancelRuntimeTask(id: string) {
+    await echo.runtime.cancelTask(id).catch(() => ({ ok: false }))
+  }
+
+  async function checkAllHealth() {
+    setHealthChecking(true)
+    try {
+      setHealth(await echo.health.check())
+    } finally {
+      setHealthChecking(false)
+    }
+  }
+
   async function importNeteasePlaylist(id: string) {
     setImportingNeteaseId(id)
     setNeteasePlaylistStatus('正在导入网易云歌单，并重新生成画像...')
@@ -624,6 +645,13 @@ export function SettingsPage({
       : modelStatusText === '已保存' || testState === 'ok'
         ? 'ok'
         : 'idle'
+  const profileRefreshTask = latestRunningRuntimeTask(runtimeTasks, ['taste-refresh'], { includeChildren: false })
+  const carePingTask = latestRunningRuntimeTask(runtimeTasks, ['care-ping'], { includeChildren: false })
+  const schedulerCatchupTask = latestRunningRuntimeTask(runtimeTasks, ['scheduler-catchup'], { includeChildren: false })
+  const profileRefreshRunning = Boolean(profileRefreshTask)
+  const carePingRunning = Boolean(carePingTask)
+  const schedulerCatchupRunning = Boolean(schedulerCatchupTask)
+  const anyRuntimeTaskRunning = runtimeTasks.some((task) => task.status === 'running')
   const activeImportTask = importTask?.status === 'running'
   const importProgress: ImportProgressPayload | null = importTask && (importTask.phase === 'semantics' || importTask.phase === 'profile' || importTask.phase === 'done')
     ? {
@@ -640,7 +668,6 @@ export function SettingsPage({
       : activeImportTask
         ? importTask.sourceName ? `正在处理 ${importTask.sourceName}` : '导入任务正在进行'
         : ''
-
   return (
     <div className="phone-surface settings-page">
       <div className="scroll-panel">
@@ -883,12 +910,46 @@ export function SettingsPage({
                 重新认识你
                 <small>基于已导入歌单重新初始化画像。</small>
               </div>
-              <button className="btn warn" type="button" onClick={regenerateProfile} disabled={busy || activeImportTask}>
-                重新生成
+              <button className="btn warn" type="button" onClick={regenerateProfile} disabled={busy || activeImportTask || profileRefreshRunning || schedulerCatchupRunning}>
+                {profileRefreshRunning ? '生成中...' : '重新生成'}
               </button>
             </div>
           </Section>
           </div>
+
+          {runtimeTasks.length > 0 && (
+            <Section label="运行任务">
+              <RuntimeTaskList tasks={runtimeTasks} onCancel={(id) => { void cancelRuntimeTask(id) }} />
+            </Section>
+          )}
+
+          <Section label="服务状态" className="health-section">
+            <div className="service-health-head">
+              <p>这里显示 Echo 依赖的外部服务状态。异常时先按提示恢复，再重试当前任务。</p>
+              <button className="btn sec" type="button" onClick={checkAllHealth} disabled={healthChecking || anyRuntimeTaskRunning}>
+                {healthChecking ? '检查中...' : '检查全部'}
+              </button>
+            </div>
+            <div className="service-health-list">
+              {health.map((item) => (
+                <div className={`service-health-item ${item.status}`} key={item.service}>
+                  <div className="service-health-main">
+                    <span className="service-health-dot" />
+                    <div>
+                      <div className="service-health-title">{serviceHealthLabel(item.service)}</div>
+                      <div className="service-health-message">{item.message}</div>
+                      {item.status !== 'ok' && (
+                        <div className="service-health-message">{serviceRecoveryHint(item.service)}</div>
+                      )}
+                    </div>
+                  </div>
+                  <time className="service-health-time">
+                    {item.checkedAt ? new Date(item.checkedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '--:--'}
+                  </time>
+                </div>
+              ))}
+            </div>
+          </Section>
 
           <Section label="回 声 · v 0 . 3">
             <label className="field">
@@ -1015,8 +1076,8 @@ export function SettingsPage({
             </div>
 
             <p className="care-copy">Echo 会在合适的时候轻轻出现一下。你点开后，它会带你回到{pageLabels.chat}、播放推荐，或进入{pageLabels.voice}。</p>
-            <button className="btn sec care-test-btn" type="button" onClick={testCarePing} disabled={busy}>
-              立刻测试一条
+            <button className="btn sec care-test-btn" type="button" onClick={testCarePing} disabled={busy || carePingRunning || schedulerCatchupRunning}>
+              {carePingRunning ? '生成中...' : '立刻测试一条'}
             </button>
             {careStatus && (
               <div className={`status-ind ${careStatus === '已保存' ? 'ok' : careStatus.includes('失败') ? 'err' : 'idle'}`}>
@@ -1032,7 +1093,7 @@ export function SettingsPage({
                 清空所有数据
                 <small>回到第一次打开 Echo 的状态。</small>
               </div>
-              <button className="btn danger" type="button" onClick={requestResetData} disabled={busy || activeImportTask}>清 空</button>
+              <button className="btn danger" type="button" onClick={requestResetData} disabled={busy || anyRuntimeTaskRunning}>清 空</button>
             </div>
             {dataStatus && (
               <div className={`status-ind ${dataState === 'ok' ? 'ok' : dataState === 'err' ? 'err' : 'idle'}`}>
@@ -1070,7 +1131,7 @@ export function SettingsPage({
               <button className="btn close-quit-btn" type="button" onClick={() => setShowResetConfirm(false)} disabled={busy}>
                 先不清
               </button>
-              <button className="btn settings-reset-confirm" type="button" onClick={resetData} disabled={busy || activeImportTask || !resetConfirmChecked}>
+              <button className="btn settings-reset-confirm" type="button" onClick={resetData} disabled={busy || anyRuntimeTaskRunning || !resetConfirmChecked}>
                 {busy ? '清空中' : '清空 Echo'}
               </button>
             </div>

@@ -2,6 +2,21 @@ import { ipcRenderer, contextBridge } from 'electron'
 import type { EchoApi } from '../src/types/ipc'
 
 const echoApi: EchoApi = {
+  runtime: {
+    getTask: (id) => ipcRenderer.invoke('runtime:getTask', id),
+    getRecentTasks: () => ipcRenderer.invoke('runtime:getRecentTasks'),
+    cancelTask: (id) => ipcRenderer.invoke('runtime:cancelTask', id),
+    onTaskChanged: (listener) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload)
+      ipcRenderer.on('runtime:task-changed', wrapped)
+      return () => ipcRenderer.off('runtime:task-changed', wrapped)
+    },
+    onEvent: (listener) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload)
+      ipcRenderer.on('runtime:event', wrapped)
+      return () => ipcRenderer.off('runtime:event', wrapped)
+    },
+  },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
     update: (path, value) => ipcRenderer.invoke('settings:update', path, value),
@@ -40,8 +55,10 @@ const echoApi: EchoApi = {
   },
   taste: {
     getProfile: () => ipcRenderer.invoke('taste:getProfile'),
+    getMemoryAudit: () => ipcRenderer.invoke('taste:getMemoryAudit'),
     regeneratePortrait: () => ipcRenderer.invoke('taste:regeneratePortrait'),
     applySignal: (kind, payload) => ipcRenderer.invoke('taste:applySignal', kind, payload),
+    correctMemory: (note) => ipcRenderer.invoke('taste:correctMemory', note),
     answerQuestion: (id, answer) => ipcRenderer.invoke('taste:answerQuestion', id, answer),
   },
   yinyi: {
@@ -62,9 +79,16 @@ const echoApi: EchoApi = {
     markStatus: (track, status) => ipcRenderer.invoke('queue:markStatus', track, status),
   },
   favorites: {
-    list: () => ipcRenderer.invoke('favorites:list'),
+    list: (options) => ipcRenderer.invoke('favorites:list', options),
+    count: (query) => ipcRenderer.invoke('favorites:count', query),
+    listKeys: () => ipcRenderer.invoke('favorites:listKeys'),
     toggle: (track) => ipcRenderer.invoke('favorites:toggle', track),
     isFavorite: (track) => ipcRenderer.invoke('favorites:isFavorite', track),
+    onChanged: (listener) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload)
+      ipcRenderer.on('favorites:changed', wrapped)
+      return () => ipcRenderer.off('favorites:changed', wrapped)
+    },
   },
   feedback: {
     record: (track, action, context) => ipcRenderer.invoke('feedback:record', track, action, context),
@@ -114,6 +138,7 @@ const echoApi: EchoApi = {
     getVolume: () => ipcRenderer.invoke('playback:getVolume'),
     seek: (positionMs) => ipcRenderer.invoke('playback:seek', positionMs),
     removeFromQueue: (index) => ipcRenderer.invoke('playback:removeFromQueue', index),
+    removeTrackFromQueue: (track) => ipcRenderer.invoke('playback:removeTrackFromQueue', track),
     clearQueue: () => ipcRenderer.invoke('playback:clearQueue'),
     reorderQueue: (fromIndex, toIndex) => ipcRenderer.invoke('playback:reorderQueue', fromIndex, toIndex),
     heartbeat: (state) => ipcRenderer.invoke('playback:heartbeat', state),
@@ -183,26 +208,3 @@ const echoApi: EchoApi = {
 }
 
 contextBridge.exposeInMainWorld('echo', echoApi)
-
-// --------- Expose some API to the Renderer process ---------
-contextBridge.exposeInMainWorld('ipcRenderer', {
-  on(...args: Parameters<typeof ipcRenderer.on>) {
-    const [channel, listener] = args
-    return ipcRenderer.on(channel, (event, ...args) => listener(event, ...args))
-  },
-  off(...args: Parameters<typeof ipcRenderer.off>) {
-    const [channel, ...omit] = args
-    return ipcRenderer.off(channel, ...omit)
-  },
-  send(...args: Parameters<typeof ipcRenderer.send>) {
-    const [channel, ...omit] = args
-    return ipcRenderer.send(channel, ...omit)
-  },
-  invoke(...args: Parameters<typeof ipcRenderer.invoke>) {
-    const [channel, ...omit] = args
-    return ipcRenderer.invoke(channel, ...omit)
-  },
-
-  // You can expose other APTs you need here.
-  // ...
-})

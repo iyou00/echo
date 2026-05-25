@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { EchoApi, YinyiEntry } from '../../types/ipc'
+import type { EchoApi, RuntimeTaskSnapshot, YinyiEntry } from '../../types/ipc'
 import type { AppPageProps } from '../../App'
 import { BrandLogo, EmptyState } from '../components'
+import { latestRunningRuntimeTask, useRuntimeTasks } from '../hooks/useRuntimeTasks'
 import { pageLabels } from '../labels'
 
 interface YinyiPageProps extends AppPageProps {
@@ -23,6 +24,39 @@ function spacedDate(date: string) {
   return date.replace(/-/g, ' . ').split('').join(' ')
 }
 
+function YinyiWritingState({
+  task,
+  onCancel,
+}: {
+  task: RuntimeTaskSnapshot | null
+  onCancel: (id: string) => void
+}) {
+  return (
+    <div className="yinyi-writing" aria-live="polite">
+      <div className="writing-ink" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </div>
+      <div className="writing-copy">
+        <div className="writing-title">Echo 正在写这封信</div>
+        <div className="writing-subtitle">先把今天的声音铺开，再落成几行字。</div>
+      </div>
+      <div className="writing-paper" aria-hidden="true">
+        <span className="writing-line wide" />
+        <span className="writing-line mid" />
+        <span className="writing-line long" />
+        <span className="writing-line short" />
+      </div>
+      {task?.cancellable && (
+        <button className="writing-cancel" type="button" onClick={() => onCancel(task.id)}>
+          停 下
+        </button>
+      )}
+    </div>
+  )
+}
+
 export function YinyiPage({ echo, isActive, openWithRandom }: YinyiPageProps) {
   const [date, setDate] = useState(isoDate())
   const [entry, setEntry] = useState<YinyiEntry | null>(null)
@@ -30,6 +64,9 @@ export function YinyiPage({ echo, isActive, openWithRandom }: YinyiPageProps) {
   const [loading, setLoading] = useState(false)
   const dateInputRef = useRef<HTMLInputElement | null>(null)
   const wasActiveRef = useRef(false)
+  const runtimeTasks = useRuntimeTasks(echo)
+  const yinyiTask = latestRunningRuntimeTask(runtimeTasks, ['yinyi-generate'], { includeChildren: false })
+  const yinyiGenerating = Boolean(yinyiTask)
 
   const load = useCallback(async (target = date) => {
     setLoading(true)
@@ -84,6 +121,15 @@ export function YinyiPage({ echo, isActive, openWithRandom }: YinyiPageProps) {
   }
 
   function renderEntry() {
+    if (yinyiGenerating) {
+      return (
+        <YinyiWritingState
+          task={yinyiTask}
+          onCancel={(id) => { void echo.runtime.cancelTask(id) }}
+        />
+      )
+    }
+
     if (loading) return <div className="quiet-line">Echo 正在翻日记本...</div>
 
     if (entry?.meta?.status === 'failed') {
@@ -161,7 +207,14 @@ export function YinyiPage({ echo, isActive, openWithRandom }: YinyiPageProps) {
             <input ref={dateInputRef} type="date" value={date} onChange={(event) => setDate(event.target.value)} />
           </span>
           <button className="tb-btn icon-only" onClick={randomEntry} title="随手翻一页">⤴</button>
-          <button className="tb-btn" onClick={generate} disabled={loading}>生 成</button>
+          <button className={`tb-btn yinyi-generate-btn${yinyiGenerating ? ' writing' : ''}`} onClick={generate} disabled={loading || yinyiGenerating}>
+            {yinyiGenerating ? (
+              <>
+                <span className="tb-pulse-dot" aria-hidden="true" />
+                正在写
+              </>
+            ) : '生 成'}
+          </button>
           <button className="tb-btn" onClick={() => setDate(isoDate())}>今 日</button>
         </div>
       </div>

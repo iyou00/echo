@@ -5,6 +5,7 @@ import { buildInitialProfile } from '../services/taste'
 import { buildSemanticsForTracks } from '../services/semantics'
 import { runImportTask } from '../services/importTasks'
 import { getNeteaseLoginState, readNeteaseCookie } from './auth'
+import { type MusicEntityConstraint, trackMatchesMusicEntity } from '../skills/music/verifier'
 
 const require = createRequire(import.meta.url)
 const netease = require('@neteasecloudmusicapienhanced/api') as typeof import('@neteasecloudmusicapienhanced/api')
@@ -101,7 +102,13 @@ function compactText(value: string): string {
   return value.toLowerCase().replace(/\s+/g, '').replace(/[《》"'“”·.,，。!！?？()（）-]/g, '')
 }
 
-function searchSongMatches(track: Track, song: Record<string, unknown>): boolean {
+export interface ResolvePlayableTrackOptions {
+  constraint?: MusicEntityConstraint
+  strictArtist?: boolean
+  strictTitle?: boolean
+}
+
+function searchSongMatches(track: Track, song: Record<string, unknown>, options: ResolvePlayableTrackOptions = {}): boolean {
   const songTitle = compactText(String(song.name ?? ''))
   const targetTitle = compactText(track.title)
   if (!songTitle || !targetTitle) return false
@@ -110,26 +117,42 @@ function searchSongMatches(track: Track, song: Record<string, unknown>): boolean
   const titleHit = songTitle === targetTitle || songTitle.includes(targetTitle) || targetTitle.includes(songTitle)
   if (!titleHit) return false
 
-  // artist 缺省（来自 Echo 文本里只写了《歌名》而没有艺人名）→ 不强制匹配，由调用方接受网易云搜出的第一条相关结果。
+  const artists = asArray(song.ar ?? song.artists)
+    .map((artist) => String(asObject(artist).name ?? ''))
+    .filter(Boolean)
+  if (options.constraint) {
+    return trackMatchesMusicEntity(
+      {
+        title: String(song.name ?? track.title),
+        artist: artists.join(' / ') || track.artist,
+      },
+      options.constraint,
+      { strictArtist: options.strictArtist, strictTitle: options.strictTitle },
+    )
+  }
+
   const targetArtists = compactText(track.artist ?? '')
   if (!targetArtists) return true
-
-  const artists = asArray(song.ar ?? song.artists)
-    .map((artist) => compactText(String(asObject(artist).name ?? '')))
-    .filter(Boolean)
-  return artists.some((artist) => targetArtists.includes(artist) || artist.includes(targetArtists))
+  const artistHit = artists
+    .map(compactText)
+    .some((artist) => targetArtists.includes(artist) || artist.includes(targetArtists))
+  return artistHit
 }
 
-async function findNeteaseSong(track: Track, cookie: string): Promise<Track | null> {
-  if (track.id) return track
+async function findNeteaseSong(track: Track, cookie: string, options: ResolvePlayableTrackOptions = {}): Promise<Track | null> {
+  if (track.id) {
+    if (options.constraint && !trackMatchesMusicEntity(track, options.constraint, { strictArtist: options.strictArtist, strictTitle: options.strictTitle })) return null
+    return track
+  }
   const keywords = `${track.title} ${track.artist ?? ''}`.trim()
   if (!keywords) return null
 
   const result = await netease.cloudsearch({ keywords, type: 1, limit: 5, offset: 0, cookie }) as ApiResponse
   const resultBody = asObject(result.body?.result)
   const songs = asArray(resultBody.songs).map(asObject)
-  const song = songs.find((item) => searchSongMatches(track, item)) ?? firstSearchSong(result.body)
-  if (!searchSongMatches(track, song)) return null
+  const matchedSong = songs.find((item) => searchSongMatches(track, item, options))
+  const song = matchedSong ?? (options.constraint ? {} : firstSearchSong(result.body))
+  if (!searchSongMatches(track, song, options)) return null
   const id = song.id ? String(song.id) : ''
   if (!id) return null
 
@@ -148,11 +171,11 @@ async function findNeteaseSong(track: Track, cookie: string): Promise<Track | nu
   }
 }
 
-export async function resolvePlayableTrack(track: Track): Promise<Track | null> {
+export async function resolvePlayableTrack(track: Track, options: ResolvePlayableTrackOptions = {}): Promise<Track | null> {
   const cookie = readNeteaseCookie()
   if (!cookie) return null
 
-  const song = await findNeteaseSong(track, cookie)
+  const song = await findNeteaseSong(track, cookie, options)
   if (!song?.id) return null
 
   // 修订自 v0.1-fixes 第 1 条:
@@ -179,11 +202,17 @@ export async function refreshPlayableUrl(track: Track): Promise<Track | null> {
   return resolvePlayableTrack({ ...track, playUrl: undefined, urlExpiresAt: undefined })
 }
 
-export async function filterPlayableTracks(candidates: Track[], limit = 3): Promise<Track[]> {
+function assertPlayableFilterActive(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException('任务已取消', 'AbortError')
+}
+
+export async function filterPlayableTracks(candidates: Track[], limit = 3, signal?: AbortSignal): Promise<Track[]> {
   const playable: Track[] = []
   for (const candidate of candidates) {
+    assertPlayableFilterActive(signal)
     if (playable.length >= limit) break
     const track = await resolvePlayableTrack(candidate).catch(() => null)
+    assertPlayableFilterActive(signal)
     if (track) playable.push(track)
   }
   return playable

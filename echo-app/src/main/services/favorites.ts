@@ -1,20 +1,26 @@
 import type { Track } from '../../types/ipc'
-import { isFavoriteTrack, listFavoriteTracks, toggleFavoriteTrack } from '../db/favorites'
+import type { FavoriteListOptions } from '../../types/ipc'
+import { countFavoriteTracks, isFavoriteTrack, listFavoriteTrackKeys, listFavoriteTracks, toggleFavoriteTrack } from '../db/favorites'
 import { recordTrackFeedback } from '../db/feedback'
-import { applySignal, maybeRefreshStructuredProfile } from './taste'
+import { applyMemorySignal } from './memoryPolicy'
 
-export function listFavorites(): Track[] {
-  return listFavoriteTracks()
+export function listFavorites(options?: FavoriteListOptions): Track[] {
+  return listFavoriteTracks(options)
+}
+
+export function countFavorites(query?: string): number {
+  return countFavoriteTracks(query)
+}
+
+export function listFavoriteKeys(): string[] {
+  return listFavoriteTrackKeys()
 }
 
 export async function toggleFavorite(track: Track): Promise<{ favorited: boolean; favorites: Track[] }> {
   const result = toggleFavoriteTrack(track)
   recordTrackFeedback(result.favorited ? 'favorited' : 'unfavorited', track)
   if (result.favorited) {
-    await applySignal('favorited', { artist: track.artist, trackId: track.id ?? track.neteaseId, title: track.title, strength: 0.08 })
-    maybeRefreshStructuredProfile('favorited')
-  } else {
-    maybeRefreshStructuredProfile('unfavorited')
+    await applyMemorySignal('favorited', { artist: track.artist, trackId: track.id ?? track.neteaseId, title: track.title }, { source: 'favorite', track })
   }
   return result
 }

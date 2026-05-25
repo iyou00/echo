@@ -1,8 +1,10 @@
-import { type CSSProperties, useRef, useState } from 'react'
+import { type CSSProperties, useEffect, useRef, useState } from 'react'
 import { Play, RefreshCw, Settings } from 'lucide-react'
-import type { EchoApi, PlaybackState, ProfileEvidenceLevel, ProfileEvidenceSource, TasteProfile, Track } from '../../types/ipc'
+import type { EchoApi, MemoryAuditSummary, PlaybackState, ProfileEvidenceLevel, ProfileEvidenceSource, TasteProfile, Track } from '../../types/ipc'
 import type { AppPageProps } from '../../App'
 import { BrandLogo, EmptyState, Section } from '../components'
+import { RuntimeTaskNotice } from '../components/RuntimeTaskNotice'
+import { latestRunningRuntimeTask, useRuntimeTasks } from '../hooks/useRuntimeTasks'
 
 interface EchoProfileProps extends AppPageProps {
   echo: EchoApi
@@ -20,6 +22,11 @@ function asPercent(value: number) {
 function displayDate(value?: string) {
   if (!value) return ''
   return new Date(value).toLocaleDateString('zh-CN')
+}
+
+function displayAuditDate(value?: string) {
+  if (!value) return ''
+  return new Date(value).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
 }
 
 function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)) }
@@ -108,6 +115,14 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
   const statusTimerRef = useRef<ReturnType<typeof setTimeout>>()
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle')
   const [statusMessage, setStatusMessage] = useState('')
+  const [correctionOpen, setCorrectionOpen] = useState(false)
+  const [correctionDraft, setCorrectionDraft] = useState('')
+  const [correctionSaving, setCorrectionSaving] = useState(false)
+  const [memoryAudit, setMemoryAudit] = useState<MemoryAuditSummary | null>(null)
+  const runtimeTasks = useRuntimeTasks(echo)
+  const profileTask = latestRunningRuntimeTask(runtimeTasks, ['taste-refresh'], { includeChildren: false })
+  const profileTaskRunning = Boolean(profileTask)
+  const profileBusy = busy || profileTaskRunning
   const portraitUpdatedAt = profile?.profile_meta?.updatedAt ?? profile?.profile_meta?.structuredUpdatedAt
   const display = profile?.display
   const signatureItems: SignatureDisplayItem[] = profile
@@ -126,6 +141,18 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
   const moodItems = profile
     ? (display?.moodItems?.length ? display.moodItems : profile.moods.slice(0, 6).map((mood) => ({ tag: mood.tag, frequency: mood.frequency, evidenceLevel: 'weak' as const, source: 'fallback' as const })))
     : []
+
+  async function refreshMemoryAudit() {
+    try {
+      setMemoryAudit(await echo.taste.getMemoryAudit())
+    } catch {
+      setMemoryAudit(null)
+    }
+  }
+
+  useEffect(() => {
+    void refreshMemoryAudit()
+  }, [echo, profile?.profile_meta?.updatedAt, profile?.profile_meta?.structuredUpdatedAt])
 
   function showStatus(type: 'success' | 'error', message: string, autoHideMs?: number) {
     clearTimeout(statusTimerRef.current)
@@ -156,6 +183,7 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
 
       try {
         await refreshProfile()
+        await refreshMemoryAudit()
       } catch {
         // 画像已生成成功，只是本地刷新失败，下次进入页面会自动加载
       }
@@ -191,12 +219,34 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
     }
   }
 
+  async function submitCorrection() {
+    const note = correctionDraft.trim()
+    if (!note || correctionSaving) return
+    setCorrectionSaving(true)
+    try {
+      const result = await echo.taste.correctMemory(note)
+      if (result.ok) {
+        setCorrectionDraft('')
+        setCorrectionOpen(false)
+        showStatus('success', result.message, 2600)
+        await refreshProfile()
+        await refreshMemoryAudit()
+      } else {
+        showStatus('error', result.message, 3000)
+      }
+    } catch (error) {
+      showStatus('error', error instanceof Error ? error.message : '纠正保存失败', 3000)
+    } finally {
+      setCorrectionSaving(false)
+    }
+  }
+
   return (
     <div className="phone-surface profile-page">
       <div className="page-toolbar">
         <div className="tb-status">Echo 眼里的你</div>
         <div className="tb-actions">
-          <button className={`tb-btn icon-only${busy ? ' spinning' : ''}`} onClick={regenerate} disabled={busy} title="重新生成画像">
+          <button className={`tb-btn icon-only${profileBusy ? ' spinning' : ''}`} onClick={regenerate} disabled={profileBusy} title="重新生成画像">
             <RefreshCw size={14} />
           </button>
           <button className="tb-btn icon-only" onClick={() => navigate('settings')} title="设置">
@@ -210,27 +260,73 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
           <EmptyState
             icon={<BrandLogo className="empty-logo" size={56} />}
             className="profile-empty"
-            title={busy ? '我正在读你的歌单……第一遍读得慢一点,你别催。' : '我还没听过你的歌呢。你给我导一份歌单,我读一下,然后我们再正经聊。'}
-            body={busy ? '大概再等 20 秒。' : undefined}
-            sign={busy ? undefined : '— Echo · 等你'}
-            action={!busy && <button className="primary-button empty-cta" onClick={() => navigate('settings')}>导 入 歌 单</button>}
+            title={profileBusy ? '我正在读你的歌单……第一遍读得慢一点,你别催。' : '我还没听过你的歌呢。你给我导一份歌单,我读一下,然后我们再正经聊。'}
+            body={profileBusy ? profileTask?.message ?? '大概再等 20 秒。' : undefined}
+            sign={profileBusy ? undefined : '— Echo · 等你'}
+            action={!profileBusy && <button className="primary-button empty-cta" onClick={() => navigate('settings')}>导 入 歌 单</button>}
           />
         ) : (
           <>
             <Section className="portrait-section">
-              <BrandLogo className={`avatar-big${busy ? ' avatar-breathing' : ''}`} size={56} />
+              <BrandLogo className={`avatar-big${profileBusy ? ' avatar-breathing' : ''}`} size={56} />
               <div className={`portrait-content ${phase}`}>
                 {phase === 'idle' || phase === 'in' ? (
                   <p className="portrait-text">{profile.echo_portrait}</p>
                 ) : (
-                  <p className="portrait-text portrait-loading">正在透过音乐看你,请稍等。</p>
+                  <p className="portrait-text portrait-loading">{profileTask?.message ?? '正在透过音乐看你,请稍等。'}</p>
                 )}
               </div>
               <div className="portrait-sign">
-                — Echo · {busy ? '正在写' : (portraitUpdatedAt ? `写于 ${displayDate(portraitUpdatedAt)}` : '初次见面')}
+                — Echo · {profileBusy ? '正在写' : (portraitUpdatedAt ? `写于 ${displayDate(portraitUpdatedAt)}` : '初次见面')}
                 {status !== 'idle' && <span className={`portrait-status ${status}`}>{statusMessage}</span>}
               </div>
+              <div className="portrait-correction">
+                {!correctionOpen ? (
+                  <button className="portrait-correction-link" type="button" onClick={() => setCorrectionOpen(true)}>
+                    这段理解不准
+                  </button>
+                ) : (
+                  <div className="portrait-correction-box">
+                    <textarea
+                      value={correctionDraft}
+                      onChange={(event) => setCorrectionDraft(event.target.value)}
+                      maxLength={300}
+                      placeholder="比如：我最近听王菲比较多，是那几天刚好在听。"
+                    />
+                    <div className="portrait-correction-actions">
+                      <button className="tb-btn" type="button" onClick={() => { setCorrectionOpen(false); setCorrectionDraft('') }} disabled={correctionSaving}>
+                        取消
+                      </button>
+                      <button className="tb-btn" type="button" onClick={submitCorrection} disabled={!correctionDraft.trim() || correctionSaving}>
+                        {correctionSaving ? '保存中' : '记下'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </Section>
+            <RuntimeTaskNotice task={profileTask?.status === 'running' ? profileTask : null} title="口味画像" onCancel={(id) => { void echo.runtime.cancelTask(id) }} />
+
+            {memoryAudit && memoryAudit.items.length > 0 && (
+              <Section label="M E M O R Y">
+                <div className="memory-audit-head">
+                  <span>{memoryAudit.items.length} 条关键记忆</span>
+                  <span>纠正 {memoryAudit.counts.corrections} · 收藏 {memoryAudit.counts.favorites}</span>
+                </div>
+                <div className="memory-audit-list">
+                  {memoryAudit.items.slice(0, 5).map((item) => (
+                    <div className={`memory-audit-item memory-${item.kind}`} key={item.id}>
+                      <span className="memory-audit-label">{item.label}</span>
+                      <div className="memory-audit-body">
+                        <div className="memory-audit-title">{item.title}</div>
+                        {item.detail && <div className="memory-audit-detail">{item.detail}</div>}
+                      </div>
+                      {item.createdAt && <time className="memory-audit-date">{displayAuditDate(item.createdAt)}</time>}
+                    </div>
+                  ))}
+                </div>
+              </Section>
+            )}
 
             <Section label="S I G N A T U R E · 7">
               <div className="signature-list">

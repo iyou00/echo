@@ -1,11 +1,11 @@
 import { BrowserWindow } from 'electron'
 import type { PlaybackHeartbeat, PlaybackPlayOptions, PlaybackState, Track } from '../../types/ipc'
+import { trackIdentity } from '../../shared/trackIdentity'
 import { getQueue, markQueueStatus } from './queue'
 import { refreshPlayableUrl } from '../netease/music'
-import { applySignal, maybeRefreshStructuredProfile } from './taste'
 import { recordHealth } from './health'
 import { recordTrackFeedback } from '../db/feedback'
-import { endCurrentScene, getCurrentScene } from './scene'
+import { applyMemorySignal } from './memoryPolicy'
 
 const state: PlaybackState = {
   current: null,
@@ -25,8 +25,7 @@ type InternalPlaybackPlayOptions = PlaybackPlayOptions & {
 }
 
 function trackKey(track?: Track | null): string {
-  if (!track) return ''
-  return `${track.id ?? track.neteaseId ?? ''}:${track.title.trim().toLowerCase()}:${track.artist.trim().toLowerCase()}`
+  return trackIdentity(track)
 }
 
 function cloneState(): PlaybackState {
@@ -109,8 +108,7 @@ async function applyPlaybackFeedback(track: Track, completionRate: number): Prom
   const rate = Math.max(0, Math.min(1, completionRate))
   if (rate >= 0.8) {
     recordTrackFeedback('played', track, rate)
-    await applySignal('played', { artist: track.artist, trackId: track.id ?? track.neteaseId, title: track.title, completionRate: rate })
-    maybeRefreshStructuredProfile('played')
+    await applyMemorySignal('played', { artist: track.artist, trackId: track.id ?? track.neteaseId, title: track.title, completionRate: rate }, { source: 'playback', track })
     const key = trackKey(track)
     const now = Date.now()
     const existing = loopCounts.get(key)
@@ -120,15 +118,13 @@ async function applyPlaybackFeedback(track: Track, completionRate: number): Prom
     loopCounts.set(key, next)
     if (next.count === 3) {
       recordTrackFeedback('looped', track, rate)
-      await applySignal('looped', { artist: track.artist, trackId: track.id ?? track.neteaseId, title: track.title })
-      maybeRefreshStructuredProfile('looped')
+      await applyMemorySignal('looped', { artist: track.artist, trackId: track.id ?? track.neteaseId, title: track.title }, { source: 'playback', track })
     }
     return
   }
   if (rate < 0.3) {
     recordTrackFeedback('skipped', track, rate)
-    await applySignal('skipped', { artist: track.artist, trackId: track.id ?? track.neteaseId, title: track.title, completionRate: rate })
-    maybeRefreshStructuredProfile('skipped')
+    await applyMemorySignal('skipped', { artist: track.artist, trackId: track.id ?? track.neteaseId, title: track.title, completionRate: rate }, { source: 'playback', track })
   }
 }
 
@@ -203,7 +199,6 @@ export async function next(): Promise<PlaybackState> {
   state.status = 'idle'
   state.queue = []
   state.error = lastError ? '下一首暂时播不出来' : undefined
-  if (getCurrentScene()) endCurrentScene()
   return emitState()
 }
 
@@ -260,6 +255,15 @@ export function removeFromQueue(index: number): PlaybackState {
   const target = state.queue[index] ?? fallbackQueue[index]
   if (target) markQueueStatus(target, 'skipped')
   state.queue = state.queue.filter((_, itemIndex) => itemIndex !== index)
+  return emitState()
+}
+
+export function removeTrackFromQueue(track: Track): PlaybackState {
+  const key = trackKey(track)
+  if (!key) return cloneState()
+  if (trackKey(state.current) === key) return cloneState()
+  markQueueStatus(track, 'skipped')
+  state.queue = state.queue.filter((item) => trackKey(item) !== key)
   return emitState()
 }
 

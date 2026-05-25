@@ -30,8 +30,6 @@ function App() {
   const [currentScene, setCurrentScene] = useState<ActiveScene | null>(null)
   const [importTask, setImportTask] = useState<ImportTaskSnapshot | null>(null)
   const handledImportTaskIdsRef = useRef(new Set<string>())
-  const currentSceneRef = useRef(currentScene)
-  useEffect(() => { currentSceneRef.current = currentScene }, [currentScene])
   const [playbackNotice, setPlaybackNotice] = useState('')
   const [careMuteToast, setCareMuteToast] = useState(false)
   const [careMuteCountdown, setCareMuteCountdown] = useState(5)
@@ -133,9 +131,6 @@ function App() {
     return echo.playback.onStateChanged((next) => {
       setPlaybackState(next)
       refreshQueue()
-      if (next.status === 'idle' && !next.current && currentSceneRef.current) {
-        echo.scene.end().then(() => setCurrentScene(null)).catch(() => undefined)
-      }
     })
   }, [echo, refreshQueue])
 
@@ -292,13 +287,24 @@ function App() {
   }
 
   async function playScene(key: SceneKey) {
-    const result = await echo.scene.play(key, { appendChatMessage: true })
+    const result = await echo.scene.play(key, { appendChatMessage: true, targetCount: 1 })
     if (result.tracks.length > 0 || result.message) {
       setCurrentScene(result.scene)
       setPlaybackState(result.state)
       await refreshQueue()
     }
     return result
+  }
+
+  async function continueScene(scene: ActiveScene) {
+    const current = await echo.scene.getCurrent()
+    if (!current || current.id !== scene.id || current.key !== scene.key) return
+    const result = await echo.scene.play(current.key, { appendChatMessage: true, continueSession: true, targetCount: 1 })
+    if (result.tracks.length > 0 || result.message) {
+      setCurrentScene(result.scene)
+      setPlaybackState(result.state)
+      await refreshQueue()
+    }
   }
 
   async function endScene() {
@@ -489,7 +495,14 @@ function App() {
             setState={setPlaybackState}
             refreshQueue={refreshQueue}
             autoPlayNext={settings?.playback.autoPlayNext ?? true}
+            currentScene={currentScene}
             voiceContinuous={voiceContinuous}
+            onSceneTrackEnded={(scene) => {
+              continueScene(scene).catch((error) => {
+                setPlaybackNotice(error instanceof Error ? error.message : '场景续播失败')
+                window.setTimeout(() => setPlaybackNotice(''), 5000)
+              })
+            }}
             onVoiceTrackEnded={() => {
               setPage('voice')
               setVoiceAutoStartToken((value) => value + 1)

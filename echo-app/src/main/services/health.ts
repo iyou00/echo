@@ -18,6 +18,36 @@ export function recordHealth(
   return upsertHealth(service, status, message, technical)
 }
 
+export type SchedulerHealthArea =
+  | 'scheduler'
+  | 'catchup'
+  | 'yinyi'
+  | 'taste-structured'
+  | 'taste-portrait'
+  | 'care-ping'
+
+const schedulerHealthLabels: Record<SchedulerHealthArea, string> = {
+  scheduler: '定时任务',
+  catchup: '启动补偿',
+  yinyi: '定时风信',
+  'taste-structured': '结构画像',
+  'taste-portrait': '画像文案',
+  'care-ping': '主动关心',
+}
+
+export function schedulerHealthMessage(area: SchedulerHealthArea, message: string): string {
+  return `${schedulerHealthLabels[area]}：${message}`
+}
+
+export function recordSchedulerHealth(
+  area: SchedulerHealthArea,
+  status: ServiceHealthStatus,
+  message: string,
+  technical = '',
+): ServiceHealth {
+  return recordHealth('scheduler', status, schedulerHealthMessage(area, message), technical)
+}
+
 function technicalMessage(error: unknown): string {
   if (error instanceof Error) return error.message
   return typeof error === 'string' ? error : ''
@@ -78,12 +108,12 @@ async function checkWeather(): Promise<void> {
 }
 
 export async function checkServiceHealth(): Promise<ServiceHealth[]> {
-  await Promise.all([
+  await Promise.allSettled([
     checkLlm(),
     checkNetease(),
     checkTts(),
     checkWeather(),
-    Promise.resolve(recordHealth('scheduler', 'ok', '定时任务已恢复。')),
+    Promise.resolve(recordSchedulerHealth('scheduler', 'ok', '已恢复。')),
     Promise.resolve(checkSecureStorage()),
   ])
   return listHealth()

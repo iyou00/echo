@@ -4,6 +4,9 @@ import type { EchoApi, PlaybackState, QueueHistoryDay, Track } from '../../types
 import type { AppPageProps } from '../../App'
 import { EmptyState } from '../components'
 import { pageLabels } from '../labels'
+import { trackIdentity } from '../../shared/trackIdentity'
+
+const FAVORITE_PAGE_SIZE = 80
 
 interface QueuePageProps extends AppPageProps {
   queue: Track[]
@@ -17,10 +20,7 @@ interface QueuePageProps extends AppPageProps {
 
 
 function trackKey(track?: Track | null): string {
-  if (!track) return ''
-  if (track.neteaseId) return `netease:${track.neteaseId}`
-  if (track.id) return `id:${track.id}`
-  return `name:${track.title.trim().toLowerCase()}::${track.artist.trim().toLowerCase()}`
+  return trackIdentity(track)
 }
 
 function SceneTag({ track }: { track: Track }) {
@@ -43,10 +43,12 @@ export function QueuePage({
   const [autoPlaySaving, setAutoPlaySaving] = useState(false)
   const [history, setHistory] = useState<QueueHistoryDay[]>([])
   const [favorites, setFavorites] = useState<Track[]>([])
+  const [favoriteTotal, setFavoriteTotal] = useState(0)
+  const [favoriteKeys, setFavoriteKeys] = useState<Set<string>>(new Set())
+  const [favoritesLoading, setFavoritesLoading] = useState(false)
   const [openDays, setOpenDays] = useState<Set<string>>(new Set())
   const [historySelectMode, setHistorySelectMode] = useState(false)
   const [selectedHistoryDates, setSelectedHistoryDates] = useState<Set<string>>(new Set())
-  const favoriteKeys = new Set(favorites.map(trackKey))
   const currentKey = trackKey(playbackState.current)
   const queueCurrent = currentKey ? queue.find((track) => trackKey(track) === currentKey) : undefined
   const playing = queueCurrent ?? queue.find((track) => track.queueStatus === 'playing')
@@ -64,9 +66,55 @@ export function QueuePage({
     echo.queue.history(7).then(setHistory).catch(() => setHistory([]))
   }, [echo, queue.length, playbackState.status])
 
+  async function refreshFavorites(options: { reset?: boolean } = {}) {
+    const offset = options.reset ? 0 : favorites.length
+    setFavoritesLoading(true)
+    try {
+      const [items, total, keys] = await Promise.all([
+        echo.favorites.list({ limit: FAVORITE_PAGE_SIZE, offset }),
+        echo.favorites.count(),
+        echo.favorites.listKeys(),
+      ])
+      setFavoriteTotal(total)
+      setFavoriteKeys(new Set(keys))
+      setFavorites((current) => {
+        const next = options.reset ? items : [...current, ...items]
+        const seen = new Set<string>()
+        return next.filter((track) => {
+          const key = trackKey(track)
+          if (!key || seen.has(key)) return false
+          seen.add(key)
+          return true
+        })
+      })
+    } finally {
+      setFavoritesLoading(false)
+    }
+  }
+
   useEffect(() => {
-    echo.favorites.list().then(setFavorites).catch(() => setFavorites([]))
-  }, [echo, queue.length, history.length])
+    refreshFavorites({ reset: true }).catch(() => {
+      setFavorites([])
+      setFavoriteTotal(0)
+      setFavoriteKeys(new Set())
+    })
+  }, [echo])
+
+  useEffect(() => {
+    return echo.favorites.onChanged((payload) => {
+      const key = trackKey(payload.track)
+      setFavoriteTotal(payload.total)
+      setFavoriteKeys((current) => {
+        const next = new Set(current)
+        if (key) {
+          if (payload.favorited) next.add(key)
+          else next.delete(key)
+        }
+        return next
+      })
+      refreshFavorites({ reset: true }).catch(() => undefined)
+    })
+  }, [echo])
 
   async function applyState(next: PlaybackState) {
     setPlaybackState(next)
@@ -79,9 +127,7 @@ export function QueuePage({
   }
 
   async function removeTrack(track: Track) {
-    const index = playbackQueueIndex(track)
-    if (index < 0) return
-    await applyState(await echo.playback.removeFromQueue(index))
+    await applyState(await echo.playback.removeTrackFromQueue(track))
   }
 
   async function reorder(fromIndex: number, toIndex: number) {
@@ -98,6 +144,8 @@ export function QueuePage({
   async function toggleFavorite(track: Track) {
     const result = await echo.favorites.toggle(track)
     setFavorites(result.favorites)
+    setFavoriteTotal(await echo.favorites.count())
+    setFavoriteKeys(new Set(await echo.favorites.listKeys()))
   }
 
   async function enqueueContextAfter(track: Track, contextTracks: Track[]) {
@@ -130,7 +178,7 @@ export function QueuePage({
   }
 
   async function playFavorite(track: Track) {
-    await playTrackWithContext(track, favorites)
+    await playTrackWithContext(track, favorites, false)
   }
 
   async function playHistoryTrack(track: Track, dayTracks: Track[]) {
@@ -253,7 +301,7 @@ export function QueuePage({
 
       <nav className="queue-tabs">
         <button className={tab === 'now' ? 'active' : ''} onClick={() => setTab('now')}>正在播放<span>{rest.length + (playing ? 1 : 0)}</span></button>
-        <button className={tab === 'favorites' ? 'active' : ''} onClick={() => setTab('favorites')}>收藏<span>{favorites.length}</span></button>
+        <button className={tab === 'favorites' ? 'active' : ''} onClick={() => setTab('favorites')}>收藏<span>{favoriteTotal}</span></button>
         <button className={tab === 'past' ? 'active' : ''} onClick={() => setTab('past')}>过往<span>{history.length}</span></button>
       </nav>
 
@@ -294,21 +342,21 @@ export function QueuePage({
               {rest.map((track, index) => {
                 const status = nowStatus(track)
                 const playbackIndex = playbackQueueIndex(track)
-                const canOperatePlaybackQueue = playbackIndex >= 0
+                const canReorderPlaybackQueue = playbackIndex >= 0
                 return (
                   <div
                     className={`q-item ${status.className} ${dragIndex === index ? 'dragging' : ''}`}
-                    draggable={canOperatePlaybackQueue}
+                    draggable={canReorderPlaybackQueue}
                     key={`${track.title}-${index}`}
                     onClick={() => playNowTrack(track)}
                     onDragStart={() => {
-                      if (canOperatePlaybackQueue) setDragIndex(index)
+                      if (canReorderPlaybackQueue) setDragIndex(index)
                     }}
                     onDragOver={(event) => {
-                      if (canOperatePlaybackQueue) event.preventDefault()
+                      if (canReorderPlaybackQueue) event.preventDefault()
                     }}
                     onDrop={() => {
-                      if (dragIndex !== null && canOperatePlaybackQueue) reorder(dragIndex, index)
+                      if (dragIndex !== null && canReorderPlaybackQueue) reorder(dragIndex, index)
                       setDragIndex(null)
                     }}
                     onDragEnd={() => setDragIndex(null)}
@@ -329,7 +377,7 @@ export function QueuePage({
                         <button className={favoriteKeys.has(trackKey(track)) ? 'q-act-btn favorite active' : 'q-act-btn favorite'} title={favoriteKeys.has(trackKey(track)) ? '取消收藏' : '收藏'} onClick={(event) => { event.stopPropagation(); void toggleFavorite(track) }}>
                           <Heart size={13} fill={favoriteKeys.has(trackKey(track)) ? 'currentColor' : 'none'} />
                         </button>
-                        <button className="q-act-btn delete-btn" title="移除" onClick={(event) => { event.stopPropagation(); void removeTrack(track) }} disabled={!canOperatePlaybackQueue}>
+                        <button className="q-act-btn delete-btn" title="移除" onClick={(event) => { event.stopPropagation(); void removeTrack(track) }}>
                           <Trash2 size={13} />
                         </button>
                       </div>
@@ -347,6 +395,7 @@ export function QueuePage({
             {favorites.length === 0 ? (
               <EmptyState icon="♡" title="还没收藏过歌呢。" body={`在${pageLabels.chat}里听到喜欢的,点歌曲卡片右上的 ♡,我帮你留着。`} />
             ) : (
+              <>
               <div className="queue-list">
                 {favorites.map((track, index) => (
                   <div className="q-item favorite-item" key={`${trackKey(track)}-${index}`}>
@@ -358,7 +407,7 @@ export function QueuePage({
                     </div>
                     <div className="q-tail q-tail-favorite">
                       <div className="q-actions always">
-                        <button className="q-act-btn" title="播放" onClick={() => playFavorite(track)} disabled={!track.playUrl}>
+                        <button className="q-act-btn" title="播放" onClick={() => playFavorite(track)}>
                           <Play size={13} fill="currentColor" />
                         </button>
                         <button className="q-act-btn favorite active" title="取消收藏" onClick={() => toggleFavorite(track)}>
@@ -369,6 +418,12 @@ export function QueuePage({
                   </div>
                 ))}
               </div>
+              {favorites.length < favoriteTotal && (
+                <button className="queue-more-btn" type="button" onClick={() => refreshFavorites().catch(() => undefined)} disabled={favoritesLoading}>
+                  {favoritesLoading ? '加载中...' : `再看 ${Math.min(FAVORITE_PAGE_SIZE, favoriteTotal - favorites.length)} 首`}
+                </button>
+              )}
+              </>
             )}
           </section>
         )}
@@ -448,7 +503,7 @@ export function QueuePage({
             )}
           </section>
         )}
-        <footer className="queue-foot">共 {tab === 'past' ? history.reduce((sum, day) => sum + day.tracks.length, 0) : tab === 'favorites' ? favorites.length : rest.length + (playing ? 1 : 0)} 首 · 由 Echo 编排</footer>
+        <footer className="queue-foot">共 {tab === 'past' ? history.reduce((sum, day) => sum + day.tracks.length, 0) : tab === 'favorites' ? favoriteTotal : rest.length + (playing ? 1 : 0)} 首 · 由 Echo 编排</footer>
       </div>
     </div>
   )

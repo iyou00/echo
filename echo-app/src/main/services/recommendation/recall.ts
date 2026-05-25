@@ -1,0 +1,402 @@
+import { createRequire } from 'node:module'
+import type { RecommendationSource, Track } from '../../../types/ipc'
+import { getAllImportedTracks } from '../../db/playlists'
+import { listSemantics } from '../../db/semantics'
+import { getTasteProfile } from '../../db/taste'
+import { asArray, asObject, normalizeNeteaseTrack } from '../../netease/music'
+import { readNeteaseCookie } from '../../netease/auth'
+import {
+  GENERIC_GENRE_KEYWORDS,
+  GENERIC_MOOD_KEYWORDS,
+  type RecommendationIntent,
+} from './intent'
+import { normalizeText, unique, uniqueTracks } from './text'
+import { NeteaseAuthRequiredError } from './errors'
+import { allowsArtistFromCorrection, buildRecommendationMemoryConstraints } from './memoryConstraints'
+
+const require = createRequire(import.meta.url)
+const netease = require('@neteasecloudmusicapienhanced/api') as Record<string, (query: Record<string, unknown>) => Promise<ApiResponse>>
+
+type ApiResponse = {
+  body?: Record<string, unknown>
+}
+
+const NET_CALL_TIMEOUT_MS = 6000
+const FETCH_CANDIDATES_TIMEOUT_MS = 9000
+
+function assertRecallActive(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException('任务已取消', 'AbortError')
+}
+
+function timed<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise<T>((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), ms)
+    promise
+      .then((value) => {
+        clearTimeout(timer)
+        resolve(value)
+      })
+      .catch(() => {
+        clearTimeout(timer)
+        resolve(fallback)
+      })
+  })
+}
+
+function withSource(track: Track | null, source: RecommendationSource): Track | null {
+  return track ? { ...track, source: 'netease', recommendSource: source } : null
+}
+
+function extractTracks(response: ApiResponse, source: RecommendationSource): Track[] {
+  const body = asObject(response.body)
+  const data = body.data
+  const result = asObject(body.result)
+  const candidates = [
+    ...asArray(asObject(data).dailySongs),
+    ...asArray(asObject(data).list),
+    ...asArray(data),
+    ...asArray(body.recommend),
+    ...asArray(body.songs),
+    ...asArray(result.songs),
+    ...asArray(result),
+  ]
+  return candidates.map((item) => withSource(normalizeNeteaseTrack(item), source)).filter((track): track is Track => Boolean(track))
+}
+
+function extractArtistIds(response: ApiResponse): string[] {
+  const result = asObject(response.body?.result)
+  return asArray(result.artists)
+    .map((artist) => String(asObject(artist).id ?? ''))
+    .filter(Boolean)
+    .slice(0, 3)
+}
+
+function extractPlaylistIds(response: ApiResponse): string[] {
+  const result = asObject(response.body?.result)
+  return asArray(result.playlists)
+    .map((playlist) => String(asObject(playlist).id ?? ''))
+    .filter(Boolean)
+    .slice(0, 2)
+}
+
+function extractTopPlaylistIds(response: ApiResponse, limit: number): string[] {
+  const body = asObject(response.body)
+  const result = asObject(body.result)
+  return [
+    ...asArray(body.playlists),
+    ...asArray(result.playlists),
+    ...asArray(asObject(body.data).playlists),
+  ]
+    .map((playlist) => String(asObject(playlist).id ?? ''))
+    .filter(Boolean)
+    .slice(0, limit)
+}
+
+function shuffleItems<T>(items: T[]): T[] {
+  const next = [...items]
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(Math.random() * (index + 1))
+    ;[next[index], next[swap]] = [next[swap], next[index]]
+  }
+  return next
+}
+
+function pickWeightedKeywords(): string[] {
+  const profile = getTasteProfile()
+  const semanticTracks = listSemantics()
+  const pool: string[] = []
+
+  const moodKeywords = (profile?.moods ?? []).flatMap((mood) => GENERIC_MOOD_KEYWORDS[mood.tag] ?? [mood.tag])
+  const shuffledMoods = shuffleItems(unique(moodKeywords))
+  pool.push(...shuffledMoods.slice(0, 3))
+
+  const genreKeywords = (profile?.genres ?? []).flatMap((genre) => GENERIC_GENRE_KEYWORDS[genre.name] ?? [genre.name])
+  const shuffledGenres = shuffleItems(unique(genreKeywords))
+  pool.push(...shuffledGenres.slice(0, 3))
+
+  const semanticMoodCounts = new Map<string, number>()
+  const semanticGenreCounts = new Map<string, number>()
+  for (const track of semanticTracks) {
+    for (const mood of track.semantic.moods) semanticMoodCounts.set(mood, (semanticMoodCounts.get(mood) ?? 0) + 1)
+    for (const genre of track.semantic.genres) semanticGenreCounts.set(genre, (semanticGenreCounts.get(genre) ?? 0) + 1)
+  }
+  const semanticMoodKeywords = Array.from(semanticMoodCounts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .flatMap(([mood]) => GENERIC_MOOD_KEYWORDS[mood] ?? [mood])
+  pool.push(...shuffleItems(unique(semanticMoodKeywords)).slice(0, 2))
+  const semanticGenreKeywords = Array.from(semanticGenreCounts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .flatMap(([genre]) => GENERIC_GENRE_KEYWORDS[genre] ?? [genre])
+  pool.push(...shuffleItems(unique(semanticGenreKeywords)).slice(0, 2))
+
+  return unique(pool)
+}
+
+function sceneKeyword(intent: RecommendationIntent): string {
+  switch (intent.sceneKey) {
+    case 'focus':
+      return '安静 轻音乐 舒缓'
+    case 'sleepy':
+      return '提神 节奏 轻快'
+    case 'relax':
+      return '放松 舒缓 治愈'
+    case 'irritated':
+      return '放松 降噪 舒缓'
+    case 'random': {
+      const profile = pickWeightedKeywords()
+      const picked = shuffleItems(profile).slice(0, 3)
+      return picked.join(' ') || '华语流行'
+    }
+    default:
+      return ''
+  }
+}
+
+function keywordFromIntent(intent: RecommendationIntent): string {
+  if (intent.seedTitle) {
+    return unique([intent.seedTitle, intent.artistQuery ?? ''].filter(Boolean)).join(' ')
+  }
+  const parts = [
+    sceneKeyword(intent),
+    intent.artistQuery ?? '',
+    intent.language === '粤语' ? '粤语' : intent.language === '英语' ? '欧美' : intent.language === '韩语' ? 'Kpop' : '',
+    intent.moods.includes('放松') || intent.tempo === 'slow' ? '慢歌' : '',
+    intent.moods.includes('清醒') || intent.energy === 'high' ? '激昂 节奏 热血' : '',
+    intent.scenes.includes('雨天') ? '雨天' : '',
+    intent.scenes.includes('夜晚') || intent.scenes.includes('睡前') ? '夜晚' : '',
+    intent.query.replace(/[推荐推来点几首听什么值得适合歌曲音乐作品的呢吗？?]/g, '').trim(),
+  ].filter(Boolean)
+  return parts.join(' ') || '华语流行'
+}
+
+function styleTagId(intent: RecommendationIntent): number | null {
+  const joined = `${intent.language ?? ''} ${intent.query}`.toLowerCase()
+  return styleTagIdFromText(joined)
+}
+
+function styleTagIdFromText(text: string): number | null {
+  const joined = text.toLowerCase()
+  if (/r&b/.test(joined)) return 1002
+  if (/说唱|rap|hip/.test(joined)) return 1001
+  if (/摇滚|rock/.test(joined)) return 1000
+  if (/民谣|folk/.test(joined)) return 1006
+  if (/电子|edm/.test(joined)) return 1007
+  return null
+}
+
+function scenePlaylistCategories(intent: RecommendationIntent): string[] {
+  switch (intent.sceneKey) {
+    case 'focus':
+      return ['工作', '学习', '安静', '轻音乐']
+    case 'sleepy':
+      return ['兴奋', '快乐', '运动', '流行']
+    case 'relax':
+      return ['放松', '治愈', '下午茶', '清新']
+    case 'irritated':
+      return ['安静', '放松', '治愈', '轻音乐']
+    case 'random': {
+      const profile = pickWeightedKeywords()
+      const categoryHints = profile.filter((keyword) => /流行|民谣|电子|说唱|摇滚|爵士|轻快|治愈|放松|清新|怀旧|安静/.test(keyword))
+      return unique([...categoryHints, '流行', '清新', '治愈']).slice(0, 4)
+    }
+    default:
+      return []
+  }
+}
+
+function genericDiscoveryKeywords(): string[] {
+  const profileKeywords = pickWeightedKeywords().filter((keyword) => keyword.trim().length > 0)
+  const fallback = ['华语流行', '轻快 流行', '治愈 华语', '舒服 华语']
+  return unique([...profileKeywords, ...fallback]).slice(0, 8)
+}
+
+async function fetchScenePlaylistCandidates(intent: RecommendationIntent, cookie: string, signal?: AbortSignal): Promise<Track[]> {
+  const categories = shuffleItems(scenePlaylistCategories(intent)).slice(0, 3)
+  if (categories.length === 0) return []
+  const playlistIds: string[] = []
+
+  for (const cat of categories) {
+    assertRecallActive(signal)
+    const offset = Math.floor(Math.random() * 3) * 6
+    const response = await timed(
+      netease.top_playlist({ cat, order: 'hot', limit: 6, offset, cookie }),
+      NET_CALL_TIMEOUT_MS,
+      null as ApiResponse | null,
+    )
+    assertRecallActive(signal)
+    if (response) playlistIds.push(...extractTopPlaylistIds(response, 3))
+  }
+
+  const uniquePlaylistIds = unique(playlistIds).slice(0, 5)
+  const groups = await Promise.all(uniquePlaylistIds.map(async (id) => {
+    assertRecallActive(signal)
+    const detail = await timed(
+      netease.playlist_track_all({ id, limit: 24, offset: 0, cookie }),
+      NET_CALL_TIMEOUT_MS,
+      null as ApiResponse | null,
+    )
+    assertRecallActive(signal)
+    return detail ? extractTracks(detail, 'playlist') : []
+  }))
+  assertRecallActive(signal)
+  return uniqueTracks(groups.flat()).slice(0, 120)
+}
+
+export async function fetchGenericDiscoveryCandidates(intent: RecommendationIntent, signal?: AbortSignal): Promise<Track[]> {
+  assertRecallActive(signal)
+  const cookie = readNeteaseCookie()
+  if (!cookie) throw new NeteaseAuthRequiredError()
+  const keywords = shuffleItems(genericDiscoveryKeywords()).slice(0, Math.max(3, Math.min(5, intent.targetCount + 3)))
+  const calls: Array<Promise<Track[]>> = []
+
+  for (const keyword of keywords) {
+    const offset = Math.floor(Math.random() * 4) * 10
+    calls.push(netCall(netease.cloudsearch({ keywords: keyword, type: 1, limit: 30, offset, cookie }), 'search'))
+    const tagId = styleTagIdFromText(keyword)
+    if (tagId) calls.push(netCall(netease.style_song({ tagId, size: 20, cursor: Math.floor(Math.random() * 3) * 20, cookie }), 'style'))
+  }
+
+  if (calls.length === 0) calls.push(netCall(netease.personalized_newsong({ limit: 30, cookie }), 'new_song'))
+
+  const groups = await Promise.all(calls)
+  assertRecallActive(signal)
+  return uniqueTracks(groups.flat()).slice(0, 160)
+}
+
+function importedSeedTracks(intent: RecommendationIntent): Track[] {
+  const imported = getAllImportedTracks()
+  if (intent.seedTitle) {
+    const seed = imported.find((track) => normalizeText(track.title).includes(normalizeText(intent.seedTitle ?? '')))
+    if (seed) return [seed]
+  }
+  const semantic = listSemantics()
+    .filter((track) => intent.moods.some((mood) => track.semantic.moods.includes(mood)) || intent.scenes.some((scene) => track.semantic.scenes.includes(scene)))
+    .slice(0, Math.max(4, intent.targetCount))
+  return [...semantic, ...imported].filter((track) => track.id || track.neteaseId).slice(0, Math.max(3, intent.targetCount))
+}
+
+function profileArtistQueries(intent: RecommendationIntent): string[] {
+  const profile = getTasteProfile()
+  const constraints = buildRecommendationMemoryConstraints(profile)
+  const semanticArtists = listSemantics()
+    .filter((track) => intent.moods.some((mood) => track.semantic.moods.includes(mood)) || intent.scenes.some((scene) => track.semantic.scenes.includes(scene)))
+    .map((track) => track.artist)
+  const profileArtists = profile?.artists.slice(0, 6).map((artist) => artist.name) ?? []
+  return unique([intent.artistQuery ?? '', ...semanticArtists, ...profileArtists].filter(Boolean))
+    .filter((artist) => allowsArtistFromCorrection(artist, intent, constraints))
+    .slice(0, 5)
+}
+
+async function fetchArtistCandidates(intent: RecommendationIntent, cookie: string, signal?: AbortSignal): Promise<Track[]> {
+  const tracks: Track[] = []
+  for (const artist of profileArtistQueries(intent)) {
+    assertRecallActive(signal)
+    const search = await timed(
+      netease.cloudsearch({ keywords: artist, type: 100, limit: 3, offset: 0, cookie }),
+      NET_CALL_TIMEOUT_MS,
+      null as ApiResponse | null,
+    )
+    assertRecallActive(signal)
+    if (!search) continue
+    for (const id of extractArtistIds(search)) {
+      assertRecallActive(signal)
+      const topSongs = await timed(
+        netease.artist_top_song({ id, cookie }),
+        NET_CALL_TIMEOUT_MS,
+        null as ApiResponse | null,
+      )
+      assertRecallActive(signal)
+      if (topSongs) tracks.push(...extractTracks(topSongs, 'artist'))
+    }
+  }
+  return tracks
+}
+
+async function fetchPlaylistCandidates(intent: RecommendationIntent, cookie: string, signal?: AbortSignal): Promise<Track[]> {
+  const keywords = `${keywordFromIntent(intent)} 歌单`.trim()
+  const playlistOffset = Math.floor(Math.random() * 3) * 5
+  assertRecallActive(signal)
+  const search = await timed(
+    netease.cloudsearch({ keywords, type: 1000, limit: 5, offset: playlistOffset, cookie }),
+    NET_CALL_TIMEOUT_MS,
+    null as ApiResponse | null,
+  )
+  assertRecallActive(signal)
+  if (!search) return []
+  const tracks: Track[] = []
+  for (const id of extractPlaylistIds(search)) {
+    assertRecallActive(signal)
+    const detail = await timed(
+      netease.playlist_track_all({ id, limit: 24, offset: 0, cookie }),
+      NET_CALL_TIMEOUT_MS,
+      null as ApiResponse | null,
+    )
+    assertRecallActive(signal)
+    if (detail) tracks.push(...extractTracks(detail, 'playlist'))
+  }
+  return tracks
+}
+
+function netCall(promise: Promise<ApiResponse>, source: RecommendationSource): Promise<Track[]> {
+  return timed(promise, NET_CALL_TIMEOUT_MS, null as ApiResponse | null)
+    .then((res) => (res ? extractTracks(res, source) : []))
+    .catch(() => [])
+}
+
+async function fetchCandidatesInternal(intent: RecommendationIntent, signal?: AbortSignal): Promise<Track[]> {
+  assertRecallActive(signal)
+  const cookie = readNeteaseCookie()
+  if (!cookie) throw new NeteaseAuthRequiredError()
+  const candidates: Track[] = []
+
+  const searchOffset = Math.floor(Math.random() * 4) * 10
+  const sceneCalls = intent.sceneKey
+    ? [timed(fetchScenePlaylistCandidates(intent, cookie, signal), NET_CALL_TIMEOUT_MS + 5000, [] as Track[])]
+    : []
+  const personalizedCalls = intent.sceneKey
+    ? []
+    : [
+        netCall(netease.recommend_songs({ cookie }), 'daily'),
+        netCall(netease.personal_fm({ cookie }), 'fm'),
+      ]
+  const calls: Array<Promise<Track[]>> = [
+    ...sceneCalls,
+    ...(intent.seedTitle ? [netCall(netease.cloudsearch({ keywords: keywordFromIntent(intent), type: 1, limit: 10, offset: 0, cookie }), 'search')] : []),
+    ...personalizedCalls,
+    netCall(netease.cloudsearch({ keywords: keywordFromIntent(intent), type: 1, limit: 30, offset: searchOffset, cookie }), 'search'),
+    netCall(netease.personalized_newsong({ limit: 20, cookie }), 'new_song'),
+    timed(fetchArtistCandidates(intent, cookie, signal), NET_CALL_TIMEOUT_MS + 2000, [] as Track[]),
+    timed(fetchPlaylistCandidates(intent, cookie, signal), NET_CALL_TIMEOUT_MS + 2000, [] as Track[]),
+  ]
+
+  const tagId = styleTagId(intent)
+  if (tagId) {
+    calls.push(netCall(netease.style_song({ tagId, size: 20, cursor: 0, cookie }), 'style'))
+  }
+
+  for (const seed of importedSeedTracks(intent)) {
+    const id = seed.neteaseId ?? seed.id
+    if (id) calls.push(netCall(netease.simi_song({ id, limit: 20, offset: 0, cookie }), 'similar'))
+  }
+
+  const groups = await Promise.all(calls)
+  assertRecallActive(signal)
+  for (const group of groups) candidates.push(...group)
+  return uniqueTracks(candidates).slice(0, 120)
+}
+
+export async function fetchCandidates(intent: RecommendationIntent, signal?: AbortSignal): Promise<Track[]> {
+  let authError: NeteaseAuthRequiredError | null = null
+  const wrapped = fetchCandidatesInternal(intent, signal).catch((error) => {
+    if (error instanceof NeteaseAuthRequiredError) {
+      authError = error
+    }
+    return [] as Track[]
+  })
+  const result = await timed(wrapped, FETCH_CANDIDATES_TIMEOUT_MS, [] as Track[])
+  assertRecallActive(signal)
+  if (authError) throw authError
+  return result
+}

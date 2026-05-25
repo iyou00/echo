@@ -3,6 +3,8 @@ import { Send, Square } from 'lucide-react'
 import type { ActiveScene, ChatMessage, EchoApi, PlaybackState, SceneDefinition, SceneKey, ScenePlaybackResult, TasteProfile, Track } from '../../types/ipc'
 import type { AppPageProps } from '../../App'
 import { BrandLogo, EmptyState, SceneRail, TrackCard } from '../components'
+import { latestRunningRuntimeTask, useRuntimeTasks } from '../hooks/useRuntimeTasks'
+import { trackIdentity } from '../../shared/trackIdentity'
 
 interface ChatPageProps extends AppPageProps {
   echo: EchoApi
@@ -103,8 +105,7 @@ function timeLabel(value: string) {
 }
 
 function trackKey(track?: Track | null): string {
-  if (!track) return ''
-  return `${track.neteaseId ?? track.id ?? ''}:${track.title}:${track.artist}`
+  return trackIdentity(track)
 }
 
 function friendlyChatError(error: unknown) {
@@ -122,7 +123,7 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
-  const [loadingScene, setLoadingScene] = useState<string | null>(null)
+  const [loadingScene, setLoadingScene] = useState<SceneKey | null>(null)
   const [favoriteKeys, setFavoriteKeys] = useState<Set<string>>(new Set())
   const [feedbackMap, setFeedbackMap] = useState<Record<string, 'more_like_this' | 'not_right'>>({})
   const [waitingLines, setWaitingLines] = useState<Record<number, string>>({})
@@ -142,6 +143,15 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
   // 已取消的助手消息 id 集合 —— sendMessage 拿到 result 后会用它判断"用户点过取消, 这个 result 不要再展示"。
   const cancelTokens = useRef<Set<number>>(new Set())
   const activeTrackKey = trackKey(playbackState.current)
+  const runtimeTasks = useRuntimeTasks(echo)
+  const sceneTask = latestRunningRuntimeTask(runtimeTasks, ['scene-playback'], { includeChildren: false })
+  const sceneTaskRunning = Boolean(sceneTask)
+  const runtimeSceneSource = sceneTask?.sourceName
+  const runtimeSceneKey = sceneTaskRunning && scenes.some((scene) => scene.key === runtimeSceneSource)
+    ? runtimeSceneSource as SceneKey
+    : null
+  const sceneLoadingKey = loadingScene ?? runtimeSceneKey
+  const inputBusy = sending || sceneTaskRunning
 
   function cleanupAssistant(id: number) {
     if (waitingAppearTimers.current[id]) {
@@ -171,7 +181,20 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
     } else {
       setMessages([])
     }
-    echo.favorites.list().then((tracks) => setFavoriteKeys(new Set(tracks.map(trackKey)))).catch(() => setFavoriteKeys(new Set()))
+    echo.favorites.listKeys().then((keys) => setFavoriteKeys(new Set(keys))).catch(() => setFavoriteKeys(new Set()))
+  }, [echo])
+
+  useEffect(() => {
+    return echo.favorites.onChanged((payload) => {
+      setFavoriteKeys((current) => {
+        const next = new Set(current)
+        const key = trackKey(payload.track)
+        if (!key) return next
+        if (payload.favorited) next.add(key)
+        else next.delete(key)
+        return next
+      })
+    })
   }, [echo])
 
   // 不再监听 chat:stream:chunk 累积 buffer。
@@ -221,7 +244,7 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
 
   async function submitText(rawText: string) {
     const text = rawText.trim()
-    if (!text || sending || !hasLlmConfig || currentScene) return
+    if (!text || inputBusy || !hasLlmConfig || currentScene) return
 
     const userMessage: ChatMessage = {
       id: -Date.now(),
@@ -426,12 +449,14 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
   }
 
   async function enterScene(key: SceneKey) {
-    if (sending || !hasLlmConfig) return
+    if (!hasLlmConfig) return
     // toggle：点击已激活的场景 = 退出
     if (currentScene?.key === key) {
+      setLoadingScene(null)
       await endScene()
       return
     }
+    if (inputBusy) return
     if (!autoPlayNext) await updateAutoPlayNext(true)
     setLoadingScene(key)
     setDraft('')
@@ -565,7 +590,7 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
           <SceneRail
             scenes={scenes}
             currentScene={currentScene}
-            loadingKey={loadingScene}
+            loadingKey={sceneLoadingKey}
             onStart={(key) => { void enterScene(key) }}
             compact
           />
@@ -575,14 +600,14 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             placeholder={currentScene ? `正在「${currentScene.label}」中…` : hasLlmConfig ? '和 Echo 说点什么...' : '先填好 LLM 才能说话...'}
-            disabled={Boolean(currentScene) || !hasLlmConfig}
+            disabled={Boolean(currentScene) || !hasLlmConfig || sceneTaskRunning}
           />
           {sending ? (
             <button className="cancel-button" type="button" onClick={cancelMessage} title="让 Echo 先停一下">
               <Square size={13} fill="currentColor" />
             </button>
           ) : (
-            <button type="submit" disabled={!draft.trim() || !hasLlmConfig || Boolean(currentScene)} title="发送">
+            <button type="submit" disabled={!draft.trim() || !hasLlmConfig || Boolean(currentScene) || sceneTaskRunning} title="发送">
               <Send size={17} />
             </button>
           )}

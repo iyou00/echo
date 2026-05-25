@@ -2,6 +2,7 @@ import type { ProfileDisplayModel, ProfileEvidenceLevel, ProfileEvidenceSource, 
 import { getDb } from '../db'
 import { getFeedbackSignalCount, listTrackFeedback, type TrackFeedback } from '../db/feedback'
 import { getAllImportedTracks } from '../db/playlists'
+import { clearRecommendationCache } from '../db/recommendationCache'
 import { getTrackSemantic, listSemantics, semanticTrackKey } from '../db/semantics'
 import { loadProfileTrackEvents, type ProfileTrackEvent } from '../db/tracks'
 import {
@@ -15,7 +16,9 @@ import { getSettings } from '../db/settings'
 import { getYinyiRange } from '../db/yinyi'
 import { completeChat, LlmError, type LlmMessage } from '../llm/client'
 import { readRootFile } from '../utils/paths'
+import { buildSoulPolicyPrompt } from '../skills/soul/policy'
 import { inferTrackSemanticFallback } from './semantics'
+import { buildMemoryEvidencePrompt } from './memoryEvidence'
 
 interface ArtistSeed {
   genre?: string[]
@@ -40,6 +43,11 @@ export class PortraitRegenerationError extends Error {
 interface RegeneratePortraitOptions {
   refreshStructured?: boolean
   fallbackOnError?: boolean
+  signal?: AbortSignal
+}
+
+function assertPortraitActive(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException('任务已取消', 'AbortError')
 }
 
 function clamp(value: number): number {
@@ -669,6 +677,8 @@ ${buildMoodTrendSignal(profile)}
 ${JSON.stringify(profile, null, 2)}
 </current_profile>
 
+${buildMemoryEvidencePrompt(profile, { includeAudit: true })}
+
 <last_portrait>
 ${profile.echo_portrait}
 </last_portrait>
@@ -821,19 +831,22 @@ export function getProfileWithQuestions(): { profile: TasteProfile | null; quest
 }
 
 export async function regeneratePortrait(options: RegeneratePortraitOptions = {}): Promise<TasteProfile | null> {
+  assertPortraitActive(options.signal)
   const refreshStructured = options.refreshStructured ?? true
   const profile = ensureProfileDisplay((refreshStructured ? buildStructuredProfileDraft('portrait') : null) ?? getTasteProfile())
   if (!profile) return null
+  assertPortraitActive(options.signal)
 
   const prompt = readPortraitPrompt()
   const userPrompt = buildPortraitUserPrompt(profile)
   const settings = getSettings()
   try {
     const messages: LlmMessage[] = [
-      { role: 'system', content: prompt },
+      { role: 'system', content: `${buildSoulPolicyPrompt('portrait')}\n\n${prompt}` },
       { role: 'user', content: userPrompt },
     ]
-    const response = await completeChat(settings, messages, { temperature: 0.9 })
+    const response = await completeChat(settings, messages, { temperature: 0.9, signal: options.signal })
+    assertPortraitActive(options.signal)
     let parsed = parseJsonObject<PortraitResponse>(response)
     const issues = parsed?.portrait ? portraitV2Issues(parsed.portrait, profile) : ['没有返回 portrait']
     if (issues.length) {
@@ -847,7 +860,8 @@ export async function regeneratePortrait(options: RegeneratePortraitOptions = {}
           role: 'user',
           content: `上一版没有通过画像 checklist: ${issues.join('；')}${artistHint}\n请重写一次,继续严格返回 JSON。`,
         },
-      ], { temperature: 0.9 })
+      ], { temperature: 0.9, signal: options.signal })
+      assertPortraitActive(options.signal)
       const retryParsed = parseJsonObject<PortraitResponse>(retryResponse)
       if (retryParsed?.portrait) {
         const retryIssues = portraitV2Issues(retryParsed.portrait, profile)
@@ -873,6 +887,7 @@ export async function regeneratePortrait(options: RegeneratePortraitOptions = {}
     }
     return next
   } catch (error) {
+    assertPortraitActive(options.signal)
     if (options.fallbackOnError) return profile
     if (error instanceof LlmError && error.kind === 'config') {
       throw new PortraitRegenerationError('模型配置还没准备好，画像文案没有刷新。')
@@ -952,20 +967,20 @@ export async function applySignal(kind: string, payload: Record<string, unknown>
     if (artist) {
       const existing = profile.artists.find((item) => item.name === artist)
       if (existing) {
-        existing.affinity = clamp(existing.affinity + 0.03)
+        existing.affinity = clamp(existing.affinity + strength)
         existing.notes = `最近完整听过 ${String(payload.title ?? '一首歌')}`
       } else {
-        profile.artists.unshift({ name: artist, affinity: 0.56, notes: '最近完整听过' })
+        profile.artists.unshift({ name: artist, affinity: clamp(0.53 + strength), notes: '最近完整听过' })
       }
     }
-    if (semantic) applySemanticBoost(profile, semantic, 0.03, 1)
+    if (semantic) applySemanticBoost(profile, semantic, Math.max(0.01, strength), 1)
   }
 
   if (kind === 'skipped') {
     const artist = String(payload.artist ?? target).trim()
     if (artist) {
       const existing = profile.artists.find((item) => item.name === artist)
-      if (existing) existing.affinity = clamp(existing.affinity - 0.02)
+      if (existing) existing.affinity = clamp(existing.affinity - strength)
       const title = String(payload.title ?? '').trim()
       if (title) {
         const marker = `跳过:${title}`
@@ -975,7 +990,7 @@ export async function applySignal(kind: string, payload: Record<string, unknown>
     if (semantic) {
       for (const mood of semantic.moods) {
         const existing = profile.moods.find((m) => m.tag === mood)
-        if (existing) existing.frequency = clamp(existing.frequency - 0.01)
+        if (existing) existing.frequency = clamp(existing.frequency - Math.max(0.005, strength / 2))
       }
     }
   }
@@ -985,13 +1000,13 @@ export async function applySignal(kind: string, payload: Record<string, unknown>
     if (artist) {
       const existing = profile.artists.find((item) => item.name === artist)
       if (existing) {
-        existing.affinity = clamp(existing.affinity + 0.05)
+        existing.affinity = clamp(existing.affinity + strength)
         existing.notes = `24 小时内循环过 ${String(payload.title ?? '一首歌')}`
       } else {
-        profile.artists.unshift({ name: artist, affinity: 0.62, notes: '最近循环过' })
+        profile.artists.unshift({ name: artist, affinity: clamp(0.58 + strength), notes: '最近循环过' })
       }
     }
-    if (semantic) applySemanticBoost(profile, semantic, 0.06, 3)
+    if (semantic) applySemanticBoost(profile, semantic, Math.max(0.03, strength), 3)
   }
 
   if (kind === 'favorited') {
@@ -999,10 +1014,10 @@ export async function applySignal(kind: string, payload: Record<string, unknown>
     if (artist) {
       const existing = profile.artists.find((item) => item.name === artist)
       if (existing) {
-        existing.affinity = clamp(existing.affinity + 0.08)
+        existing.affinity = clamp(existing.affinity + strength)
         existing.notes = `刚收藏过 ${String(payload.title ?? '一首歌')}`
       } else {
-        profile.artists.unshift({ name: artist, affinity: 0.66, notes: '刚收藏过' })
+        profile.artists.unshift({ name: artist, affinity: clamp(0.6 + strength), notes: '刚收藏过' })
       }
     }
     const title = String(payload.title ?? '').trim()
@@ -1020,13 +1035,14 @@ export async function applySignal(kind: string, payload: Record<string, unknown>
         ].slice(0, 10)
       }
     }
-    if (semantic) applySemanticBoost(profile, semantic, 0.08, 4)
+    if (semantic) applySemanticBoost(profile, semantic, Math.max(0.05, strength), 4)
   }
 
   if (kind === 'event_started' || kind === 'correct_assumption') {
     getDb()
       .prepare('INSERT INTO events (user_id, kind, content, confidence, weight, started_at) VALUES (1, ?, ?, ?, ?, CURRENT_TIMESTAMP)')
       .run(kind === 'event_started' ? 'context' : 'correction', target || String(payload.note ?? '用户修正了 Echo 的判断'), 0.7, 0.8)
+    if (kind === 'correct_assumption') clearRecommendationCache()
   }
 
   if (kind === 'event_ended') {
@@ -1047,6 +1063,5 @@ export async function applySignal(kind: string, payload: Record<string, unknown>
 
 export async function answerQuestion(id: number, answer: string): Promise<{ ok: boolean }> {
   saveTasteQuestionAnswer(id, answer)
-  await applySignal('correct_assumption', { target: answer, strength: 0.2, note: `taste_question:${id}` })
   return { ok: true }
 }

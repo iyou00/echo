@@ -1,3 +1,4 @@
+import { RUNTIME_TASK_RECENT_LIMIT } from '../types/ipc'
 import type {
   ChatMessage,
   EchoApi,
@@ -21,7 +22,12 @@ import type {
   Track,
   YinyiEntry,
   ImportTaskSnapshot,
+  MemoryAuditSummary,
+  RuntimeEvent,
+  RuntimeTaskSnapshot,
 } from '../types/ipc'
+import { chineseDayPeriodLabel } from '../shared/dayPeriod'
+import { trackIdentity } from '../shared/trackIdentity'
 
 const now = new Date().toISOString()
 
@@ -136,8 +142,10 @@ let healthState: ServiceHealth[] = [
 ]
 let profileState: TasteProfile | null = structuredClone(mockProfile)
 let questionState: TasteQuestion[] = structuredClone(mockQuestions)
+let correctionState: string[] = []
 let queueState: Track[] = structuredClone(mockTracks)
 let favoriteState: Track[] = []
+const favoriteListeners = new Set<(payload: { track: Track; favorited: boolean; total: number }) => void>()
 let activeSceneState: ActiveScene | null = null
 let sceneSessions: ActiveScene[] = []
 const playbackState: PlaybackState = {
@@ -182,9 +190,104 @@ let closeRequestListeners: Array<() => void> = []
 let navigateListeners: Array<Parameters<EchoApi['app']['onNavigate']>[0]> = []
 let importTaskState: ImportTaskSnapshot | null = null
 let importTaskListeners: Array<(snapshot: ImportTaskSnapshot | null) => void> = []
+let runtimeTaskListeners: Array<(snapshot: RuntimeTaskSnapshot) => void> = []
+let runtimeEventListeners: Array<(event: RuntimeEvent) => void> = []
+const runtimeTasks: RuntimeTaskSnapshot[] = []
+let runtimeTaskSequence = 0
 
 function wait(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
+function emitMockRuntimeTask(task: RuntimeTaskSnapshot) {
+  const next = structuredClone(task)
+  runtimeTaskListeners.forEach((listener) => listener(next))
+}
+
+function rememberMockRuntimeTask(task: RuntimeTaskSnapshot) {
+  const index = runtimeTasks.findIndex((item) => item.id === task.id)
+  if (index >= 0) runtimeTasks.splice(index, 1)
+  runtimeTasks.unshift(task)
+  runtimeTasks.splice(50)
+  emitMockRuntimeTask(task)
+}
+
+function startMockRuntimeTask(input: {
+  kind: string
+  parentTaskId?: string
+  phase?: string
+  total?: number
+  message?: string
+  sourceName?: string
+  cancellable?: boolean
+}): RuntimeTaskSnapshot {
+  const startedAt = new Date().toISOString()
+  const task: RuntimeTaskSnapshot = {
+    id: `mock-runtime-${Date.now()}-${++runtimeTaskSequence}`,
+    parentTaskId: input.parentTaskId,
+    kind: input.kind,
+    status: 'running',
+    phase: input.phase ?? 'preparing',
+    current: 0,
+    total: input.total ?? 1,
+    startedAt,
+    updatedAt: startedAt,
+    sourceName: input.sourceName,
+    message: input.message,
+    cancellable: input.cancellable ?? true,
+  }
+  rememberMockRuntimeTask(task)
+  return task
+}
+
+function updateMockRuntimeTask(task: RuntimeTaskSnapshot, patch: Partial<RuntimeTaskSnapshot>) {
+  if (task.status !== 'running') return
+  Object.assign(task, patch, {
+    id: task.id,
+    kind: task.kind,
+    updatedAt: new Date().toISOString(),
+  })
+  rememberMockRuntimeTask(task)
+}
+
+function finishMockRuntimeTask(task: RuntimeTaskSnapshot, status: RuntimeTaskSnapshot['status'], patch: Partial<RuntimeTaskSnapshot> = {}) {
+  if (task.status !== 'running') return
+  Object.assign(task, patch, {
+    id: task.id,
+    kind: task.kind,
+    status,
+    updatedAt: new Date().toISOString(),
+    finishedAt: new Date().toISOString(),
+  })
+  rememberMockRuntimeTask(task)
+}
+
+function assertMockRuntimeTaskActive(task: RuntimeTaskSnapshot) {
+  if (task.status === 'canceled') throw new DOMException('任务已取消', 'AbortError')
+}
+
+async function runMockRuntimeTask<T>(
+  input: Parameters<typeof startMockRuntimeTask>[0],
+  runner: (task: RuntimeTaskSnapshot) => Promise<T>,
+): Promise<T> {
+  const task = startMockRuntimeTask(input)
+  try {
+    const result = await runner(task)
+    assertMockRuntimeTaskActive(task)
+    finishMockRuntimeTask(task, 'succeeded', {
+      phase: 'done',
+      current: task.total,
+      message: task.message ?? '任务已完成。',
+    })
+    return result
+  } catch (error) {
+    if (task.status === 'canceled') throw error
+    finishMockRuntimeTask(task, 'failed', {
+      error: error instanceof Error ? error.message : '任务失败',
+      errorKind: error instanceof DOMException && error.name === 'AbortError' ? 'canceled' : 'unknown',
+    })
+    throw error
+  }
 }
 
 function setNestedSetting(path: string, value: unknown): Settings {
@@ -211,14 +314,16 @@ function todayIso(offset = 0) {
 }
 
 function mockTrackKey(track?: Track | null) {
-  if (!track) return ''
-  if (track.neteaseId) return `netease:${track.neteaseId}`
-  if (track.id) return `id:${track.id}`
-  return `name:${track.title.trim().toLowerCase()}::${track.artist.trim().toLowerCase()}`
+  return trackIdentity(track)
 }
 
 function mockIsFavorite(track: Track) {
   return favoriteState.some((item) => mockTrackKey(item) === mockTrackKey(track))
+}
+
+function emitFavoriteChanged(track: Track, favorited: boolean) {
+  const payload = { track: structuredClone(track), favorited, total: favoriteState.length }
+  favoriteListeners.forEach((listener) => listener(structuredClone(payload)))
 }
 
 const sceneListeners = new Set<(scene: ActiveScene | null) => void>()
@@ -258,6 +363,15 @@ function emitPlayback() {
 
 function setMockImportTask(snapshot: ImportTaskSnapshot | null) {
   importTaskState = snapshot ? structuredClone(snapshot) : null
+  if (snapshot) {
+    const runtimeSnapshot: RuntimeTaskSnapshot = {
+      ...snapshot,
+      kind: snapshot.kind === 'playlist-file' ? 'playlist-import' : snapshot.kind === 'netease-playlist' ? 'netease-playlist-import' : snapshot.kind,
+      status: snapshot.status === 'interrupted' ? 'canceled' : snapshot.status,
+      cancellable: false,
+    }
+    rememberMockRuntimeTask(runtimeSnapshot)
+  }
   const next = importTaskState ? structuredClone(importTaskState) : null
   importTaskListeners.forEach((listener) => listener(next))
 }
@@ -284,6 +398,32 @@ const yinyiEntries: YinyiEntry[] = [
 ]
 
 const mockEcho: EchoApi = {
+  runtime: {
+    async getTask(id) {
+      return structuredClone(runtimeTasks.find((task) => task.id === id) ?? null)
+    },
+    async getRecentTasks() {
+      return structuredClone(runtimeTasks.slice(0, RUNTIME_TASK_RECENT_LIMIT))
+    },
+    async cancelTask(id) {
+      const task = runtimeTasks.find((item) => item.id === id)
+      if (!task || task.status !== 'running' || !task.cancellable) return { ok: false }
+      finishMockRuntimeTask(task, 'canceled', { errorKind: 'canceled', message: '任务已取消' })
+      return { ok: true }
+    },
+    onTaskChanged(listener) {
+      runtimeTaskListeners.push(listener)
+      return () => {
+        runtimeTaskListeners = runtimeTaskListeners.filter((item) => item !== listener)
+      }
+    },
+    onEvent(listener) {
+      runtimeEventListeners.push(listener)
+      return () => {
+        runtimeEventListeners = runtimeEventListeners.filter((item) => item !== listener)
+      }
+    },
+  },
   settings: {
     async get() {
       return structuredClone(settingsState)
@@ -402,35 +542,51 @@ const mockEcho: EchoApi = {
   },
   scheduler: {
     async runCatchup() {
-      const primary = { ok: true, job: 'yinyi_daily' as const, date: todayIso(), status: 'skipped' as const, message: '这一天已经有音忆了。' }
-      return { ok: true, primary, results: [primary] }
+      return runMockRuntimeTask({ kind: 'scheduler-catchup', phase: 'catchup', total: 1, message: '执行启动补偿任务' }, async (task) => {
+        await wait(180)
+        assertMockRuntimeTaskActive(task)
+        const primary = { ok: true, job: 'yinyi_daily' as const, date: todayIso(), status: 'skipped' as const, message: '这一天已经有音忆了。' }
+        updateMockRuntimeTask(task, { phase: 'done', current: 1, message: primary.message })
+        return { ok: true, primary, results: [primary] }
+      })
     },
   },
   chat: {
     async send(text: string): Promise<SendChatResult> {
-      const user: ChatMessage = { id: ++messageId, role: 'user', content: text, createdAt: new Date().toISOString() }
-      messages.push(user)
-      const picked = mockTracks.slice(0, text.includes('慢') || text.includes('类似') ? 3 : 1)
-      const content = picked.length > 1 ? '给你接三首慢一点的。第一首先降速，后两首把情绪铺开。' : '我先给你放这首。它的入口轻，适合现在。'
-      for (const chunk of content.match(/.{1,8}/g) ?? [content]) {
-        await wait(80)
-        chunkListeners.forEach((listener) => listener(chunk))
-      }
-      const assistant: ChatMessage = {
-        id: ++messageId,
-        role: 'assistant',
-        content,
-        createdAt: new Date().toISOString(),
-        tracks: picked,
-      }
-      messages.push(assistant)
-      queueState = picked.concat(queueState.filter((track) => !picked.some((item) => item.title === track.title)))
-      return { message: assistant, tracks: picked }
+      return runMockRuntimeTask({ kind: 'chat-send', phase: 'input', total: 4, sourceName: text.slice(0, 64), message: '理解你的消息' }, async (task) => {
+        const user: ChatMessage = { id: ++messageId, role: 'user', content: text, createdAt: new Date().toISOString() }
+        messages.push(user)
+        updateMockRuntimeTask(task, { phase: 'recommendation', current: 1, message: '挑选合适的歌曲' })
+        await wait(160)
+        assertMockRuntimeTaskActive(task)
+        const picked = mockTracks.slice(0, text.includes('慢') || text.includes('类似') ? 3 : 1)
+        const content = picked.length > 1 ? '给你接三首慢一点的。第一首先降速，后两首把情绪铺开。' : '我先给你放这首。它的入口轻，适合现在。'
+        updateMockRuntimeTask(task, { phase: 'stream', current: 2, message: '生成回复' })
+        for (const chunk of content.match(/.{1,8}/g) ?? [content]) {
+          await wait(80)
+          assertMockRuntimeTaskActive(task)
+          chunkListeners.forEach((listener) => listener(chunk))
+        }
+        updateMockRuntimeTask(task, { phase: 'persist', current: 3, message: '保存对话' })
+        const assistant: ChatMessage = {
+          id: ++messageId,
+          role: 'assistant',
+          content,
+          createdAt: new Date().toISOString(),
+          tracks: picked,
+        }
+        messages.push(assistant)
+        queueState = picked.concat(queueState.filter((track) => !picked.some((item) => item.title === track.title)))
+        updateMockRuntimeTask(task, { phase: 'done', current: 4, message: '回复已生成。' })
+        return { message: assistant, tracks: picked }
+      })
     },
     async loadRecent(limit = 30) {
       return structuredClone(messages.slice(-limit))
     },
     async cancel() {
+      const task = runtimeTasks.find((item) => item.kind === 'chat-send' && item.status === 'running' && item.cancellable)
+      if (task) finishMockRuntimeTask(task, 'canceled', { errorKind: 'canceled', message: '任务已取消' })
       return { ok: true }
     },
     onChunk(listener) {
@@ -450,12 +606,80 @@ const mockEcho: EchoApi = {
     async getProfile() {
       return { profile: structuredClone(profileState), questions: structuredClone(questionState) }
     },
+    async getMemoryAudit() {
+      const audit: MemoryAuditSummary = {
+        updatedAt: new Date().toISOString(),
+        counts: {
+          corrections: correctionState.length,
+          favorites: favoriteState.length,
+          explicitLikes: 1,
+          explicitMisses: 1,
+          loops: 1,
+          repeatedSkips: 1,
+        },
+        items: [
+          ...correctionState.map((content, index) => ({
+            id: `mock-correction-${index}`,
+            kind: 'correction' as const,
+            label: '纠正',
+            title: content,
+            createdAt: new Date(Date.now() - index * 60000).toISOString(),
+          })),
+          {
+            id: 'mock-favorite-1',
+            kind: 'favorite' as const,
+            label: '收藏',
+            title: `《${mockTracks[0].title}》`,
+            detail: mockTracks[0].artist,
+            createdAt: now,
+            track: structuredClone(mockTracks[0]),
+          },
+          {
+            id: 'mock-loop-1',
+            kind: 'loop' as const,
+            label: '循环',
+            title: `《${mockTracks[2].title}》`,
+            detail: `2 次 · ${mockTracks[2].artist}`,
+            createdAt: now,
+            track: structuredClone(mockTracks[2]),
+          },
+          {
+            id: 'mock-miss-1',
+            kind: 'explicit_miss' as const,
+            label: '不合适',
+            title: `《${mockTracks[3].title}》`,
+            detail: '这次方向偏了',
+            createdAt: now,
+            track: structuredClone(mockTracks[3]),
+          },
+        ].slice(0, 8),
+      }
+      return structuredClone(audit)
+    },
     async regeneratePortrait() {
-      profileState = structuredClone(mockProfile)
-      return structuredClone(profileState)
+      return runMockRuntimeTask({ kind: 'taste-refresh', phase: 'structured-profile', total: 2, message: '整理口味画像信号' }, async (task) => {
+        await wait(220)
+        assertMockRuntimeTaskActive(task)
+        updateMockRuntimeTask(task, { phase: 'portrait', current: 1, message: '重写画像文案' })
+        await wait(260)
+        assertMockRuntimeTaskActive(task)
+        profileState = structuredClone(mockProfile)
+        updateMockRuntimeTask(task, { phase: 'done', current: 2, message: '画像文案已刷新。' })
+        return structuredClone(profileState)
+      })
     },
     async applySignal() {
       return structuredClone(profileState)
+    },
+    async correctMemory(note) {
+      const content = note.trim()
+      if (!content) return { ok: false, message: '先写一句你想纠正的地方。' }
+      profileState = {
+        ...(profileState ?? structuredClone(mockProfile)),
+        echo_portrait: `${profileState?.echo_portrait ?? mockProfile.echo_portrait}\n修正:${content}`,
+      }
+      correctionState = [content, ...correctionState].slice(0, 6)
+      return { ok: true, message: '我记下了，下次画像会按这个修正。' }
     },
     async answerQuestion(id, answer) {
       questionState = questionState.map((question) =>
@@ -466,18 +690,23 @@ const mockEcho: EchoApi = {
   },
   yinyi: {
     async generate(date = todayIso()) {
-      const entry: YinyiEntry = {
-        id: Date.now(),
-        date,
-        style: 'manual',
-        content:
-          '今天这篇是你手动叫我写的。\n\n我看见你在几首歌之间找一个合适的速度。歌单里没有大动作，只有你一点一点把注意力收回来。\n\n这也算今天的线索。',
-        meta: { tracks: queueState.slice(0, 3), status: 'ok' },
-        createdAt: new Date().toISOString(),
-      }
-      yinyiEntries.unshift(entry)
-      yinyiGeneratedListeners.forEach((listener) => listener({ date: entry.date, status: entry.meta?.status ?? 'ok' }))
-      return structuredClone(entry)
+      return runMockRuntimeTask({ kind: 'yinyi-generate', phase: 'generate', total: 1, message: '生成风信' }, async (task) => {
+        await wait(320)
+        assertMockRuntimeTaskActive(task)
+        const entry: YinyiEntry = {
+          id: Date.now(),
+          date,
+          style: 'manual',
+          content:
+            '今天这篇是你手动叫我写的。\n\n我看见你在几首歌之间找一个合适的速度。歌单里没有大动作，只有你一点一点把注意力收回来。\n\n这也算今天的线索。',
+          meta: { tracks: queueState.slice(0, 3), status: 'ok' },
+          createdAt: new Date().toISOString(),
+        }
+        yinyiEntries.unshift(entry)
+        yinyiGeneratedListeners.forEach((listener) => listener({ date: entry.date, status: entry.meta?.status ?? 'ok' }))
+        updateMockRuntimeTask(task, { phase: 'done', current: 1, message: '风信已生成。' })
+        return structuredClone(entry)
+      })
     },
     async getByDate(date) {
       return structuredClone(yinyiEntries.find((entry) => entry.date === date) ?? null)
@@ -520,8 +749,22 @@ const mockEcho: EchoApi = {
     },
   },
   favorites: {
-    async list() {
-      return structuredClone(favoriteState.map((track) => ({ ...track, favorited: true })))
+    async list(options) {
+      const query = options?.query?.trim().toLowerCase()
+      const offset = Math.max(0, Math.floor(options?.offset ?? 0))
+      const limit = Math.max(1, Math.min(200, Math.floor(options?.limit ?? 200)))
+      const filtered = query
+        ? favoriteState.filter((track) => `${track.title} ${track.artist} ${track.album ?? ''}`.toLowerCase().includes(query))
+        : favoriteState
+      return structuredClone(filtered.slice(offset, offset + limit).map((track) => ({ ...track, favorited: true })))
+    },
+    async count(query) {
+      const normalized = query?.trim().toLowerCase()
+      if (!normalized) return favoriteState.length
+      return favoriteState.filter((track) => `${track.title} ${track.artist} ${track.album ?? ''}`.toLowerCase().includes(normalized)).length
+    },
+    async listKeys() {
+      return structuredClone(favoriteState.map(mockTrackKey))
     },
     async toggle(track) {
       const key = mockTrackKey(track)
@@ -529,10 +772,15 @@ const mockEcho: EchoApi = {
       favoriteState = exists
         ? favoriteState.filter((item) => mockTrackKey(item) !== key)
         : [{ ...track, favorited: true }, ...favoriteState]
-      return { favorited: !exists, favorites: structuredClone(favoriteState) }
+      emitFavoriteChanged(track, !exists)
+      return { favorited: !exists, favorites: structuredClone(favoriteState.slice(0, 200)) }
     },
     async isFavorite(track) {
       return mockIsFavorite(track)
+    },
+    onChanged(listener) {
+      favoriteListeners.add(listener)
+      return () => favoriteListeners.delete(listener)
     },
   },
   feedback: {
@@ -569,39 +817,53 @@ const mockEcho: EchoApi = {
       return structuredClone(scene)
     },
     async play(key, options) {
-      const scene = await this.start(key)
-      const tracks = structuredClone(mockTracks.slice(0, scene.targetCount).map((track) => ({
-        ...track,
-        playUrl: track.playUrl ?? 'mock://audio',
-        sceneKey: scene.key,
-        sceneLabel: scene.label,
-        sceneLine: scene.line,
-        sceneSessionId: scene.id,
-        queueStatus: 'pending' as const,
-      })))
-      if (mockSceneSuperseded(scene)) return { scene, tracks: [], state: structuredClone(playbackState) }
-      if (tracks.length > 0) {
-        const [first, ...rest] = tracks
-        playbackState.current = { ...first, queueStatus: 'playing' }
-        playbackState.position = 0
-        playbackState.duration = first.durationMs ?? 180000
-        playbackState.status = 'loading'
-        playbackState.queue = rest
-        queueState = [{ ...first, queueStatus: 'playing' }, ...rest]
-        emitPlayback()
-      }
-      if (mockSceneSuperseded(scene)) return { scene, tracks: [], state: structuredClone(playbackState) }
-      const message = options?.appendChatMessage
-        ? {
-          id: ++messageId,
-          role: 'assistant' as const,
-          content: tracks[0] ? mockSceneMessage(scene.key, tracks[0].title) : `好，我先帮你找几首${scene.label}的。`,
-          createdAt: new Date().toISOString(),
-          tracks,
+      return runMockRuntimeTask({ kind: 'scene-playback', phase: 'recommend', total: 4, sourceName: key, message: '准备场景歌曲' }, async (task) => {
+        const scene = options?.continueSession && activeSceneState?.status === 'active' && activeSceneState.key === key
+          ? activeSceneState
+          : await this.start(key)
+        await wait(180)
+        assertMockRuntimeTaskActive(task)
+        const targetCount = Math.max(1, Math.min(scene.targetCount, options?.targetCount ?? scene.targetCount))
+        const tracks = structuredClone(mockTracks.slice(0, targetCount).map((track) => ({
+          ...track,
+          playUrl: track.playUrl ?? 'mock://audio',
+          sceneKey: scene.key,
+          sceneLabel: scene.label,
+          sceneLine: scene.line,
+          sceneSessionId: scene.id,
+          queueStatus: 'pending' as const,
+        })))
+        if (mockSceneSuperseded(scene)) return { scene, tracks: [], state: structuredClone(playbackState) }
+        updateMockRuntimeTask(task, { phase: 'queue', current: 2, message: `准备 ${tracks.length} 首场景歌曲` })
+        if (tracks.length > 0) {
+          const [first, ...rest] = tracks
+          playbackState.current = { ...first, queueStatus: 'playing' }
+          playbackState.position = 0
+          playbackState.duration = first.durationMs ?? 180000
+          playbackState.status = 'loading'
+          playbackState.queue = rest
+          queueState = [{ ...first, queueStatus: 'playing' }, ...rest]
+          emitPlayback()
         }
-        : undefined
-      if (message) messages.push(message)
-      return { scene, tracks, state: structuredClone(playbackState), message }
+        await wait(120)
+        assertMockRuntimeTaskActive(task)
+        if (mockSceneSuperseded(scene)) return { scene, tracks: [], state: structuredClone(playbackState) }
+        updateMockRuntimeTask(task, { phase: 'chat-line', current: 4, message: scene.label })
+        const message = options?.appendChatMessage
+          ? {
+            id: ++messageId,
+            role: 'assistant' as const,
+            content: tracks[0] ? mockSceneMessage(scene.key, tracks[0].title) : `好，我先帮你找几首${scene.label}的。`,
+            createdAt: new Date().toISOString(),
+            tracks,
+          }
+          : undefined
+        if (message) {
+          messages.push(message)
+          injectedMessageListeners.forEach((listener) => listener(structuredClone(message)))
+        }
+        return { scene, tracks, state: structuredClone(playbackState), message }
+      })
     },
     async end() {
       if (!activeSceneState || activeSceneState.status !== 'active') return null
@@ -723,7 +985,22 @@ const mockEcho: EchoApi = {
       return emitPlayback()
     },
     async removeFromQueue(index) {
+      const target = playbackState.queue[index]
       playbackState.queue = playbackState.queue.filter((_, itemIndex) => itemIndex !== index)
+      if (target) {
+        const key = mockTrackKey(target)
+        queueState = queueState.map((item) => (
+          mockTrackKey(item) === key ? { ...item, queueStatus: 'skipped' as const } : item
+        ))
+      }
+      return emitPlayback()
+    },
+    async removeTrackFromQueue(track) {
+      const key = mockTrackKey(track)
+      playbackState.queue = playbackState.queue.filter((item) => mockTrackKey(item) !== key)
+      queueState = queueState.map((item) => (
+        mockTrackKey(item) === key ? { ...item, queueStatus: 'skipped' as const } : item
+      ))
       return emitPlayback()
     },
     async clearQueue() {
@@ -806,10 +1083,15 @@ const mockEcho: EchoApi = {
   },
   voice: {
     async generate() {
-      return {
-        content: '刚才那几首歌先放着。你不用急着切换，让情绪慢一点落下来。',
-        status: 'done',
-      }
+      return runMockRuntimeTask({ kind: 'voice-line', phase: 'generate', total: 1, message: '生成口播文案' }, async (task) => {
+        await wait(180)
+        assertMockRuntimeTaskActive(task)
+        updateMockRuntimeTask(task, { phase: 'done', current: 1, message: '口播文案已生成。' })
+        return {
+          content: '刚才那几首歌先放着。你不用急着切换，让情绪慢一点落下来。',
+          status: 'done',
+        }
+      })
     },
   },
   tts: {
@@ -828,13 +1110,25 @@ const mockEcho: EchoApi = {
   },
   listening: {
     async generateSegment() {
-      const track = { ...mockTracks[0], playUrl: 'mock://audio', durationMs: 180000, sourceContext: 'voice' as const }
-      return {
-        text: `下午好。这个时间适合把节奏放轻一点,我给你放${track.artist}的《${track.title}》。先让它垫在后面,你不用急着切走。`,
-        track,
-        generatedAt: new Date().toISOString(),
-        error: '浏览器预览不合成语音',
-      }
+      return runMockRuntimeTask({ kind: 'listening-segment', phase: 'context', total: 4, message: '整理回声上下文' }, async (task) => {
+        await wait(160)
+        assertMockRuntimeTaskActive(task)
+        updateMockRuntimeTask(task, { phase: 'candidates', current: 2, message: '挑选回声歌曲' })
+        await wait(180)
+        assertMockRuntimeTaskActive(task)
+        updateMockRuntimeTask(task, { phase: 'tts', current: 3, message: '合成回声音频' })
+        const track = { ...mockTracks[0], playUrl: 'mock://audio', durationMs: 180000, sourceContext: 'voice' as const }
+        await wait(120)
+        assertMockRuntimeTaskActive(task)
+        updateMockRuntimeTask(task, { phase: 'done', current: 4, message: '浏览器预览不合成语音' })
+        const period = chineseDayPeriodLabel()
+        return {
+          text: `${period}好。这个时间适合把节奏放轻一点,我给你放${track.artist}的《${track.title}》。先让它垫在后面,你不用急着切走。`,
+          track,
+          generatedAt: new Date().toISOString(),
+          error: '浏览器预览不合成语音',
+        }
+      })
     },
   },
   carePings: {
@@ -847,20 +1141,25 @@ const mockEcho: EchoApi = {
       ]
     },
     async test(type = 'casual_check') {
-      const page = type === 'voice_invite' ? 'voice' : 'chat'
-      if (type !== 'voice_invite') {
-        const message: ChatMessage = {
-          id: ++messageId,
-          role: 'assistant',
-          content: type === 'recommend_track' ? '来了。' : '周二下午,工作还顺吗?',
-          createdAt: new Date().toISOString(),
-          tracks: type === 'recommend_track' ? [mockTracks[0]] : [],
+      return runMockRuntimeTask({ kind: 'care-ping', phase: 'generate', total: 1, message: '生成主动关心' }, async (task) => {
+        await wait(180)
+        assertMockRuntimeTaskActive(task)
+        const page = type === 'voice_invite' ? 'voice' : 'chat'
+        if (type !== 'voice_invite') {
+          const message: ChatMessage = {
+            id: ++messageId,
+            role: 'assistant',
+            content: type === 'recommend_track' ? '来了。' : '周二下午,工作还顺吗?',
+            createdAt: new Date().toISOString(),
+            tracks: type === 'recommend_track' ? [mockTracks[0]] : [],
+          }
+          messages.push(message)
+          injectedMessageListeners.forEach((listener) => listener(structuredClone(message)))
         }
-        messages.push(message)
-        injectedMessageListeners.forEach((listener) => listener(structuredClone(message)))
-      }
-      navigateListeners.forEach((listener) => listener({ page, action: type === 'voice_invite' ? 'start_listening' : undefined, canMuteToday: true }))
-      return { ok: true, message: '浏览器预览会模拟跳转，系统通知请在 Echo 客户端窗口测试' }
+        navigateListeners.forEach((listener) => listener({ page, action: type === 'voice_invite' ? 'start_listening' : undefined, canMuteToday: true }))
+        updateMockRuntimeTask(task, { phase: 'done', current: 1, message: '测试通知已发出。' })
+        return { ok: true, message: '浏览器预览会模拟跳转，系统通知请在 Echo 客户端窗口测试' }
+      })
     },
     async muteToday() {
       return { ok: true, message: '今天先不提醒了' }
