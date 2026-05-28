@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef } from 'react'
+import { FormEvent, useEffect, useRef, useState } from 'react'
 import { Download, Upload } from 'lucide-react'
 import type { CareFrequency, EchoApi, ImportProgressPayload, ImportTaskSnapshot, Settings, Track } from '../../types/ipc'
 import type { AppPageProps } from '../appState'
@@ -194,6 +194,9 @@ export function SettingsPage({
     setResetConfirmChecked,
   } = useSettingsPageState()
 
+  const [activeTab, setActiveTab] = useState<'sync' | 'pref' | 'sys'>(hasLlmConfig ? 'sync' : 'sys')
+  const [showNeteaseDrawer, setShowNeteaseDrawer] = useState(false)
+
   function switchProvider(key: string) {
     const preset = providerPresets[key]
     patchSettingsPageState({
@@ -263,6 +266,7 @@ export function SettingsPage({
 
   useEffect(() => {
     if (!importFocusToken) return
+    setActiveTab('sync')
     window.setTimeout(() => {
       importSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
     }, 120)
@@ -270,6 +274,7 @@ export function SettingsPage({
 
   useEffect(() => {
     if (!apiFocusToken) return
+    setActiveTab('sys')
     window.setTimeout(() => {
       apiSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
     }, 120)
@@ -644,6 +649,9 @@ export function SettingsPage({
       const playlists = await echo.netease.listPlaylists()
       setNeteasePlaylists(playlists)
       setNeteasePlaylistStatus(playlists.length > 0 ? `读到 ${playlists.length} 个歌单` : '没有读到歌单')
+      if (playlists.length > 0) {
+        setShowNeteaseDrawer(true)
+      }
     } catch (error) {
       setNeteasePlaylistStatus(error instanceof Error ? error.message : '读取歌单失败')
     } finally {
@@ -746,443 +754,496 @@ export function SettingsPage({
         : ''
   return (
     <div className="phone-surface settings-page">
+      {/* Tabs Header */}
+      <div className="tabs-bar">
+        <button
+          className={`tab-btn ${activeTab === 'sync' ? 'active' : ''}`}
+          type="button"
+          onClick={() => setActiveTab('sync')}
+        >
+          音乐同步
+        </button>
+        <button
+          className={`tab-btn ${activeTab === 'pref' ? 'active' : ''}`}
+          type="button"
+          onClick={() => setActiveTab('pref')}
+        >
+          偏好设置
+        </button>
+        <button
+          className={`tab-btn ${activeTab === 'sys' ? 'active' : ''}`}
+          type="button"
+          onClick={() => setActiveTab('sys')}
+        >
+          系统与服务
+        </button>
+      </div>
+
       <div className="scroll-panel">
-        {!hasLlmConfig && (
-          <div className="first-run">
-            <div>嗨,我是 Echo。</div>
-            <p>在我们开始之前,你需要给我一个 LLM 端点——这样我才能“说话”。DeepSeek 一个月几块钱,Kimi 也行,任何 OpenAI 兼容的服务都可以。</p>
+        {/* Pinned Progress HUD */}
+        {(globalImportStatus || importProgress) && (
+          <div className="import-progress-hud" aria-live="polite">
+            <div className="hud-meta">
+              <div className="hud-title">
+                <span className="hud-pulse" />
+                {importProgress ? '正在导入你的歌单...' : '歌单导入任务'}
+              </div>
+              {importProgress && (
+                <div className="hud-percent">
+                  {importProgressPercent(importProgress)}%
+                </div>
+              )}
+            </div>
+            {importProgress && (
+              <div className="hud-bar-bg">
+                <div className="hud-bar-fill" style={{ width: `${importProgressPercent(importProgress)}%` }} />
+              </div>
+            )}
+            <div className="hud-status-text">
+              {importProgress ? importProgressLine(importProgress) : globalImportStatus}
+            </div>
+            {globalImportStatus && importProgress && (
+              <div className="hud-status-text" style={{ opacity: 0.7, fontSize: '10px' }}>
+                {globalImportStatus}
+              </div>
+            )}
           </div>
         )}
 
         <form onSubmit={(event) => { void save(event) }}>
-          <div ref={apiSectionRef}>
-          <Section label="A I 模 型">
-            {storageDegraded && (
-              <div className="status-ind err" role="alert">
-                <span className="status-dot" />
-                {storageHealth?.message ?? '当前系统未启用加密存储，API Key 暂时不能保存。'}
-              </div>
-            )}
+          {/* TAB 1: SYNC */}
+          {activeTab === 'sync' && (
+            <div ref={importSectionRef} className="import-focus-anchor">
+              <Section label="让 Echo 认识你的音乐">
+                <p className="import-intro">登录网易云后才能播放歌曲；导入歌单后 Echo 才懂你的口味。</p>
 
-            <label className="field">
-              <div className="field-label">服务商</div>
-              <select className="input" value={provider} onChange={(event) => switchProvider(event.target.value)}>
-                {Object.entries(providerPresets).map(([key, preset]) => (
-                  <option value={key} key={key}>{preset.label}</option>
-                ))}
-              </select>
-            </label>
-
-            {provider !== 'custom' && providerPresets[provider] && (
-              <div className="provider-info">
-                <span className="provider-dot" />
-                端点 {providerPresets[provider].baseUrl} · 只需填 Key 即可
-              </div>
-            )}
-
-            {provider === 'custom' && (
-              <label className="field">
-                <div className="field-label">API 端点</div>
-                <div className="field-hint">填写完整的 OpenAI 兼容 Base URL。</div>
-                <input className="input" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.example.com/v1" />
-              </label>
-            )}
-
-            <label className="field">
-              <div className="field-label">API Key</div>
-              <div className="field-hint">{storageCannotSave ? '加密存储不可用，已禁止保存以避免明文写入。' : (providerPresets[provider]?.keyHint ?? '本地加密存储。')}</div>
-              <input
-                className="input"
-                type="password"
-                value={apiKey}
-                onChange={(event) => setApiKey(event.target.value)}
-                placeholder="sk-..."
-                disabled={storageCannotSave}
-              />
-            </label>
-
-            <label className="field">
-              <div className="field-label">模型</div>
-              <input
-                className="input"
-                value={model}
-                onChange={(event) => setModel(event.target.value)}
-                placeholder={providerPresets[provider]?.modelPlaceholder ?? '模型名'}
-              />
-              {provider !== 'custom' && providerPresets[provider]?.docsUrl && (
-                <a href={providerPresets[provider].docsUrl} target="_blank" rel="noopener noreferrer" className="model-docs-link">
-                  了解模型名称 ›
-                </a>
-              )}
-            </label>
-
-            <div className="settings-row">
-              <button className="btn sec" type="button" onClick={testLlm} disabled={busy}>
-                {testState === 'testing' ? '测试中...' : '测试连接'}
-              </button>
-              <button className="btn" type="submit" disabled={busy || settingsSaved}>
-                {settingsSaved ? '已保存' : '保存'}
-              </button>
-            </div>
-            {modelStatusText && (
-              <div className={`status-ind ${modelStatusState}`}>
-                <span className="status-dot" />
-                {modelStatusText}
-              </div>
-            )}
-            {testState === 'fail' && (
-              <p className="status-help">
-                通常是 API Key 错了 / 过期了 / 余额不够。去你的 LLM 平台后台看一下 key,然后回来重填。
-              </p>
-            )}
-          </Section>
-          </div>
-
-          <Section label="风 信">
-            <label className="field">
-              <div>
-                <div className="field-label">每天什么时候写{pageLabels.yinyi}</div>
-                <div className="field-hint">Echo 在这个时间点回顾今天的你。</div>
-              </div>
-              <input className="time-input" type="time" value={generateAt} onChange={(event) => updateYinyiGenerateAt(event.target.value)} />
-            </label>
-
-            <label className="toggle-row">
-              <div className="toggle-text">
-                <div className="t1">打开{pageLabels.yinyi}时随机翻一篇过去</div>
-                <div className="t2">像偶然翻到旧日记本的某一页。</div>
-              </div>
-              <input type="checkbox" checked={openWithRandom} onChange={(event) => updateYinyiOpenWithRandom(event.target.checked)} />
-            </label>
-            {yinyiStatus && (
-              <div className={`status-ind ${yinyiStatus === '已保存' ? 'ok' : 'err'}`}>
-                <span className="status-dot" />
-                {yinyiStatus}
-              </div>
-            )}
-          </Section>
-
-          <Section label="絮 语 与 品 味">
-            <label className="toggle-row">
-              <div className="toggle-text">
-                <div className="t1">启动时恢复上次{pageLabels.chat}</div>
-                <div className="t2">影响下次真正启动；最小化到托盘会保留当前界面。</div>
-              </div>
-              <input type="checkbox" checked={restoreOnStart} onChange={(event) => updateRestoreOnStart(event.target.checked)} />
-            </label>
-            {chatStatus && (
-              <div className={`status-ind ${chatStatus === '已保存' ? 'ok' : 'err'}`}>
-                <span className="status-dot" />
-                {chatStatus}
-              </div>
-            )}
-          </Section>
-
-          <div ref={importSectionRef} className="import-focus-anchor">
-          <Section label="让 Echo 认识你的音乐">
-            <p className="import-intro">登录网易云后才能播放歌曲；导入歌单后 Echo 才懂你的口味。</p>
-
-            <div className="import-method">
-              <div className="import-method-title">网易云音乐</div>
-              <div className="import-method-desc">登录后才能播放歌曲。登录后也可以直接导入网易云歌单。</div>
-              <div className="import-method-actions">
-                {neteaseState.loggedIn ? (
-                  <>
-                    <button className="btn" type="button" onClick={loadNeteasePlaylists} disabled={neteaseBusy}>读取歌单</button>
-                    <button className="btn danger" type="button" onClick={logoutNetease} disabled={neteaseBusy || activeImportTask}>退出</button>
-                  </>
-                ) : (
-                  <button className="btn" type="button" onClick={startNeteaseLogin} disabled={neteaseBusy}>
-                    {neteaseBusy ? '生成中...' : '扫码登录'}
-                  </button>
-                )}
-                <button className="btn sec" type="button" onClick={refreshNeteaseStatus} disabled={neteaseBusy}>刷新状态</button>
-              </div>
-              <div className="import-method-status">
-                <span className={`status-ind inline ${neteaseState.loggedIn ? 'ok' : 'idle'}`}>
-                  <span className="status-dot" />
-                  {neteaseState.loggedIn ? neteaseState.nickname ?? '已登录' : neteaseState.message}
-                </span>
-              </div>
-              {neteaseQr && (
-                <div className="netease-qr">
-                  <img src={neteaseQr.qrImage} alt="网易云扫码登录二维码" />
-                  <div>
-                    <div className="field-label">用网易云音乐 App 扫码</div>
-                    <div className="field-hint">扫码后在手机上确认，这里会自动更新登录状态。</div>
+                <div className="import-method">
+                  <div className="import-method-title">网易云音乐</div>
+                  <div className="import-method-desc">登录后才能播放歌曲。登录后也可以直接导入网易云歌单。</div>
+                  <div className="import-method-actions">
+                    {neteaseState.loggedIn ? (
+                      <>
+                        <button className="btn" type="button" onClick={loadNeteasePlaylists} disabled={neteaseBusy}>读取歌单</button>
+                        <button className="btn danger" type="button" onClick={logoutNetease} disabled={neteaseBusy || activeImportTask}>退出</button>
+                      </>
+                    ) : (
+                      <button className="btn" type="button" onClick={startNeteaseLogin} disabled={neteaseBusy}>
+                        {neteaseBusy ? '生成中...' : '扫码登录'}
+                      </button>
+                    )}
+                    <button className="btn sec" type="button" onClick={refreshNeteaseStatus} disabled={neteaseBusy}>刷新状态</button>
+                  </div>
+                  <div className="import-method-status">
+                    <span className={`status-ind inline ${neteaseState.loggedIn ? 'ok' : 'idle'}`}>
+                      <span className="status-dot" />
+                      {neteaseState.loggedIn ? neteaseState.nickname ?? '已登录' : neteaseState.message}
+                    </span>
+                  </div>
+                  {neteaseQr && (
+                    <div className="netease-qr">
+                      <img src={neteaseQr.qrImage} alt="网易云扫码登录二维码" />
+                      <div>
+                        <div className="field-label">用网易云音乐 App 扫码</div>
+                        <div className="field-hint">扫码后在手机上确认，这里会自动更新登录状态。</div>
+                        <div className="status-ind idle">
+                          <span className="status-dot" />
+                          {neteaseQrStatus}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {!neteaseQr && neteaseQrStatus && (
                     <div className="status-ind idle">
                       <span className="status-dot" />
                       {neteaseQrStatus}
                     </div>
+                  )}
+                  {neteaseState.loggedIn && neteasePlaylists.length > 0 && (
+                    <div style={{ marginTop: '14px' }}>
+                      <button
+                        className="btn sec"
+                        type="button"
+                        onClick={() => setShowNeteaseDrawer(true)}
+                        style={{ width: '100%', justifyContent: 'center' }}
+                      >
+                        选择要导入的歌单 ({neteasePlaylists.length})
+                      </button>
+                    </div>
+                  )}
+                  {neteasePlaylistStatus && (
+                    <div className={`status-ind ${neteasePlaylistStatus.includes('失败') ? 'err' : 'idle'}`} style={{ marginTop: '10px' }}>
+                      <span className="status-dot" />
+                      {neteasePlaylistStatus}
+                    </div>
+                  )}
+                </div>
+
+                <div className="import-divider"><span>或者</span></div>
+
+                <div className="import-method">
+                  <div className="import-method-title">从文件导入</div>
+                  <div className="import-method-desc">适合其他音乐平台或手工整理的通用歌单 JSON。</div>
+                  <div className="import-method-actions">
+                    <button className="btn sec" type="button" onClick={downloadTemplate} disabled={templateState === 'working'}>
+                      <Download size={15} />
+                      {templateState === 'working' ? '保存中...' : '下载模板'}
+                    </button>
+                    <button className="btn sec" type="button" onClick={importPlaylist} disabled={busy || activeImportTask}>
+                      <Upload size={15} />
+                      {activeImportTask || importState === 'importing' ? '导入中...' : '选择文件'}
+                    </button>
+                  </div>
+                  {templateStatus && (
+                    <div className={`status-ind ${templateState === 'ok' ? 'ok' : templateState === 'fail' ? 'err' : 'idle'}`}>
+                      <span className="status-dot" />
+                      {templateStatus}
+                    </div>
+                  )}
+                  {importStatus && (
+                    <div className={`status-ind ${importState === 'ok' ? 'ok' : importState === 'fail' ? 'err' : 'idle'}`}>
+                      <span className="status-dot" />
+                      {importStatus}
+                    </div>
+                  )}
+                </div>
+
+                <div className="data-line">
+                  <div>
+                    重新认识你
+                    <small>基于已导入歌单重新初始化画像。</small>
+                  </div>
+                  <button className="btn warn" type="button" onClick={regenerateProfile} disabled={busy || activeImportTask || profileRefreshRunning || schedulerCatchupRunning}>
+                    {profileRefreshRunning ? '生成中...' : '重新生成'}
+                  </button>
+                </div>
+              </Section>
+            </div>
+          )}
+
+          {/* TAB 2: PREFERENCE */}
+          {activeTab === 'pref' && (
+            <>
+              <Section label="风 信">
+                <label className="field">
+                  <div>
+                    <div className="field-label">每天什么时候写{pageLabels.yinyi}</div>
+                    <div className="field-hint">Echo 在这个时间点回顾今天的你。</div>
+                  </div>
+                  <input className="time-input" type="time" value={generateAt} onChange={(event) => updateYinyiGenerateAt(event.target.value)} />
+                </label>
+
+                <label className="toggle-row">
+                  <div className="toggle-text">
+                    <div className="t1">打开{pageLabels.yinyi}时随机翻一篇过去</div>
+                    <div className="t2">像偶然翻到旧日记本的某一页。</div>
+                  </div>
+                  <input type="checkbox" checked={openWithRandom} onChange={(event) => updateYinyiOpenWithRandom(event.target.checked)} />
+                </label>
+                {yinyiStatus && (
+                  <div className={`status-ind ${yinyiStatus === '已保存' ? 'ok' : 'err'}`}>
+                    <span className="status-dot" />
+                    {yinyiStatus}
+                  </div>
+                )}
+              </Section>
+
+              <Section label="絮 语 与 品 味">
+                <label className="toggle-row">
+                  <div className="toggle-text">
+                    <div className="t1">启动时恢复上次{pageLabels.chat}</div>
+                    <div className="t2">影响下次真正启动；最小化到托盘会保留当前界面。</div>
+                  </div>
+                  <input type="checkbox" checked={restoreOnStart} onChange={(event) => updateRestoreOnStart(event.target.checked)} />
+                </label>
+                {chatStatus && (
+                  <div className={`status-ind ${chatStatus === '已保存' ? 'ok' : 'err'}`}>
+                    <span className="status-dot" />
+                    {chatStatus}
+                  </div>
+                )}
+              </Section>
+
+              <Section label="回 声 · v 0 . 3">
+                <label className="field">
+                  <div className="field-label">所在城市</div>
+                  <div className="field-hint">用于天气开场。留空时 Echo 会跳过天气。</div>
+                  <input
+                    className="input"
+                    value={city}
+                    onChange={(event) => setCity(event.target.value)}
+                    onBlur={(event) => { void saveVoiceSettings({ city: event.target.value }) }}
+                    placeholder="北京 / 上海 / Shenzhen"
+                  />
+                </label>
+
+                <label className="field">
+                  <div className="field-label">TTS 服务</div>
+                  <div className="field-hint">支持任何 OpenAI 兼容的 /v1/audio/speech 接口，留空回到默认。</div>
+                  <div className="model-presets">
+                    <button
+                      type="button"
+                      className={ttsBaseUrl === defaultTtsBaseUrl ? 'model-tag active' : 'model-tag'}
+                      onClick={() => {
+                        setTtsBaseUrl(defaultTtsBaseUrl)
+                        void saveVoiceSettings({ ttsBaseUrl: defaultTtsBaseUrl })
+                      }}
+                    >
+                      wangwangit · 默认
+                    </button>
+                    <button
+                      type="button"
+                      className={ttsBaseUrl && ttsBaseUrl !== defaultTtsBaseUrl ? 'model-tag active' : 'model-tag'}
+                      onClick={() => setTtsBaseUrl(ttsBaseUrl && ttsBaseUrl !== defaultTtsBaseUrl ? ttsBaseUrl : 'https://')}
+                    >
+                      自定义
+                    </button>
+                  </div>
+                  <input
+                    className="input"
+                    value={ttsBaseUrl}
+                    onChange={(event) => setTtsBaseUrl(event.target.value)}
+                    onBlur={(event) => { void saveVoiceSettings({ ttsBaseUrl: event.target.value }) }}
+                    placeholder={defaultTtsBaseUrl}
+                  />
+                  <div className="settings-row">
+                    <button className="btn sec" type="button" onClick={testTtsConnection} disabled={busy || ttsTestState === 'testing'}>
+                      {ttsTestState === 'testing' ? '测试中...' : '测试 TTS'}
+                    </button>
+                  </div>
+                  {ttsTestStatus && (
+                    <div className={`status-ind ${ttsTestState === 'ok' ? 'ok' : ttsTestState === 'fail' ? 'err' : 'idle'}`}>
+                      <span className="status-dot" />
+                      {ttsTestStatus}
+                    </div>
+                  )}
+                </label>
+
+                <label className="field">
+                  <div className="field-label">音色</div>
+                  <select
+                    className="input"
+                    value={ttsVoice}
+                    onChange={(event) => {
+                      setTtsVoice(event.target.value)
+                      void saveVoiceSettings({ ttsVoice: event.target.value })
+                    }}
+                  >
+                    {ttsVoices.map(([value, label]) => (
+                      <option value={value} key={value}>{label}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="field">
+                  <div className="field-label">语速 · {ttsSpeed.toFixed(1)}x</div>
+                  <input
+                    className="range-input"
+                    type="range"
+                    min="0.5"
+                    max="1.5"
+                    step="0.1"
+                    value={ttsSpeed}
+                    onChange={(event) => setTtsSpeed(Number(event.target.value))}
+                    onBlur={(event) => saveTtsSpeedOnce(Number(event.target.value))}
+                    onPointerUp={(event) => saveTtsSpeedOnce(Number(event.currentTarget.value))}
+                  />
+                </label>
+                {voiceSettingsStatus && (
+                  <div className={`status-ind ${voiceSettingsStatus === '已保存' ? 'ok' : 'err'}`}>
+                    <span className="status-dot" />
+                    {voiceSettingsStatus}
+                  </div>
+                )}
+              </Section>
+
+              <Section label="E C H O 的 关 心" className="care-settings-section">
+                <label className="toggle-row">
+                  <div className="toggle-text">
+                    <div className="t1">主动来找你</div>
+                    <div className="t2">Echo 在合适的时候发系统通知问候你或推荐歌。</div>
+                  </div>
+                  <input type="checkbox" checked={careEnabled} onChange={(event) => updateCareEnabled(event.target.checked)} />
+                </label>
+
+                <div className="care-frequency">
+                  <div className="field-label">频率</div>
+                  <div className="care-frequency-row">
+                    {[
+                      ['gentle', '克制', '每天 2 条'],
+                      ['normal', '适中', '每天 3 条'],
+                      ['frequent', '频繁', '每天 4 条'],
+                    ].map(([value, label, count]) => (
+                      <button
+                        className={careFrequency === value ? 'care-frequency-pill active' : 'care-frequency-pill'}
+                        type="button"
+                        key={value}
+                        onClick={() => updateCareFrequency(value as CareFrequency)}
+                      >
+                        <span>{label}</span>
+                        <small>{count}</small>
+                      </button>
+                    ))}
                   </div>
                 </div>
-              )}
-              {!neteaseQr && neteaseQrStatus && (
-                <div className="status-ind idle">
-                  <span className="status-dot" />
-                  {neteaseQrStatus}
+
+                <p className="care-copy">Echo 会在合适的时候轻轻出现一下。你点开后，它会带你回到{pageLabels.chat}、播放推荐，或进入{pageLabels.voice}。</p>
+                <button className="btn sec care-test-btn" type="button" onClick={testCarePing} disabled={busy || carePingRunning || schedulerCatchupRunning}>
+                  {carePingRunning ? '生成中...' : '立刻测试一条'}
+                </button>
+                {careStatus && (
+                  <div className={`status-ind ${careStatus === '已保存' ? 'ok' : careStatus.includes('失败') ? 'err' : 'idle'}`}>
+                    <span className="status-dot" />
+                    {careStatus}
+                  </div>
+                )}
+              </Section>
+            </>
+          )}
+
+          {/* TAB 3: SYSTEM */}
+          {activeTab === 'sys' && (
+            <>
+              {!hasLlmConfig && (
+                <div className="first-run" style={{ marginBottom: '16px', marginTop: '4px' }}>
+                  <div>嗨,我是 Echo。</div>
+                  <p>在我们开始之前,你需要给我一个 LLM 端点——这样我才能“说话”。DeepSeek 一个月几块钱,Kimi 也行,任何 OpenAI 兼容的服务都可以。</p>
                 </div>
               )}
-              {neteasePlaylists.length > 0 && (
-                <div className="netease-playlists">
-                  {neteasePlaylists.map((playlist) => (
-                    <div className="netease-playlist" key={playlist.id}>
-                      <div>
-                        <div className="np-list-name">{playlist.name}</div>
-                        <div className="np-list-meta">{playlist.trackCount} 首 · {playlist.creator ?? '网易云'}</div>
+
+              <div ref={apiSectionRef}>
+                <Section label="A I 模 型">
+                  {storageDegraded && (
+                    <div className="status-ind err" role="alert">
+                      <span className="status-dot" />
+                      {storageHealth?.message ?? '当前系统未启用加密存储，API Key 暂时不能保存。'}
+                    </div>
+                  )}
+
+                  <label className="field">
+                    <div className="field-label">服务商</div>
+                    <select className="input" value={provider} onChange={(event) => switchProvider(event.target.value)}>
+                      {Object.entries(providerPresets).map(([key, preset]) => (
+                        <option value={key} key={key}>{preset.label}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  {provider !== 'custom' && providerPresets[provider] && (
+                    <div className="provider-info">
+                      <span className="provider-dot" />
+                      端点 {providerPresets[provider].baseUrl} · 只需填 Key 即可
+                    </div>
+                  )}
+
+                  {provider === 'custom' && (
+                    <label className="field">
+                      <div className="field-label">API 端点</div>
+                      <div className="field-hint">填写完整的 OpenAI 兼容 Base URL。</div>
+                      <input className="input" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.example.com/v1" />
+                    </label>
+                  )}
+
+                  <label className="field">
+                    <div className="field-label">API Key</div>
+                    <div className="field-hint">{storageCannotSave ? '加密存储不可用，已禁止保存以避免明文写入。' : (providerPresets[provider]?.keyHint ?? '本地加密存储。')}</div>
+                    <input
+                      className="input"
+                      type="password"
+                      value={apiKey}
+                      onChange={(event) => setApiKey(event.target.value)}
+                      placeholder="sk-..."
+                      disabled={storageCannotSave}
+                    />
+                  </label>
+
+                  <label className="field">
+                    <div className="field-label">模型</div>
+                    <input
+                      className="input"
+                      value={model}
+                      onChange={(event) => setModel(event.target.value)}
+                      placeholder={providerPresets[provider]?.modelPlaceholder ?? '模型名'}
+                    />
+                    {provider !== 'custom' && providerPresets[provider]?.docsUrl && (
+                      <a href={providerPresets[provider].docsUrl} target="_blank" rel="noopener noreferrer" className="model-docs-link">
+                        了解模型名称 ›
+                      </a>
+                    )}
+                  </label>
+
+                  <div className="settings-row">
+                    <button className="btn sec" type="button" onClick={testLlm} disabled={busy}>
+                      {testState === 'testing' ? '测试中...' : '测试连接'}
+                    </button>
+                    <button className="btn" type="submit" disabled={busy || settingsSaved}>
+                      {settingsSaved ? '已保存' : '保存'}
+                    </button>
+                  </div>
+                  {modelStatusText && (
+                    <div className={`status-ind ${modelStatusState}`}>
+                      <span className="status-dot" />
+                      {modelStatusText}
+                    </div>
+                  )}
+                  {testState === 'fail' && (
+                    <p className="status-help">
+                      通常是 API Key 错了 / 过期了 / 余额不够。去你的 LLM 平台后台看一下 key,然后回来重填。
+                    </p>
+                  )}
+                </Section>
+              </div>
+
+              {runtimeTasks.length > 0 && (
+                <Section label="运行任务">
+                  <RuntimeTaskList tasks={runtimeTasks} onCancel={(id) => { void cancelRuntimeTask(id) }} />
+                </Section>
+              )}
+
+              <Section label="服务状态" className="health-section">
+                <div className="service-health-head">
+                  <p>这里显示 Echo 依赖的外部服务状态。异常时先按提示恢复，再重试当前任务。</p>
+                  <button className="btn sec" type="button" onClick={checkAllHealth} disabled={healthChecking || anyRuntimeTaskRunning}>
+                    {healthChecking ? '检查中...' : '检查全部'}
+                  </button>
+                </div>
+                <div className="service-health-list">
+                  {health.map((item) => (
+                    <div className={`service-health-item ${item.status}`} key={item.service}>
+                      <div className="service-health-main">
+                        <span className="service-health-dot" />
+                        <div>
+                          <div className="service-health-title">{serviceHealthLabel(item.service)}</div>
+                          <div className="service-health-message">{item.message}</div>
+                          {item.status !== 'ok' && (
+                            <div className="service-health-message">{serviceRecoveryHint(item.service)}</div>
+                          )}
+                        </div>
                       </div>
-                      <button className="btn sec" type="button" onClick={() => importNeteasePlaylist(playlist.id)} disabled={Boolean(importingNeteaseId) || activeImportTask}>
-                        {importingNeteaseId === playlist.id ? '导入中...' : '导入'}
-                      </button>
+                      <time className="service-health-time">
+                        {item.checkedAt ? new Date(item.checkedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '--:--'}
+                      </time>
                     </div>
                   ))}
                 </div>
-              )}
-              {neteasePlaylistStatus && (
-                <div className={`status-ind ${neteasePlaylistStatus.includes('失败') ? 'err' : 'idle'}`}>
-                  <span className="status-dot" />
-                  {neteasePlaylistStatus}
-                </div>
-              )}
-            </div>
+              </Section>
 
-            <div className="import-divider"><span>或者</span></div>
-
-            <div className="import-method">
-              <div className="import-method-title">从文件导入</div>
-              <div className="import-method-desc">适合其他音乐平台或手工整理的通用歌单 JSON。</div>
-              <div className="import-method-actions">
-                <button className="btn sec" type="button" onClick={downloadTemplate} disabled={templateState === 'working'}>
-                  <Download size={15} />
-                  {templateState === 'working' ? '保存中...' : '下载模板'}
-                </button>
-                <button className="btn sec" type="button" onClick={importPlaylist} disabled={busy || activeImportTask}>
-                  <Upload size={15} />
-                  {activeImportTask || importState === 'importing' ? '导入中...' : '选择文件'}
-                </button>
-              </div>
-              {templateStatus && (
-                <div className={`status-ind ${templateState === 'ok' ? 'ok' : templateState === 'fail' ? 'err' : 'idle'}`}>
-                  <span className="status-dot" />
-                  {templateStatus}
+              <Section label="数 据">
+                <div className="data-line danger-line">
+                  <div>
+                    清空所有数据
+                    <small>回到第一次打开 Echo 的状态。</small>
+                  </div>
+                  <button className="btn danger" type="button" onClick={requestResetData} disabled={busy || anyRuntimeTaskRunning}>清 空</button>
                 </div>
-              )}
-              {importStatus && (
-                <div className={`status-ind ${importState === 'ok' ? 'ok' : importState === 'fail' ? 'err' : 'idle'}`}>
-                  <span className="status-dot" />
-                  {importStatus}
-                </div>
-              )}
-            </div>
-
-            {(globalImportStatus || importProgress) && (
-              <div className="import-progress" aria-live="polite">
-                <div className="import-progress-text">{importProgress ? importProgressLine(importProgress) : globalImportStatus}</div>
-                {importProgress && (
-                  <div className="import-progress-bar">
-                    <span style={{ width: `${importProgressPercent(importProgress)}%` }} />
+                {dataStatus && (
+                  <div className={`status-ind ${dataState === 'ok' ? 'ok' : dataState === 'err' ? 'err' : 'idle'}`}>
+                    <span className="status-dot" />
+                    {dataStatus}
                   </div>
                 )}
-                {globalImportStatus && importProgress && <div className="field-hint">{globalImportStatus}</div>}
-              </div>
-            )}
-
-            <div className="data-line">
-              <div>
-                重新认识你
-                <small>基于已导入歌单重新初始化画像。</small>
-              </div>
-              <button className="btn warn" type="button" onClick={regenerateProfile} disabled={busy || activeImportTask || profileRefreshRunning || schedulerCatchupRunning}>
-                {profileRefreshRunning ? '生成中...' : '重新生成'}
-              </button>
-            </div>
-          </Section>
-          </div>
-
-          {runtimeTasks.length > 0 && (
-            <Section label="运行任务">
-              <RuntimeTaskList tasks={runtimeTasks} onCancel={(id) => { void cancelRuntimeTask(id) }} />
-            </Section>
+              </Section>
+            </>
           )}
-
-          <Section label="服务状态" className="health-section">
-            <div className="service-health-head">
-              <p>这里显示 Echo 依赖的外部服务状态。异常时先按提示恢复，再重试当前任务。</p>
-              <button className="btn sec" type="button" onClick={checkAllHealth} disabled={healthChecking || anyRuntimeTaskRunning}>
-                {healthChecking ? '检查中...' : '检查全部'}
-              </button>
-            </div>
-            <div className="service-health-list">
-              {health.map((item) => (
-                <div className={`service-health-item ${item.status}`} key={item.service}>
-                  <div className="service-health-main">
-                    <span className="service-health-dot" />
-                    <div>
-                      <div className="service-health-title">{serviceHealthLabel(item.service)}</div>
-                      <div className="service-health-message">{item.message}</div>
-                      {item.status !== 'ok' && (
-                        <div className="service-health-message">{serviceRecoveryHint(item.service)}</div>
-                      )}
-                    </div>
-                  </div>
-                  <time className="service-health-time">
-                    {item.checkedAt ? new Date(item.checkedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '--:--'}
-                  </time>
-                </div>
-              ))}
-            </div>
-          </Section>
-
-          <Section label="回 声 · v 0 . 3">
-            <label className="field">
-              <div className="field-label">所在城市</div>
-              <div className="field-hint">用于天气开场。留空时 Echo 会跳过天气。</div>
-              <input
-                className="input"
-                value={city}
-                onChange={(event) => setCity(event.target.value)}
-                onBlur={(event) => { void saveVoiceSettings({ city: event.target.value }) }}
-                placeholder="北京 / 上海 / Shenzhen"
-              />
-            </label>
-
-            <label className="field">
-              <div className="field-label">TTS 服务</div>
-              <div className="field-hint">支持任何 OpenAI 兼容的 /v1/audio/speech 接口，留空回到默认。</div>
-              <div className="model-presets">
-                <button
-                  type="button"
-                  className={ttsBaseUrl === defaultTtsBaseUrl ? 'model-tag active' : 'model-tag'}
-                  onClick={() => {
-                    setTtsBaseUrl(defaultTtsBaseUrl)
-                    void saveVoiceSettings({ ttsBaseUrl: defaultTtsBaseUrl })
-                  }}
-                >
-                  wangwangit · 默认
-                </button>
-                <button
-                  type="button"
-                  className={ttsBaseUrl && ttsBaseUrl !== defaultTtsBaseUrl ? 'model-tag active' : 'model-tag'}
-                  onClick={() => setTtsBaseUrl(ttsBaseUrl && ttsBaseUrl !== defaultTtsBaseUrl ? ttsBaseUrl : 'https://')}
-                >
-                  自定义
-                </button>
-              </div>
-              <input
-                className="input"
-                value={ttsBaseUrl}
-                onChange={(event) => setTtsBaseUrl(event.target.value)}
-                onBlur={(event) => { void saveVoiceSettings({ ttsBaseUrl: event.target.value }) }}
-                placeholder={defaultTtsBaseUrl}
-              />
-              <div className="settings-row">
-                <button className="btn sec" type="button" onClick={testTtsConnection} disabled={busy || ttsTestState === 'testing'}>
-                  {ttsTestState === 'testing' ? '测试中...' : '测试 TTS'}
-                </button>
-              </div>
-              {ttsTestStatus && (
-                <div className={`status-ind ${ttsTestState === 'ok' ? 'ok' : ttsTestState === 'fail' ? 'err' : 'idle'}`}>
-                  <span className="status-dot" />
-                  {ttsTestStatus}
-                </div>
-              )}
-            </label>
-
-            <label className="field">
-              <div className="field-label">音色</div>
-              <select
-                className="input"
-                value={ttsVoice}
-                onChange={(event) => {
-                  setTtsVoice(event.target.value)
-                  void saveVoiceSettings({ ttsVoice: event.target.value })
-                }}
-              >
-                {ttsVoices.map(([value, label]) => (
-                  <option value={value} key={value}>{label}</option>
-                ))}
-              </select>
-            </label>
-
-            <label className="field">
-              <div className="field-label">语速 · {ttsSpeed.toFixed(1)}x</div>
-              <input
-                className="range-input"
-                type="range"
-                min="0.5"
-                max="1.5"
-                step="0.1"
-                value={ttsSpeed}
-                onChange={(event) => setTtsSpeed(Number(event.target.value))}
-                onBlur={(event) => saveTtsSpeedOnce(Number(event.target.value))}
-                onPointerUp={(event) => saveTtsSpeedOnce(Number(event.currentTarget.value))}
-              />
-            </label>
-            {voiceSettingsStatus && (
-              <div className={`status-ind ${voiceSettingsStatus === '已保存' ? 'ok' : 'err'}`}>
-                <span className="status-dot" />
-                {voiceSettingsStatus}
-              </div>
-            )}
-          </Section>
-
-          <Section label="E C H O 的 关 心" className="care-settings-section">
-            <label className="toggle-row">
-              <div className="toggle-text">
-                <div className="t1">主动来找你</div>
-                <div className="t2">Echo 在合适的时候发系统通知问候你或推荐歌。</div>
-              </div>
-              <input type="checkbox" checked={careEnabled} onChange={(event) => updateCareEnabled(event.target.checked)} />
-            </label>
-
-            <div className="care-frequency">
-              <div className="field-label">频率</div>
-              <div className="care-frequency-row">
-                {[
-                  ['gentle', '克制', '每天 2 条'],
-                  ['normal', '适中', '每天 3 条'],
-                  ['frequent', '频繁', '每天 4 条'],
-                ].map(([value, label, count]) => (
-                  <button
-                    className={careFrequency === value ? 'care-frequency-pill active' : 'care-frequency-pill'}
-                    type="button"
-                    key={value}
-                    onClick={() => updateCareFrequency(value as CareFrequency)}
-                  >
-                    <span>{label}</span>
-                    <small>{count}</small>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <p className="care-copy">Echo 会在合适的时候轻轻出现一下。你点开后，它会带你回到{pageLabels.chat}、播放推荐，或进入{pageLabels.voice}。</p>
-            <button className="btn sec care-test-btn" type="button" onClick={testCarePing} disabled={busy || carePingRunning || schedulerCatchupRunning}>
-              {carePingRunning ? '生成中...' : '立刻测试一条'}
-            </button>
-            {careStatus && (
-              <div className={`status-ind ${careStatus === '已保存' ? 'ok' : careStatus.includes('失败') ? 'err' : 'idle'}`}>
-                <span className="status-dot" />
-                {careStatus}
-              </div>
-            )}
-          </Section>
-
-          <Section label="数 据">
-            <div className="data-line danger-line">
-              <div>
-                清空所有数据
-                <small>回到第一次打开 Echo 的状态。</small>
-              </div>
-              <button className="btn danger" type="button" onClick={requestResetData} disabled={busy || anyRuntimeTaskRunning}>清 空</button>
-            </div>
-            {dataStatus && (
-              <div className={`status-ind ${dataState === 'ok' ? 'ok' : dataState === 'err' ? 'err' : 'idle'}`}>
-                <span className="status-dot" />
-                {dataStatus}
-              </div>
-            )}
-          </Section>
         </form>
 
         <div className="about-link">
@@ -1192,6 +1253,37 @@ export function SettingsPage({
         </div>
 
         <footer className="page-foot">E C H O · v 0 . 1 . 0</footer>
+      </div>
+
+      {/* Slide-up Netease Playlists Drawer */}
+      <div className={`drawer-overlay ${showNeteaseDrawer ? 'active' : ''}`} onClick={() => setShowNeteaseDrawer(false)} />
+      <div className={`drawer-sheet ${showNeteaseDrawer ? 'active' : ''}`}>
+        <div className="drawer-drag-bar" />
+        <div className="drawer-header">
+          <div className="drawer-title">选择歌单导入 Echo</div>
+          <button type="button" className="drawer-close" onClick={() => setShowNeteaseDrawer(false)}>×</button>
+        </div>
+        <div className="drawer-body">
+          {neteasePlaylists.map((playlist) => (
+            <div className="playlist-item" key={playlist.id}>
+              <div className="playlist-info">
+                <div className="playlist-name">{playlist.name}</div>
+                <div className="playlist-count">{playlist.trackCount} 首 · {playlist.creator ?? '网易云'}</div>
+              </div>
+              <button
+                className="playlist-import-btn"
+                type="button"
+                onClick={() => {
+                  setShowNeteaseDrawer(false)
+                  void importNeteasePlaylist(playlist.id)
+                }}
+                disabled={Boolean(importingNeteaseId) || activeImportTask}
+              >
+                {importingNeteaseId === playlist.id ? '导入中...' : '导入'}
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
 
       {showResetConfirm && (
