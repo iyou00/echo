@@ -93,13 +93,23 @@ function violatesExclusions(track: VerifiableTrack, constraint: MusicEntityConst
   return (constraint.excludedArtists ?? []).some((artist) => artistMatchesConstraint(track.artist, artist))
 }
 
+function stripParentheses(text: string): string {
+  return text.replace(/\([^)]*\)/g, '').replace(/（[^）]*）/g, '').trim()
+}
+
 export function titleMatchesConstraint(title: string, expected?: string, strict = false): boolean {
   if (!expected) return true
   const trackTitle = normalizeText(title)
   const targetTitle = normalizeText(expected)
   if (!trackTitle || !targetTitle) return false
   if (trackTitle === targetTitle) return true
-  return strict ? false : trackTitle.includes(targetTitle) || targetTitle.includes(trackTitle)
+
+  // Strip parenthetical data (e.g. subtitles, remix labels, live tags) and try again
+  const cleanTrack = normalizeText(stripParentheses(title))
+  const cleanTarget = normalizeText(stripParentheses(expected))
+  if (cleanTrack && cleanTarget && cleanTrack === cleanTarget) return true
+
+  return strict ? false : trackTitle.includes(targetTitle) || targetTitle.includes(trackTitle) || (!!cleanTrack && !!cleanTarget && (cleanTrack.includes(cleanTarget) || cleanTarget.includes(cleanTrack)))
 }
 
 export function trackMatchesMusicEntity(

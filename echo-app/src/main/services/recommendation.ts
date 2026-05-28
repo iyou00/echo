@@ -40,7 +40,7 @@ import { fetchCandidates, fetchGenericDiscoveryCandidates } from './recommendati
 import { NeteaseAuthRequiredError } from './recommendation/errors'
 import { buildRecommendationMemoryConstraints } from './recommendation/memoryConstraints'
 import { currentMusicCorrectionConstraintForQuery } from '../skills/music/correctionMemory'
-import { filterTracksByMusicEntity, mergeMusicEntityConstraints, type MusicEntityConstraint } from '../skills/music/verifier'
+import { filterTracksByMusicEntity, mergeMusicEntityConstraints, titleMatchesConstraint, type MusicEntityConstraint } from '../skills/music/verifier'
 import { createRecommendationDeterminismContext, stableShuffle, type RecommendationDeterminismContext } from './recommendation/deterministic'
 
 export {
@@ -194,10 +194,7 @@ function isDirectSongRequest(text: string, intent: RecommendationIntent): boolea
 }
 
 function titleMatchesSeed(track: Track, seedTitle?: string): boolean {
-  const seed = normalizeText(seedTitle ?? '')
-  const title = normalizeText(track.title)
-  if (!seed || !title) return false
-  return title === seed || title.includes(seed)
+  return titleMatchesConstraint(track.title, seedTitle, false)
 }
 
 function artistMatchesQuery(track: Track, artistQuery?: string): boolean {

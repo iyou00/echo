@@ -3,6 +3,9 @@ import type { RecommendationSource, TasteProfile, Track } from '../../../types/i
 import { getAllImportedTracks } from '../../db/playlists'
 import { listSemantics } from '../../db/semantics'
 import { getTasteProfile } from '../../db/taste'
+import { listFavorites } from '../favorites'
+import { loadRecentRecommendedTracks } from '../../db/tracks'
+import { titleMatchesConstraint } from '../../skills/music/verifier'
 import { asArray, asObject, normalizeNeteaseTrack } from '../../netease/music'
 import { readNeteaseCookie } from '../../netease/auth'
 import {
@@ -277,8 +280,19 @@ export async function fetchGenericDiscoveryCandidates(intent: RecommendationInte
 
 function importedSeedTracks(intent: RecommendationIntent): Track[] {
   const imported = getAllImportedTracks()
+  const favorites = listFavorites()
+  const recommended = loadRecentRecommendedTracks(100)
+
+  const localPool = [...favorites, ...recommended, ...imported]
+
   if (intent.seedTitle) {
-    const seed = imported.find((track) => normalizeText(track.title).includes(normalizeText(intent.seedTitle ?? '')))
+    const seed = localPool.find((track) => {
+      const titleMatch = titleMatchesConstraint(track.title, intent.seedTitle, false)
+      const artistMatch = intent.artistQuery
+        ? normalizeText(track.artist).includes(normalizeText(intent.artistQuery))
+        : true
+      return titleMatch && artistMatch
+    })
     if (seed) return [seed]
   }
   const semantic = listSemantics()
@@ -395,6 +409,9 @@ async function fetchCandidatesInternal(intent: RecommendationIntent, signal?: Ab
   const groups = await Promise.all(calls)
   assertRecallActive(signal)
   for (const group of groups) candidates.push(...group)
+  if (intent.seedTitle) {
+    candidates.unshift(...importedSeedTracks(intent))
+  }
   return uniqueTracks(candidates).slice(0, 120)
 }
 
