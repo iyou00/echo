@@ -150,10 +150,10 @@ function normalizeText(content: string): string {
 
 function limitText(text: string): string {
   const trimmed = normalizeText(text)
-  if (trimmed.length <= 180) return trimmed
-  const sliced = trimmed.slice(0, 180)
+  if (trimmed.length <= 300) return trimmed
+  const sliced = trimmed.slice(0, 300)
   const lastStop = Math.max(sliced.lastIndexOf('。'), sliced.lastIndexOf('，'), sliced.lastIndexOf('、'), sliced.lastIndexOf('——'))
-  return sliced.slice(0, lastStop > 90 ? lastStop + 1 : 180).trim()
+  return sliced.slice(0, lastStop > 180 ? lastStop + 1 : 300).trim()
 }
 
 const BANNED_LISTENING_TEXT_PATTERN = /我给你接上|给你安排|安排上|给你放一首|稳稳的|接住|撑住|沉淀|治愈的力量|完全理解你的心情|根据你的画像|根据你的轨迹|根据你的数据|太满|太猛|上头|燃爆|往里收|松开一点|空间感|音乐颜色|声音质地|情绪流动|拉你回来|缓一会儿|放下来/
@@ -168,10 +168,10 @@ function sentenceCount(text: string): number {
 
 function hasListeningTextQuality(text: string): boolean {
   const compact = text.replace(/\s+/g, '')
-  if (compact.length < 18 || compact.length > 180) return false
-  if (sentenceCount(text) > 4) return false
+  if (compact.length < 18 || compact.length > 300) return false
+  if (sentenceCount(text) > 6) return false
   const firstTitleIndex = text.indexOf('《')
-  if (firstTitleIndex < 0 || firstTitleIndex > 90) return false
+  if (firstTitleIndex < 0 || firstTitleIndex > 150) return false
   if (!text.includes('我') && !text.includes('你')) return false
   if (/(总的来说|由此可见|为您|用户|画像|轨迹|轮廓|数据|算法|记忆策略|纠正过|说明你|你其实|你总是|你一直|人格|诊断|标签)/.test(text)) return false
   if (BANNED_LISTENING_TEXT_PATTERN.test(text)) return false
@@ -354,7 +354,7 @@ function buildVoiceMoment(input: {
       hasRecommendationHistory: input.hasRecommendationHistory,
       hasTasteProfile,
       isContinuation: true,
-      suggestedLength: '70-110',
+      suggestedLength: '140-200',
     }
   }
   if (hasEmotionConversation(input.conversations)) {
@@ -366,7 +366,7 @@ function buildVoiceMoment(input: {
       hasRecommendationHistory: input.hasRecommendationHistory,
       hasTasteProfile,
       isContinuation: false,
-      suggestedLength: '80-140',
+      suggestedLength: '160-260',
     }
   }
   if (input.importedTrackCount === 0 && !hasTasteProfile) {
@@ -378,7 +378,7 @@ function buildVoiceMoment(input: {
       hasRecommendationHistory: input.hasRecommendationHistory,
       hasTasteProfile,
       isContinuation: false,
-      suggestedLength: '60-100',
+      suggestedLength: '120-180',
     }
   }
   if (input.importedTrackCount > 0 && !input.hasRecommendationHistory) {
@@ -390,7 +390,7 @@ function buildVoiceMoment(input: {
       hasRecommendationHistory: input.hasRecommendationHistory,
       hasTasteProfile,
       isContinuation: false,
-      suggestedLength: '80-120',
+      suggestedLength: '150-220',
     }
   }
   if (input.playedToday === 0) {
@@ -402,7 +402,7 @@ function buildVoiceMoment(input: {
       hasRecommendationHistory: input.hasRecommendationHistory,
       hasTasteProfile,
       isContinuation: false,
-      suggestedLength: '70-120',
+      suggestedLength: '150-220',
     }
   }
   return {
@@ -413,7 +413,7 @@ function buildVoiceMoment(input: {
     hasRecommendationHistory: input.hasRecommendationHistory,
     hasTasteProfile,
     isContinuation: false,
-    suggestedLength: '80-130',
+    suggestedLength: '150-240',
   }
 }
 
@@ -518,7 +518,7 @@ ${input.candidates.map((item, index) => `- C${index + 1}: ${item.artist} / ${ite
 <output_contract>
 只输出最终要朗读的一段话。不要 JSON,不要 Markdown,不要编号,不要解释。
 必须从 candidates 里选一首,并在前两句写成《歌名》。
-整体 70-160 字,最多 4 句。TTS 开头不要空转。
+整体 160-260 字,最多 6 句。TTS 开头不要空转。
 记忆只用于挑歌和语气边界,不要说画像、轨迹、数据、纠正、策略。
 像朋友临时发来一段语音,少下结论,多给一个具体听法。
 </output_contract>`
@@ -583,7 +583,7 @@ export async function generateListeningSegment(options: ListeningSegmentOptions 
             role: 'user',
             content: `${context}
 
-上一版不适合 TTS。重写成一段能直接朗读的话: 70-160 字,最多 4 句,歌名出现在前两句,保留一首候选歌名,用具体听法,不要解释机制。`,
+上一版不适合 TTS。重写成一段能直接朗读的话: 160-260 字,最多 6 句,歌名出现在前两句,保留一首候选歌名,用具体听法,不要解释机制。`,
           },
         ], { temperature: options?.continuation ? 0.95 : 0.85, signal: options.signal, maxTokens: 300 })
         assertListeningActive(options.signal)
