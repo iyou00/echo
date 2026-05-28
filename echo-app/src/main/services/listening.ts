@@ -569,7 +569,7 @@ export async function generateListeningSegment(options: ListeningSegmentOptions 
           role: 'user',
           content: context,
         },
-      ], { temperature: options?.continuation ? 0.95 : 0.85, signal: options.signal, maxTokens: 300 })
+      ], { temperature: options?.continuation ? 0.95 : 0.85, signal: options.signal, maxTokens: 800 })
       assertListeningActive(options.signal)
       const parsed = parseJsonObject(response)
       const nextText = parsed?.text ? limitText(parsed.text) : limitText(response)
@@ -585,7 +585,7 @@ export async function generateListeningSegment(options: ListeningSegmentOptions 
 
 上一版不适合 TTS。重写成一段能直接朗读的话: 160-260 字,最多 6 句,歌名出现在前两句,保留一首候选歌名,用具体听法,不要解释机制。`,
           },
-        ], { temperature: options?.continuation ? 0.95 : 0.85, signal: options.signal, maxTokens: 300 })
+        ], { temperature: options?.continuation ? 0.95 : 0.85, signal: options.signal, maxTokens: 800 })
         assertListeningActive(options.signal)
         const retryParsed = parseJsonObject(retry)
         const retryText = retryParsed?.text ? limitText(retryParsed.text) : limitText(retry)
