@@ -1,15 +1,21 @@
 import type { Track } from '../types/ipc'
 
-export function trackIdentity(track?: Track | null): string {
-  if (!track) return ''
-  const neteaseId = String(track.neteaseId ?? '').trim()
-  if (neteaseId) return `netease:${neteaseId}`
-  const id = String(track.id ?? '').trim()
-  if (id) return `id:${id}`
-  return `name:${track.title.trim().toLowerCase()}::${track.artist.trim().toLowerCase()}`
+export type TrackIdentityInput = Pick<Track, 'title' | 'artist'> & Partial<Pick<Track, 'id' | 'neteaseId'>>
+
+export function normalizeTrackText(text: string): string {
+  return text.trim().toLowerCase()
 }
 
-export function sameTrack(a?: Track | null, b?: Track | null): boolean {
+export function trackIdentity(track?: TrackIdentityInput | null): string {
+  if (!track) return ''
+  const neteaseId = String(track.neteaseId ?? '').trim()
+  const id = String(track.id ?? '').trim()
+  const unifiedId = neteaseId || id
+  if (unifiedId) return `id:${unifiedId}`
+  return `name:${normalizeTrackText(track.title)}::${normalizeTrackText(track.artist)}`
+}
+
+export function sameTrack(a?: TrackIdentityInput | null, b?: TrackIdentityInput | null): boolean {
   const left = trackIdentity(a)
   return Boolean(left && left === trackIdentity(b))
 }
