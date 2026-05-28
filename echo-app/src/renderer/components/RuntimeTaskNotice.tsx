@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import type { RuntimeTaskSnapshot } from '../../types/ipc'
 import { runtimeErrorMessage } from '../../shared/runtimeRecovery'
 import { groupRuntimeTasksForDisplay } from '../hooks/useRuntimeTasks'

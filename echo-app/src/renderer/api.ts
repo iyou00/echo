@@ -28,6 +28,7 @@ import type {
 } from '../types/ipc'
 import { chineseDayPeriodLabel } from '../shared/dayPeriod'
 import { trackIdentity } from '../shared/trackIdentity'
+import { assertEchoApiContract, assertEchoApiReadContract } from './mockContract'
 
 const now = new Date().toISOString()
 
@@ -139,6 +140,7 @@ let healthState: ServiceHealth[] = [
   { service: 'tts', status: 'degraded', message: '浏览器预览不合成语音。', checkedAt: now },
   { service: 'weather', status: 'degraded', message: '还没设置城市。我会跳过天气开场。', checkedAt: now },
   { service: 'scheduler', status: 'ok', message: '定时任务已恢复。', checkedAt: now },
+  { service: 'storage', status: 'ok', message: '本地存储正常。', checkedAt: now },
 ]
 let profileState: TasteProfile | null = structuredClone(mockProfile)
 let questionState: TasteQuestion[] = structuredClone(mockQuestions)
@@ -189,6 +191,7 @@ let cookieExpiredListeners: Array<(message: string) => void> = []
 let closeRequestListeners: Array<() => void> = []
 let navigateListeners: Array<Parameters<EchoApi['app']['onNavigate']>[0]> = []
 let importTaskState: ImportTaskSnapshot | null = null
+const settingsChangedListeners = new Set<(payload: { path: string; value: unknown }) => void>()
 let importTaskListeners: Array<(snapshot: ImportTaskSnapshot | null) => void> = []
 let runtimeTaskListeners: Array<(snapshot: RuntimeTaskSnapshot) => void> = []
 let runtimeEventListeners: Array<(event: RuntimeEvent) => void> = []
@@ -429,7 +432,17 @@ const mockEcho: EchoApi = {
       return structuredClone(settingsState)
     },
     async update(path, value) {
-      return setNestedSetting(path, value)
+      const result = setNestedSetting(path, value)
+      settingsChangedListeners.forEach((listener) => listener({ path, value }))
+      return result
+    },
+    async updateBatch(updates) {
+      for (const item of updates) {
+        setNestedSetting(item.path, item.value)
+      }
+      const paths = updates.map((item) => item.path)
+      settingsChangedListeners.forEach((listener) => listener({ path: 'settings.batch', value: { paths } }))
+      return structuredClone(settingsState)
     },
     async testLlm(): Promise<LlmTestResult> {
       await wait(320)
@@ -500,13 +513,15 @@ const mockEcho: EchoApi = {
         { service: 'tts', status: 'unknown', message: '语音状态还没检查。' },
         { service: 'weather', status: 'unknown', message: '天气状态还没检查。' },
         { service: 'scheduler', status: 'unknown', message: '定时任务状态还没检查。' },
+        { service: 'storage', status: 'ok', message: '本地存储正常。' },
       ]
       setMockImportTask(null)
       emitPlayback()
       return { ok: true }
     },
-    onChanged(_listener) {
-      return () => {}
+    onChanged(listener) {
+      settingsChangedListeners.add(listener)
+      return () => settingsChangedListeners.delete(listener)
     },
   },
   health: {
@@ -536,6 +551,7 @@ const mockEcho: EchoApi = {
           checkedAt,
         },
         { service: 'scheduler', status: 'ok', message: '定时任务已恢复。', checkedAt },
+        { service: 'storage', status: 'ok', message: '本地存储正常。', checkedAt },
       ]
       return structuredClone(healthState)
     },
@@ -784,8 +800,9 @@ const mockEcho: EchoApi = {
     },
   },
   feedback: {
-    async record() {
-      return { ok: true, message: '我记住了。' }
+    async record(track, action, context) {
+      correctionState = [`[${action}] ${track.title} - ${track.artist}${context ? ` (${context})` : ''}`, ...correctionState].slice(0, 20)
+      return { ok: true, message: `已记录"${action}"对${track.title}的反馈。` }
     },
   },
   scene: {
@@ -1109,7 +1126,7 @@ const mockEcho: EchoApi = {
     },
   },
   listening: {
-    async generateSegment() {
+    async generateSegment(options) {
       return runMockRuntimeTask({ kind: 'listening-segment', phase: 'context', total: 4, message: '整理回声上下文' }, async (task) => {
         await wait(160)
         assertMockRuntimeTaskActive(task)
@@ -1117,13 +1134,13 @@ const mockEcho: EchoApi = {
         await wait(180)
         assertMockRuntimeTaskActive(task)
         updateMockRuntimeTask(task, { phase: 'tts', current: 3, message: '合成回声音频' })
-        const track = { ...mockTracks[0], playUrl: 'mock://audio', durationMs: 180000, sourceContext: 'voice' as const }
+        const track = options?.continuation ? { ...mockTracks[1], playUrl: 'mock://audio', durationMs: 180000, sourceContext: 'voice' as const } : { ...mockTracks[0], playUrl: 'mock://audio', durationMs: 180000, sourceContext: 'voice' as const }
         await wait(120)
         assertMockRuntimeTaskActive(task)
         updateMockRuntimeTask(task, { phase: 'done', current: 4, message: '浏览器预览不合成语音' })
         const period = chineseDayPeriodLabel()
         return {
-          text: `${period}好。这个时间适合把节奏放轻一点,我给你放${track.artist}的《${track.title}》。先让它垫在后面,你不用急着切走。`,
+          text: options?.continuation ? `接着来。换一首风格接近的，${track.artist}的《${track.title}》。` : `${period}好。这个时间适合把节奏放轻一点,我给你放${track.artist}的《${track.title}》。先让它垫在后面,你不用急着切走。`,
           track,
           generatedAt: new Date().toISOString(),
           error: '浏览器预览不合成语音',
@@ -1232,6 +1249,27 @@ const mockEcho: EchoApi = {
   },
 }
 
+if (import.meta.env.DEV) {
+  assertEchoApiContract(mockEcho, 'mockEcho')
+  void assertEchoApiReadContract(mockEcho, 'mockEcho').catch((error) => {
+    setTimeout(() => {
+      throw error
+    }, 0)
+  })
+}
+
+let windowEchoReadContractStarted = false
+
 export function getEchoApi(): EchoApi {
-  return window.echo ?? mockEcho
+  if (window.echo) {
+    if (import.meta.env.DEV) assertEchoApiContract(window.echo, 'window.echo')
+    if (import.meta.env.DEV && !windowEchoReadContractStarted) {
+      windowEchoReadContractStarted = true
+      void assertEchoApiReadContract(window.echo, 'window.echo').catch((error) => {
+        console.error('[EchoApi] read contract failed', error)
+      })
+    }
+    return window.echo
+  }
+  return mockEcho
 }

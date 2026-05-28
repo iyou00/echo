@@ -9,12 +9,14 @@ import { pruneOldData } from '../src/main/db/maintenance'
 import { upgradeLegacyNeteaseSecret } from '../src/main/netease/auth'
 import { registerIpc } from '../src/main/ipc'
 import { registerScheduler, runStartupCatchup, stopScheduler } from '../src/main/services/scheduler'
-import { archiveDaySeal } from '../src/main/services/daySeal'
+import { archiveDaySeal, warmMostRecentSealCache } from '../src/main/services/daySeal'
 import { checkSecureStorage } from '../src/main/utils/secureStorage'
 import { getState as getPlaybackState, onPlaybackStateChanged, pause, resume } from '../src/main/services/playback'
 import { getCurrentScene, listSceneDefinitions, onSceneChanged } from '../src/main/services/scene'
 import { NeteaseAuthRequiredError } from '../src/main/services/recommendation'
 import { startScenePlayback } from '../src/main/services/scenePlayback'
+import { recordSchedulerHealth } from '../src/main/services/health'
+import { warmRootFileCache } from '../src/main/utils/paths'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -36,9 +38,24 @@ export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
 
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST
 
+app.disableHardwareAcceleration()
+app.commandLine.appendSwitch('disable-gpu')
+
+if (VITE_DEV_SERVER_URL) {
+  app.setPath('userData', path.join(process.env.APP_ROOT, '.electron-user-data'))
+}
+
 if (process.platform === 'win32') {
   app.setAppUserModelId('local.echo.app')
 }
+
+process.on('uncaughtException', (error) => {
+  console.error('[fatal] uncaught exception:', error)
+})
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[fatal] unhandled rejection:', reason)
+})
 
 let win: BrowserWindow | null
 let isQuitting = false
@@ -78,8 +95,33 @@ function createWindow() {
     icon: createAppIcon(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
       backgroundThrottling: false,
     },
+  })
+
+  win.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+    const connectSrc = VITE_DEV_SERVER_URL ? "'self' http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:*" : "'self'"
+    const scriptSrc = VITE_DEV_SERVER_URL ? "'self' 'unsafe-inline'" : "'self'"
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [
+          [
+            "default-src 'self'",
+            `script-src ${scriptSrc}`,
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data: https:",
+            "media-src 'self' blob: data: https: http:",
+            `connect-src ${connectSrc} https: http:`,
+            "font-src 'self' data:",
+            "object-src 'none'",
+          ].join('; '),
+        ],
+      },
+    })
   })
 
   win.on('close', (event) => {
@@ -88,6 +130,11 @@ function createWindow() {
     const settings = getSettings()
     if (settings.ui.closeBehavior === 'minimize') {
       win?.hide()
+      return
+    }
+    if (settings.ui.closeBehavior === 'quit') {
+      isQuitting = true
+      app.quit()
       return
     }
 
@@ -232,7 +279,9 @@ function createTray() {
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
 app.on('window-all-closed', async () => {
-  await archiveDaySeal().catch(() => undefined)
+  await archiveDaySeal().catch((error) => {
+    console.warn('[daySeal] archive failed during window-all-closed', error)
+  })
   if (isQuitting && process.platform !== 'darwin') {
     app.quit()
     win = null
@@ -252,7 +301,9 @@ app.on('before-quit', async (event) => {
   event.preventDefault()
   cleanupStarted = true
   isQuitting = true
-  await archiveDaySeal().catch(() => undefined)
+  await archiveDaySeal().catch((error) => {
+    console.warn('[daySeal] archive failed during before-quit', error)
+  })
   stopScheduler()
   closeDb()
   app.exit(0)
@@ -268,7 +319,29 @@ app.whenReady().then(() => {
   registerScheduler()
   onPlaybackStateChanged(() => rebuildTrayMenu())
   onSceneChanged(() => rebuildTrayMenu())
-  runStartupCatchup().catch(() => undefined)
+  warmRootFileCache([
+    'prompts/system.md',
+    'prompts/agent-soul.md',
+    'prompts/yinyi-writer-v5.md',
+    'prompts/yinyi-writer-v4.md',
+    'prompts/seal-writer.md',
+    'prompts/care-ping-recommend.md',
+    'prompts/care-ping-voice-invite.md',
+    'prompts/care-ping-casual.md',
+    'prompts/portrait-writer-v2.md',
+    'prompts/portrait-writer.md',
+    'prompts/scenario-100.md',
+    'samples/artist-genre-seed.json',
+  ]).catch((error) => {
+    console.warn('[paths] warm root file cache failed', error)
+  })
+  warmMostRecentSealCache().catch((error) => {
+    console.warn('[daySeal] warm cache failed', error)
+  })
+  runStartupCatchup().catch((error) => {
+    const message = error instanceof Error ? error.message : String(error)
+    recordSchedulerHealth('catchup', 'degraded', '启动补偿失败。', message)
+  })
   createWindow()
   createTray()
 })

@@ -48,7 +48,7 @@ ${tracks.map((track) => `${track.title} - ${track.artist}`).join('\n')}
 
 请说一段。`,
       },
-    ], { signal: options.signal })
+    ], { signal: options.signal, maxTokens: 200 })
     assertVoiceActive(options.signal)
     return { content: stripKnownSystemBlocks(content).trim() || fallback, status: 'done' }
   } catch {

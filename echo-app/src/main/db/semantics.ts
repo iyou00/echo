@@ -1,4 +1,5 @@
 import type { SemanticSummary, TasteProfile, Track, TrackSemantic } from '../../types/ipc'
+import { trackIdentity, type TrackIdentityInput } from '../../shared/trackIdentity'
 import { getDb } from './index'
 
 interface SemanticRow {
@@ -18,10 +19,8 @@ interface SemanticRow {
   source_json: string
 }
 
-export function semanticTrackKey(track: Pick<Track, 'id' | 'neteaseId' | 'title' | 'artist'>): string {
-  if (track.neteaseId) return `netease:${track.neteaseId}`
-  if (track.id) return `id:${track.id}`
-  return `name:${track.title.trim().toLowerCase()}::${track.artist.trim().toLowerCase()}`
+export function semanticTrackKey(track: TrackIdentityInput): string {
+  return trackIdentity(track)
 }
 
 function parseList(value: string): string[] {
@@ -48,14 +47,14 @@ function rowToSemantic(row: SemanticRow): TrackSemantic {
 
 export function getTrackSemantic(track: Pick<Track, 'id' | 'neteaseId' | 'title' | 'artist'>): TrackSemantic | null {
   const row = getDb()
-    .prepare('SELECT * FROM track_semantics WHERE user_id = 1 AND track_key = ?')
+    .prepare('SELECT * FROM track_semantics WHERE user_id = current_user_id() AND track_key = ?')
     .get(semanticTrackKey(track)) as SemanticRow | undefined
   return row ? rowToSemantic(row) : null
 }
 
 export function listSemantics(): Array<Track & { semantic: TrackSemantic }> {
   const rows = getDb()
-    .prepare('SELECT * FROM track_semantics WHERE user_id = 1 ORDER BY updated_at DESC')
+    .prepare('SELECT * FROM track_semantics WHERE user_id = current_user_id() ORDER BY updated_at DESC')
     .all() as SemanticRow[]
   return rows.map((row) => ({
     id: row.netease_id || undefined,
@@ -75,8 +74,8 @@ export function upsertTrackSemantic(track: Track, semantic: TrackSemantic): void
         user_id, track_key, netease_id, title, artist, album,
         language, genres_json, moods_json, scenes_json, energy, tempo, familiarity, confidence, source_json, updated_at
       )
-      VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(track_key) DO UPDATE SET
+      VALUES (current_user_id(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(user_id, track_key) DO UPDATE SET
         netease_id = excluded.netease_id,
         title = excluded.title,
         artist = excluded.artist,
@@ -112,7 +111,7 @@ export function upsertTrackSemantic(track: Track, semantic: TrackSemantic): void
 
 export function splitMissingSemantics(tracks: Track[]): { missing: Track[]; skipped: number } {
   const seen = new Set<string>()
-  const rows = getDb().prepare('SELECT track_key FROM track_semantics WHERE user_id = 1').all() as Array<{ track_key: string }>
+  const rows = getDb().prepare('SELECT track_key FROM track_semantics WHERE user_id = current_user_id()').all() as Array<{ track_key: string }>
   const existing = new Set(rows.map((row) => row.track_key))
   const missing: Track[] = []
   let skipped = 0
@@ -130,24 +129,53 @@ export function splitMissingSemantics(tracks: Track[]): { missing: Track[]; skip
 }
 
 export function getSemanticSummary(): SemanticSummary {
-  const tracks = listSemantics()
-  const moodCounts = new Map<string, { count: number; artists: Map<string, number> }>()
-  for (const track of tracks) {
-    for (const mood of track.semantic.moods) {
-      const item = moodCounts.get(mood) ?? { count: 0, artists: new Map<string, number>() }
-      item.count += 1
-      item.artists.set(track.artist, (item.artists.get(track.artist) ?? 0) + 1)
-      moodCounts.set(mood, item)
+  const db = getDb()
+
+  const { total } = db
+    .prepare('SELECT COUNT(*) as total FROM track_semantics WHERE user_id = current_user_id()')
+    .get() as { total: number }
+
+  if (total === 0) return { moods: [], total: 0 }
+
+  const rows = db
+    .prepare(`
+      SELECT
+        je.value AS mood,
+        s.artist,
+        COUNT(*) AS cnt
+      FROM track_semantics s
+      CROSS JOIN json_each(s.moods_json) je
+      WHERE s.user_id = current_user_id()
+        AND je.value IS NOT NULL
+        AND je.value != ''
+      GROUP BY je.value, s.artist
+      ORDER BY je.value, cnt DESC
+    `)
+    .all() as Array<{ mood: string; artist: string; cnt: number }>
+
+  const moodTotals = new Map<string, number>()
+  const moodArtists = new Map<string, Array<{ artist: string; cnt: number }>>()
+  for (const row of rows) {
+    moodTotals.set(row.mood, (moodTotals.get(row.mood) ?? 0) + row.cnt)
+    if (row.artist) {
+      const list = moodArtists.get(row.mood) ?? []
+      if (list.length < 3) list.push({ artist: row.artist, cnt: row.cnt })
+      moodArtists.set(row.mood, list)
     }
   }
-  const max = Math.max(1, ...Array.from(moodCounts.values()).map((item) => item.count))
-  const moods: TasteProfile['moods'] = Array.from(moodCounts.entries())
-    .sort((a, b) => b[1].count - a[1].count)
+
+  const sorted = Array.from(moodTotals.entries())
+    .sort((a, b) => b[1] - a[1])
     .slice(0, 8)
-    .map(([tag, item]) => ({
-      tag,
-      frequency: Number((item.count / max).toFixed(2)),
-      signature_artists: Array.from(item.artists.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([artist]) => artist),
-    }))
-  return { moods, total: tracks.length }
+
+  if (sorted.length === 0) return { moods: [], total }
+
+  const max = sorted[0][1]
+  const moods: TasteProfile['moods'] = sorted.map(([tag, count]) => ({
+    tag,
+    frequency: Number((count / max).toFixed(2)),
+    signature_artists: (moodArtists.get(tag) ?? []).map((a) => a.artist),
+  }))
+
+  return { moods, total }
 }

@@ -51,6 +51,10 @@ export interface IntentRejectIf {
   requireTempo?: Array<TrackSemantic['tempo']>
 }
 
+export interface IntentParseOptions {
+  inferEntities?: boolean
+}
+
 const ALLOWED_MOODS = new Set(['放松', '松弛', '清醒', '热烈', '轻快', '治愈', '怀旧', '孤独', '陪伴', '发呆'])
 const ALLOWED_SCENES = new Set(['上午', '午休', '下午工作', '通勤', '下班路上', '夜晚', '睡前', '雨天', '独处', '运动'])
 const ALLOWED_LANGUAGES = new Set(['华语', '粤语', '英语', '韩语', '日语'])
@@ -163,12 +167,13 @@ function normalizeIntentOverride(raw: unknown): IntentOverride | null {
   return override
 }
 
-export function validateIntentOverride(text: string, override: IntentOverride | null): IntentOverride | null {
+export function validateIntentOverride(text: string, override: IntentOverride | null, options: IntentParseOptions = {}): IntentOverride | null {
   if (!override) return null
   const highTerms = detectTerms(text, HIGH_ENERGY_TERMS)
   const lowTerms = detectTerms(text, LOW_ENERGY_TERMS)
-  const artistQuery = inferArtistQuery(text)
-  const directSong = inferDirectSongRequest(text)
+  const inferEntities = options.inferEntities ?? true
+  const artistQuery = inferEntities ? inferArtistQuery(text) : undefined
+  const directSong = inferEntities ? inferDirectSongRequest(text) : {}
   const requested = parseRequestedTrackCount(text)
   const explicitMusic = MUSIC_REQUEST_PATTERN.test(text)
   const next: IntentOverride = { ...override }
@@ -352,7 +357,7 @@ export async function inferIntentWithLlm(text: string, recentDialog?: string, op
     completeChat(settings, [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
-    ], { temperature: 0, signal: options.signal, timeoutMs: INTENT_LLM_TIMEOUT_MS }),
+    ], { temperature: 0, signal: options.signal, timeoutMs: INTENT_LLM_TIMEOUT_MS, maxTokens: 200 }),
     INTENT_LLM_TIMEOUT_MS,
   )
   assertIntentActive(options.signal)
@@ -372,7 +377,7 @@ function parseTargetCount(text: string): number {
   return parseRequestedTrackCount(text).targetCount
 }
 
-export function parseIntent(text: string): RecommendationIntent {
+export function parseIntent(text: string, options: IntentParseOptions = {}): RecommendationIntent {
   const lower = text.toLowerCase()
   const moods: string[] = []
   const scenes: string[] = []
@@ -403,9 +408,10 @@ export function parseIntent(text: string): RecommendationIntent {
   const energy = hasHighEnergy ? 'high' : hasLowEnergy ? 'low' : undefined
   const tempo = hasHighEnergy ? 'fast' : hasLowEnergy ? 'slow' : undefined
   const familiarity = /新|没听过|探索|陌生/.test(lower) ? 'explore' : /熟|稳|安全|常听|像/.test(lower) ? 'safe' : 'balanced'
-  const directSong = inferDirectSongRequest(text)
-  const seedTitle = text.match(/《([^》]{1,40})》/)?.[1]?.trim() ?? directSong.seedTitle
-  const artistQuery = directSong.artistQuery ?? inferArtistQuery(text)
+  const inferEntities = options.inferEntities ?? true
+  const directSong = inferEntities ? inferDirectSongRequest(text) : {}
+  const seedTitle = inferEntities ? text.match(/《([^》]{1,40})》/)?.[1]?.trim() ?? directSong.seedTitle : undefined
+  const artistQuery = inferEntities ? directSong.artistQuery ?? inferArtistQuery(text) : undefined
   const rejectIf = hasHighEnergy
     ? { minEnergy: 0.55, forbidTempo: ['slow' as const], requireTempo: ['fast' as const] }
     : hasLowEnergy

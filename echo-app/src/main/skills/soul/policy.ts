@@ -93,6 +93,10 @@ export function buildSoulPolicyPrompt(surface: SoulPolicySurface): string {
 ${agentSoul || FALLBACK_AGENT_SOUL}
 </agent_soul>
 
+<core_contract>
+${CORE_POLICY.map((line) => `- ${line}`).join('\n')}
+</core_contract>
+
 <surface_contract>
 ${[...interactionLines, ...surfaceLines].map((line) => `- ${line}`).join('\n')}
 </surface_contract>

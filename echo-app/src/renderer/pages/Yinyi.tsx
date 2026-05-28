@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { EchoApi, RuntimeTaskSnapshot, YinyiEntry } from '../../types/ipc'
-import type { AppPageProps } from '../../App'
+import type { AppPageProps } from '../appState'
 import { BrandLogo, EmptyState } from '../components'
 import { latestRunningRuntimeTask, useRuntimeTasks } from '../hooks/useRuntimeTasks'
 import { pageLabels } from '../labels'
@@ -80,12 +80,12 @@ export function YinyiPage({ echo, isActive, openWithRandom }: YinyiPageProps) {
   }, [date, echo])
 
   useEffect(() => {
-    load(date)
+    load(date).catch(() => undefined)
   }, [date, load])
 
   useEffect(() => {
     return echo.yinyi.onGenerated((payload) => {
-      if (payload.date === date) load(date)
+      if (payload.date === date) load(date).catch(() => undefined)
       else echo.yinyi.getRange(30).then(setRange).catch(() => undefined)
     })
   }, [echo, date, load])

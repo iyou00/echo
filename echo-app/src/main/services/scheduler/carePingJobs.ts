@@ -11,6 +11,7 @@ import { insertScheduledJob } from '../../db/scheduledJobs'
 import { getSettings } from '../../db/settings'
 import { recordSchedulerHealth } from '../health'
 import { runCarePingSlot } from '../carePings'
+import { stableInt } from '../recommendation/deterministic'
 import { runSchedulerResultTask } from './runtimeTask'
 
 let carePingTasks: ScheduledTask[] = []
@@ -71,7 +72,8 @@ function randomPlannedAt(window: CarePingWindow, date: string): string | null {
   const max = end.getTime() - 60 * 1000
   if (min > max) return null
   const totalMinutes = Math.floor((max - min) / 60000)
-  const picked = new Date(min + Math.floor(Math.random() * (totalMinutes + 1)) * 60000)
+  const offset = stableInt(`${date}:care-ping:${window.key}:${window.startHour}-${window.endHour}`, totalMinutes + 1)
+  const picked = new Date(min + offset * 60000)
   picked.setSeconds(0, 0)
   return plannedAtKey(picked)
 }
@@ -92,6 +94,15 @@ function shouldExpireCarePing(record: CarePingScheduleRecord, now = new Date()):
   return now.getTime() - planned.getTime() > CARE_PING_CATCHUP_GRACE_MS
 }
 
+function technicalMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return typeof error === 'string' ? error : ''
+}
+
+function recordCarePingSchedulerFailure(message: string, error: unknown): void {
+  recordSchedulerHealth('care-ping', 'degraded', message, technicalMessage(error))
+}
+
 export function rescheduleCarePings(): void {
   carePingTasks.forEach((task) => task.stop())
   carePingTasks = []
@@ -99,7 +110,9 @@ export function rescheduleCarePings(): void {
   carePingRolloverTask = cron.schedule('5 0 * * *', () => rescheduleCarePings())
   carePingWatchdogTask?.stop()
   carePingWatchdogTask = cron.schedule('* * * * *', () => {
-    runCarePingWatchdog().catch(() => undefined)
+    runCarePingWatchdog().catch((error) => {
+      recordCarePingSchedulerFailure('watchdog 执行失败。', error)
+    })
   })
 
   const settings = getSettings()
@@ -148,7 +161,9 @@ export function rescheduleCarePings(): void {
     const planned = parsePlannedAt(record.plannedAt)
     if (planned.getTime() <= now.getTime()) {
       if (shouldCatchUpCarePing(record, now)) {
-        executeCarePingPlan(record).catch(() => undefined)
+        executeCarePingPlan(record).catch((error) => {
+          recordCarePingSchedulerFailure(`${record.label}补发失败。`, error)
+        })
       } else {
         updateCarePingPlanStatus(record.id, 'skipped', 'App 未在计划时间运行，已错过这次主动通知。')
         insertScheduledJob('care_ping', record.plannedAt, 'skipped', `${record.label}已错过。`)
@@ -157,7 +172,9 @@ export function rescheduleCarePings(): void {
     }
 
     carePingTasks.push(cron.schedule(`${planned.getMinutes()} ${planned.getHours()} * * *`, () => {
-      executeCarePingPlan(record).catch(() => undefined)
+      executeCarePingPlan(record).catch((error) => {
+        recordCarePingSchedulerFailure(`${record.label}执行失败。`, error)
+      })
     }))
   }
 }

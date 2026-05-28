@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ActiveScene, ImportTaskSnapshot, PlaybackState, SceneDefinition, SceneKey, Settings, TasteProfile, Track } from './types/ipc'
+import { Component, useCallback, useEffect, useMemo, useRef, type ErrorInfo, type ReactNode } from 'react'
+import type { ActiveScene, PlaybackState, SceneKey, SettingUpdatePatch, Settings, Track } from './types/ipc'
 import { getEchoApi } from './renderer/api'
 import { AboutEchoPage } from './renderer/pages/AboutEcho'
 import { ChatPage } from './renderer/pages/Chat'
@@ -12,284 +12,367 @@ import { FirstRunWelcome } from './renderer/components/FirstRunWelcome'
 import { Player } from './renderer/components/Player'
 import { HeaderAvatar, WindowControls } from './renderer/components'
 import { pageLabels } from './renderer/labels'
+import { type AppPageProps, type PageKey, useAppState } from './renderer/appState'
 
-export type PageKey = 'chat' | 'profile' | 'yinyi' | 'voice' | 'queue' | 'settings' | 'about'
+class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  state = { hasError: false }
+  static getDerivedStateFromError() { return { hasError: true } }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.warn('[app] render error', error, info.componentStack)
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: 32, textAlign: 'center', color: '#666' }}>
+          <p>Echo 遇到了一个意外错误。</p>
+          <button onClick={() => this.setState({ hasError: false })} style={{ marginTop: 12, padding: '6px 16px', cursor: 'pointer' }}>重试</button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
-export interface AppPageProps {
-  navigate: (page: PageKey) => void
+function logAppAsyncError(area: string, error: unknown): void {
+  console.warn(`[app] ${area} failed`, error)
 }
 
 function App() {
   const echo = useMemo(() => getEchoApi(), [])
-  const [page, setPage] = useState<PageKey>('chat')
-  const [settings, setSettings] = useState<Settings | null>(null)
-  const [bootReady, setBootReady] = useState(false)
-  const [profile, setProfile] = useState<TasteProfile | null>(null)
-  const [queue, setQueue] = useState<Track[]>([])
-  const [sceneDefinitions, setSceneDefinitions] = useState<SceneDefinition[]>([])
-  const [currentScene, setCurrentScene] = useState<ActiveScene | null>(null)
-  const [importTask, setImportTask] = useState<ImportTaskSnapshot | null>(null)
+  const [state, dispatch] = useAppState()
   const handledImportTaskIdsRef = useRef(new Set<string>())
-  const [playbackNotice, setPlaybackNotice] = useState('')
-  const [careMuteToast, setCareMuteToast] = useState(false)
-  const [careMuteCountdown, setCareMuteCountdown] = useState(5)
-  const [voiceAutoStartToken, setVoiceAutoStartToken] = useState(0)
-  const [voiceContinuous, setVoiceContinuousState] = useState(() => localStorage.getItem('echo:voiceContinuous') === '1')
-  const [closeDialogOpen, setCloseDialogOpen] = useState(false)
-  const [rememberCloseChoice, setRememberCloseChoice] = useState(false)
-  const [latestYinyiDate, setLatestYinyiDate] = useState('')
-  const [onboardingOpen, setOnboardingOpen] = useState(false)
-  const [firstRunWelcomeOpen, setFirstRunWelcomeOpen] = useState(false)
-  const [settingsImportFocusToken, setSettingsImportFocusToken] = useState(0)
-  const [settingsApiFocusToken, setSettingsApiFocusToken] = useState(0)
-  const [playbackState, setPlaybackState] = useState<PlaybackState>({
-    current: null,
-    position: 0,
-    duration: 0,
-    status: 'idle',
-    volume: 100,
-    queue: [],
-    history: [],
-  })
+  const {
+    page,
+    settings,
+    bootReady,
+    profile,
+    queue,
+    sceneDefinitions,
+    currentScene,
+    importTask,
+    playbackNotice,
+    careMuteToast,
+    careMuteCountdown,
+    voiceAutoStartToken,
+    voiceContinuous,
+    closeDialogOpen,
+    rememberCloseChoice,
+    latestYinyiDate,
+    onboardingOpen,
+    firstRunWelcomeOpen,
+    settingsImportFocusToken,
+    settingsApiFocusToken,
+    playbackState,
+  } = state
+
+  const setPage = useCallback((page: PageKey) => dispatch({ page }), [dispatch])
+  const setSettings = useCallback((settings: Settings | null) => dispatch({ settings }), [dispatch])
+  const setPlaybackState = useCallback((playbackState: PlaybackState) => dispatch({ playbackState }), [dispatch])
 
   const hasLlmConfig = Boolean(settings?.llm.baseUrl && settings.llm.apiKey && settings.llm.model)
 
   const refreshProfile = useCallback(async () => {
     const next = await echo.taste.getProfile()
-    setProfile(next.profile)
-  }, [echo])
+    dispatch({ profile: next.profile })
+  }, [dispatch, echo])
 
   const refreshQueue = useCallback(async (): Promise<Track[]> => {
     const next = await echo.queue.get()
-    setQueue(next)
+    dispatch({ queue: next })
     return next
-  }, [echo])
+  }, [dispatch, echo])
 
   const refreshScene = useCallback(async (): Promise<ActiveScene | null> => {
     const next = await echo.scene.getCurrent()
-    setCurrentScene(next)
+    dispatch({ currentScene: next })
     return next
-  }, [echo])
+  }, [dispatch, echo])
+
+  const reloadSettings = useCallback(async (): Promise<void> => {
+    try {
+      const next = await echo.settings.get()
+      setSettings(next)
+      dispatch({ playbackNotice: '' })
+    } catch (error) {
+      logAppAsyncError('reload settings', error)
+      dispatch({ playbackNotice: error instanceof Error ? error.message : '设置读取失败' })
+    }
+  }, [dispatch, echo, setSettings])
 
   useEffect(() => {
     let alive = true
 
-    async function boot() {
-      const [nextSettings, nextTaste, nextQueue, nextPlayback, nextYinyi, nextScenes, nextScene, nextImportTask] = await Promise.all([
-        echo.settings.get(),
-        echo.taste.getProfile(),
-        echo.queue.get(),
-        echo.playback.getState(),
-        echo.yinyi.getRange(1).catch(() => []),
-        echo.scene.definitions(),
-        echo.scene.getCurrent(),
-        echo.import.getSnapshot(),
-      ])
+    function bootTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+      return Promise.race([
+        promise,
+        new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+      ]).catch((error) => {
+        logAppAsyncError('boot optional resource', error)
+        return fallback
+      })
+    }
 
-      if (!alive) return
-      setSettings(nextSettings)
-      setProfile(nextTaste.profile)
-      setQueue(nextQueue)
-      setPlaybackState(nextPlayback)
-      setLatestYinyiDate(nextYinyi[0]?.date ?? '')
-      setSceneDefinitions(nextScenes)
-      setCurrentScene(nextScene)
-      setImportTask(nextImportTask)
-      const isExistingUser = Boolean(nextSettings.meta.onboardingCompletedAt) || Boolean(nextTaste.profile)
-      const shouldShowFirstRunWelcome = !isExistingUser && !nextSettings.meta.firstRunWelcomeCompletedAt
-      setFirstRunWelcomeOpen(shouldShowFirstRunWelcome)
-      setOnboardingOpen(!shouldShowFirstRunWelcome && !nextSettings.meta.onboardingCompletedAt && !nextTaste.profile)
-      const isRealElectron = Boolean(window.echo)
-      const needsOnboarding = !shouldShowFirstRunWelcome && !nextSettings.meta.onboardingCompletedAt && !nextTaste.profile
-      if (!needsOnboarding && isRealElectron && (!nextSettings.llm.baseUrl || !nextSettings.llm.apiKey || !nextSettings.llm.model)) {
-        setPage('settings')
+    function bootRequired<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+      return Promise.race([
+        promise,
+        new Promise<T>((_, reject) => setTimeout(() => reject(new Error(message)), ms)),
+      ])
+    }
+
+    async function boot() {
+      try {
+        const [nextSettings, nextTaste, nextQueue, nextPlayback, nextYinyi, nextScenes, nextScene, nextImportTask] = await Promise.all([
+          bootRequired(echo.settings.get(), 10_000, '设置读取超时，请重试。'),
+          bootTimeout(echo.taste.getProfile(), 10_000, { profile: null, questions: [] }),
+          bootTimeout(echo.queue.get(), 10_000, []),
+          bootTimeout(echo.playback.getState(), 10_000, { current: null, position: 0, duration: 0, status: 'idle', volume: 100, queue: [], history: [] }),
+          bootTimeout(echo.yinyi.getRange(1), 10_000, []),
+          bootTimeout(echo.scene.definitions(), 10_000, []),
+          bootTimeout(echo.scene.getCurrent(), 10_000, null),
+          bootTimeout(echo.import.getSnapshot(), 10_000, null),
+        ])
+
+        if (!alive) return
+        dispatch({
+          settings: nextSettings,
+          profile: nextTaste.profile,
+          queue: nextQueue,
+          playbackState: nextPlayback,
+          latestYinyiDate: nextYinyi[0]?.date ?? '',
+          sceneDefinitions: nextScenes,
+          currentScene: nextScene,
+          importTask: nextImportTask,
+        })
+        if (!nextSettings) {
+          dispatch({ page: 'settings' })
+        } else {
+          const isExistingUser = Boolean(nextSettings.meta.onboardingCompletedAt) || Boolean(nextTaste.profile)
+          const shouldShowFirstRunWelcome = !isExistingUser && !nextSettings.meta.firstRunWelcomeCompletedAt
+          dispatch({
+            firstRunWelcomeOpen: shouldShowFirstRunWelcome,
+            onboardingOpen: !shouldShowFirstRunWelcome && !nextSettings.meta.onboardingCompletedAt && !nextTaste.profile,
+          })
+          const isRealElectron = Boolean(window.echo)
+          const needsOnboarding = !shouldShowFirstRunWelcome && !nextSettings.meta.onboardingCompletedAt && !nextTaste.profile
+          if (!needsOnboarding && isRealElectron && (!nextSettings.llm.baseUrl || !nextSettings.llm.apiKey || !nextSettings.llm.model)) {
+            dispatch({ page: 'settings' })
+          }
+        }
+      } catch (error) {
+        console.error('[app] boot failed', error)
+        if (!alive) return
+        dispatch({
+          page: 'settings',
+          playbackNotice: error instanceof Error ? error.message : 'Echo 启动初始化失败',
+        })
+      } finally {
+        if (alive) dispatch({ bootReady: true })
       }
-      // 所有初始数据都到位后才解锁主界面，避免渲染时 settings 还是 null 闪一下"去设置"提示。
-      setBootReady(true)
     }
 
     boot()
     return () => {
       alive = false
     }
-  }, [echo])
+  }, [dispatch, echo])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      refreshScene().catch(() => undefined)
+      refreshScene().catch((error) => logAppAsyncError('refresh scene', error))
     }, 60000)
     return () => window.clearInterval(timer)
   }, [refreshScene])
 
   useEffect(() => {
     return echo.scene.onChanged((next) => {
-      setCurrentScene(next)
+      dispatch({ currentScene: next })
     })
-  }, [echo])
+  }, [dispatch, echo])
 
   useEffect(() => {
     return echo.playback.onStateChanged((next) => {
       setPlaybackState(next)
-      refreshQueue()
+      void refreshQueue().catch((error) => logAppAsyncError('refresh queue after playback change', error))
     })
-  }, [echo, refreshQueue])
+  }, [echo, refreshQueue, setPlaybackState])
 
   useEffect(() => {
     return echo.import.onChanged((next) => {
-      setImportTask(next)
+      dispatch({ importTask: next })
     })
-  }, [echo])
+  }, [dispatch, echo])
 
   useEffect(() => {
     if (!settings) return
     if (importTask?.status !== 'succeeded') return
     if (handledImportTaskIdsRef.current.has(importTask.id)) return
     handledImportTaskIdsRef.current.add(importTask.id)
-    refreshProfile().catch(() => undefined)
-    refreshQueue().catch(() => undefined)
+    refreshProfile().catch((error) => logAppAsyncError('refresh profile after import', error))
+    refreshQueue().catch((error) => logAppAsyncError('refresh queue after import', error))
     if (settings.meta.onboardingStep === 'playlist' || !settings.meta.onboardingCompletedAt) {
-      echo.settings.update('meta.onboardingStep', 'done')
-        .then((next) => next.meta.onboardingCompletedAt ? next : echo.settings.update('meta.onboardingCompletedAt', new Date().toISOString()))
+      const updates: SettingUpdatePatch[] = [
+        { path: 'meta.onboardingStep' as const, value: 'done' },
+        ...(!settings.meta.onboardingCompletedAt ? [{ path: 'meta.onboardingCompletedAt' as const, value: new Date().toISOString() }] : []),
+      ]
+      echo.settings.updateBatch(updates)
         .then(setSettings)
-        .catch(() => undefined)
+        .catch((error) => logAppAsyncError('mark onboarding import complete', error))
     }
-  }, [echo, importTask, refreshProfile, refreshQueue, settings])
+  }, [echo, importTask, refreshProfile, refreshQueue, setSettings, settings])
 
   useEffect(() => {
     return echo.playback.onCookieExpired((message) => {
-      setPlaybackNotice(message)
-      window.setTimeout(() => setPlaybackNotice(''), 5000)
+      dispatch({ playbackNotice: message })
+      window.setTimeout(() => dispatch({ playbackNotice: '' }), 5000)
     })
-  }, [echo])
+  }, [dispatch, echo])
 
   useEffect(() => {
     return echo.app.onCloseRequested(() => {
-      setCloseDialogOpen(true)
+      dispatch({ closeDialogOpen: true })
     })
-  }, [echo])
+  }, [dispatch, echo])
 
   useEffect(() => {
     return echo.app.onNavigate((payload) => {
-      setPage(payload.page)
-      if (payload.action === 'start_listening') setVoiceAutoStartToken((value) => value + 1)
+      dispatch((current) => ({
+        page: payload.page,
+        voiceAutoStartToken: payload.action === 'start_listening' ? current.voiceAutoStartToken + 1 : current.voiceAutoStartToken,
+      }))
       if (payload.canMuteToday) {
-        setCareMuteToast(true)
-        setCareMuteCountdown(5)
+        dispatch({ careMuteToast: true, careMuteCountdown: 5 })
       }
     })
-  }, [echo])
+  }, [dispatch, echo])
 
   useEffect(() => {
     if (!careMuteToast) return
     const timer = window.setInterval(() => {
-      setCareMuteCountdown((current) => {
-        if (current <= 1) {
+      dispatch((current) => {
+        if (current.careMuteCountdown <= 1) {
           window.clearInterval(timer)
-          setCareMuteToast(false)
-          return 0
+          return { careMuteCountdown: 0, careMuteToast: false }
         }
-        return current - 1
+        return { careMuteCountdown: current.careMuteCountdown - 1 }
       })
     }, 1000)
     return () => window.clearInterval(timer)
-  }, [careMuteToast])
+  }, [careMuteToast, dispatch])
 
   useEffect(() => {
     if (page === 'profile') {
-      refreshProfile().catch(() => undefined)
+      refreshProfile().catch((error) => logAppAsyncError('refresh profile on page enter', error))
     }
   }, [page, refreshProfile])
 
   useEffect(() => {
     return echo.yinyi.onGenerated((payload) => {
       if (payload.status !== 'failed') {
-        setLatestYinyiDate((current) => (payload.date > current ? payload.date : current))
+        dispatch((current) => ({ latestYinyiDate: payload.date > current.latestYinyiDate ? payload.date : current.latestYinyiDate }))
       }
     })
-  }, [echo])
+  }, [dispatch, echo])
 
   useEffect(() => {
     if (page !== 'yinyi') return
     if (!latestYinyiDate) return
     if (settings?.meta?.lastViewedYinyiAt === latestYinyiDate) return
-    echo.settings.update('meta.lastViewedYinyiAt', latestYinyiDate).then(setSettings).catch(() => undefined)
-  }, [page, latestYinyiDate, settings?.meta?.lastViewedYinyiAt, echo])
+    echo.settings.update('meta.lastViewedYinyiAt', latestYinyiDate)
+      .then(setSettings)
+      .catch((error) => logAppAsyncError('mark yinyi viewed', error))
+  }, [page, latestYinyiDate, settings?.meta?.lastViewedYinyiAt, echo, setSettings])
 
   const yinyiUnread = Boolean(latestYinyiDate) && latestYinyiDate !== (settings?.meta?.lastViewedYinyiAt ?? '')
 
   useEffect(() => {
     if (!bootReady || !settings) return
     const firstRunDone = Boolean(settings.meta.firstRunWelcomeCompletedAt)
-    setOnboardingOpen(firstRunDone && !firstRunWelcomeOpen && !settings.meta.onboardingCompletedAt && !profile)
-  }, [bootReady, settings, profile, firstRunWelcomeOpen])
+    dispatch({ onboardingOpen: firstRunDone && !firstRunWelcomeOpen && !settings.meta.onboardingCompletedAt && !profile })
+  }, [bootReady, dispatch, settings, profile, firstRunWelcomeOpen])
 
-  async function rememberMinimizeChoice() {
+  async function rememberCloseChoiceAs(behavior: NonNullable<Settings['ui']['closeBehavior']>) {
     if (!rememberCloseChoice) return
-    const next = await echo.settings.update('ui.closeBehavior', 'minimize')
+    const next = await echo.settings.update('ui.closeBehavior', behavior)
     setSettings(next)
   }
 
   async function minimizeToTray() {
-    await rememberMinimizeChoice()
-    setCloseDialogOpen(false)
-    await echo.app.minimizeToTray()
+    try {
+      await rememberCloseChoiceAs('minimize')
+      dispatch({ closeDialogOpen: false })
+      await echo.app.minimizeToTray()
+    } catch (error) { logAppAsyncError('minimizeToTray', error) }
   }
 
   async function quitEcho() {
-    await rememberMinimizeChoice()
-    setCloseDialogOpen(false)
-    await echo.app.quit()
+    try {
+      await rememberCloseChoiceAs('quit')
+      dispatch({ closeDialogOpen: false })
+      await echo.app.quit()
+    } catch (error) { logAppAsyncError('quitEcho', error) }
   }
 
   async function muteCareToday() {
-    await echo.carePings.muteToday()
-    setCareMuteToast(false)
+    try {
+      await echo.carePings.muteToday()
+      dispatch({ careMuteToast: false })
+    } catch (error) { logAppAsyncError('muteCareToday', error) }
   }
 
   async function updateAutoPlayNext(value: boolean) {
-    const next = await echo.settings.update('playback.autoPlayNext', value)
-    setSettings(next)
+    try {
+      const next = await echo.settings.update('playback.autoPlayNext', value)
+      setSettings(next)
+    } catch (error) {
+      logAppAsyncError('updateAutoPlayNext', error)
+      throw error
+    }
   }
 
   async function completeFirstRunWelcome() {
-    const next = await echo.settings.update('meta.firstRunWelcomeCompletedAt', new Date().toISOString())
-    setSettings(next)
-    setFirstRunWelcomeOpen(false)
-    setOnboardingOpen(!next.meta.onboardingCompletedAt && !profile)
+    try {
+      const next = await echo.settings.update('meta.firstRunWelcomeCompletedAt', new Date().toISOString())
+      setSettings(next)
+      dispatch({ firstRunWelcomeOpen: false, onboardingOpen: !next.meta.onboardingCompletedAt && !profile })
+    } catch (error) { logAppAsyncError('completeFirstRunWelcome', error) }
   }
 
   async function startOnboardingApi() {
-    const next = await echo.settings.update('meta.onboardingCompletedAt', new Date().toISOString())
-    setSettings(next)
-    setOnboardingOpen(false)
-    setPage('settings')
-    setSettingsApiFocusToken((value) => value + 1)
+    try {
+      const next = await echo.settings.update('meta.onboardingCompletedAt', new Date().toISOString())
+      setSettings(next)
+      dispatch((current) => ({ onboardingOpen: false, page: 'settings', settingsApiFocusToken: current.settingsApiFocusToken + 1 }))
+    } catch (error) { logAppAsyncError('startOnboardingApi', error) }
   }
 
   async function startOnboardingImport() {
-    let next = await echo.settings.update('meta.onboardingStep', 'playlist')
-    next = await echo.settings.update('meta.onboardingCompletedAt', new Date().toISOString())
-    setSettings(next)
-    setOnboardingOpen(false)
-    setPage('settings')
-    setSettingsImportFocusToken((value) => value + 1)
+    try {
+      const next = await echo.settings.updateBatch([
+        { path: 'meta.onboardingStep', value: 'playlist' },
+        { path: 'meta.onboardingCompletedAt', value: new Date().toISOString() },
+      ])
+      setSettings(next)
+      dispatch((current) => ({ onboardingOpen: false, page: 'settings', settingsImportFocusToken: current.settingsImportFocusToken + 1 }))
+    } catch (error) { logAppAsyncError('startOnboardingImport', error) }
   }
 
   async function skipOnboarding() {
-    const next = await echo.settings.update('meta.onboardingCompletedAt', new Date().toISOString())
-    setSettings(next)
-    setOnboardingOpen(false)
+    try {
+      const next = await echo.settings.update('meta.onboardingCompletedAt', new Date().toISOString())
+      setSettings(next)
+      dispatch({ onboardingOpen: false })
+    } catch (error) { logAppAsyncError('skipOnboarding', error) }
   }
 
   function setVoiceContinuous(value: boolean) {
-    setVoiceContinuousState(value)
+    dispatch({ voiceContinuous: value })
     localStorage.setItem('echo:voiceContinuous', value ? '1' : '0')
   }
 
   async function playScene(key: SceneKey) {
     const result = await echo.scene.play(key, { appendChatMessage: true, targetCount: 1 })
     if (result.tracks.length > 0 || result.message) {
-      setCurrentScene(result.scene)
+      dispatch({ currentScene: result.scene })
       setPlaybackState(result.state)
       await refreshQueue()
     }
@@ -301,7 +384,7 @@ function App() {
     if (!current || current.id !== scene.id || current.key !== scene.key) return
     const result = await echo.scene.play(current.key, { appendChatMessage: true, continueSession: true, targetCount: 1 })
     if (result.tracks.length > 0 || result.message) {
-      setCurrentScene(result.scene)
+      dispatch({ currentScene: result.scene })
       setPlaybackState(result.state)
       await refreshQueue()
     }
@@ -309,15 +392,27 @@ function App() {
 
   async function endScene() {
     await echo.scene.end()
-    setCurrentScene(null)
+    dispatch({ currentScene: null })
   }
 
   async function closeWindow() {
-    if (settings?.ui.closeBehavior === 'minimize') {
-      await echo.app.minimizeToTray()
-      return
+    try {
+      if (settings?.ui.closeBehavior === 'minimize') {
+        await echo.app.minimizeToTray()
+        return
+      }
+      if (settings?.ui.closeBehavior === 'quit') {
+        await echo.app.quit()
+        return
+      }
+      dispatch({ closeDialogOpen: true })
+    } catch (error) {
+      logAppAsyncError('closeWindow', error)
+      dispatch({
+        closeDialogOpen: true,
+        playbackNotice: error instanceof Error ? error.message : '关闭窗口失败，请重试。',
+      })
     }
-    setCloseDialogOpen(true)
   }
 
   const tabItems: Array<{ key: PageKey; label: string }> = [
@@ -349,8 +444,8 @@ function App() {
             ))}
           </nav>
           <WindowControls
-            onMinimize={() => echo.window.minimize().catch(() => undefined)}
-            onToggleMaximize={() => echo.window.toggleMaximize().catch(() => undefined)}
+            onMinimize={() => echo.window.minimize().catch((error) => logAppAsyncError('window minimize', error))}
+            onToggleMaximize={() => echo.window.toggleMaximize().catch((error) => logAppAsyncError('window toggle maximize', error))}
             onClose={closeWindow}
           />
         </header>
@@ -367,8 +462,8 @@ function App() {
           <small>{page === 'settings' ? 'S E T T I N G S' : page === 'about' ? 'A B O U T' : 'P R O F I L E'}</small>
         </div>
         <WindowControls
-          onMinimize={() => echo.window.minimize().catch(() => undefined)}
-          onToggleMaximize={() => echo.window.toggleMaximize().catch(() => undefined)}
+          onMinimize={() => echo.window.minimize().catch((error) => logAppAsyncError('window minimize', error))}
+          onToggleMaximize={() => echo.window.toggleMaximize().catch((error) => logAppAsyncError('window toggle maximize', error))}
           onClose={closeWindow}
         />
       </header>
@@ -424,7 +519,7 @@ function App() {
               endScene={endScene}
               autoPlayNext={settings?.playback.autoPlayNext ?? true}
               updateAutoPlayNext={updateAutoPlayNext}
-              focusApiSettings={() => setSettingsApiFocusToken((v) => v + 1)}
+              focusApiSettings={() => dispatch((current) => ({ settingsApiFocusToken: current.settingsApiFocusToken + 1 }))}
             />
           </div>
           <div className="shell-page" style={{ display: page === 'yinyi' ? 'flex' : 'none' }}>
@@ -476,6 +571,7 @@ function App() {
               echo={echo}
               settings={settings}
               setSettings={setSettings}
+              reloadSettings={reloadSettings}
               hasLlmConfig={hasLlmConfig}
               refreshProfile={refreshProfile}
               refreshQueue={refreshQueue}
@@ -499,13 +595,13 @@ function App() {
             voiceContinuous={voiceContinuous}
             onSceneTrackEnded={(scene) => {
               continueScene(scene).catch((error) => {
-                setPlaybackNotice(error instanceof Error ? error.message : '场景续播失败')
-                window.setTimeout(() => setPlaybackNotice(''), 5000)
+                dispatch({ playbackNotice: error instanceof Error ? error.message : '场景续播失败' })
+                window.setTimeout(() => dispatch({ playbackNotice: '' }), 5000)
               })
             }}
             onVoiceTrackEnded={() => {
               setPage('voice')
-              setVoiceAutoStartToken((value) => value + 1)
+              dispatch((current) => ({ voiceAutoStartToken: current.voiceAutoStartToken + 1 }))
             }}
           />
         </div>
@@ -522,9 +618,9 @@ function App() {
                 <input
                   type="checkbox"
                   checked={rememberCloseChoice}
-                  onChange={(event) => setRememberCloseChoice(event.target.checked)}
+                  onChange={(event) => dispatch({ rememberCloseChoice: event.target.checked })}
                 />
-                <span>下次不再提醒，默认最小化到托盘</span>
+                <span>下次不再提醒，记住这次选择</span>
               </label>
               <div className="close-dialog-actions">
                 <button className="btn sec close-quit-btn" type="button" onClick={quitEcho}>直接退出</button>
@@ -572,4 +668,10 @@ function App() {
   )
 }
 
-export default App
+export default function Root() {
+  return (
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
+  )
+}

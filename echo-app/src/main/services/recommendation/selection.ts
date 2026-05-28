@@ -2,7 +2,7 @@ import type { Track } from '../../../types/ipc'
 import { getSettings } from '../../db/settings'
 import { completeChat } from '../../llm/client'
 import type { RecommendationIntent } from './intent'
-import { parseJsonObject, trackKey, uniqueTracks } from './text'
+import { parseJsonObject, uniqueTracks } from './text'
 
 function assertSelectionActive(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException('任务已取消', 'AbortError')
@@ -26,18 +26,18 @@ export async function selectFinalTracks(text: string, candidates: Track[], inten
   const targetCount = intent.targetCount
   if (candidates.length <= targetCount) return candidates.map((track, index) => ({ ...track, reason: track.reason ?? fallbackReason(track, index, intent) }))
   assertSelectionActive(signal)
+  const selected = uniqueTracks(candidates).slice(0, targetCount)
   const settings = getSettings()
-  const list = candidates
-    .slice(0, Math.max(20, targetCount * 8))
+  const list = selected
     .map((track, index) => `${index + 1}. ${track.title} - ${track.artist}${track.album ? ` / ${track.album}` : ''} / ${track.recommendSource ?? 'search'}`)
     .join('\n')
   try {
     const content = await completeChat(settings, [
       {
         role: 'system',
-        content: `你是 Echo 的最终推荐排序器。只能从候选中选 ${targetCount} 首。
-输出严格 JSON: {"indexes":[数字],"notes":["每首一句中文理由"]}。
-indexes 数量必须是 ${targetCount}。理由要具体,每首理由要有差异。`,
+        content: `你是 Echo 的推荐理由编辑器。歌曲顺序已经固定,不能增删、换歌或改顺序。
+输出严格 JSON: {"notes":["每首一句中文理由"]}。
+notes 数量必须是 ${selected.length}。理由要具体,每首理由要有差异。`,
       },
       {
         role: 'user',
@@ -46,22 +46,12 @@ indexes 数量必须是 ${targetCount}。理由要具体,每首理由要有差�
 候选:
 ${list}`,
       },
-    ], { temperature: 0.45, signal })
+    ], { temperature: 0, signal, maxTokens: 200 })
     assertSelectionActive(signal)
     const parsed = parseJsonObject(content)
-    const indexes = Array.isArray(parsed?.indexes) ? parsed.indexes.map(Number).filter((item) => Number.isInteger(item)) : []
     const notes = Array.isArray(parsed?.notes) ? parsed.notes.map(String) : []
-    const selected = indexes
-      .map((index) => candidates[index - 1])
-      .filter((track): track is Track => Boolean(track))
-      .slice(0, targetCount)
-      .map((track, index) => ({ ...track, reason: notes[index] || fallbackReason(track, index, intent) }))
-    const filled = uniqueTracks([
-      ...selected,
-      ...candidates.filter((track) => !selected.some((item) => trackKey(item) === trackKey(track))),
-    ]).slice(0, targetCount)
-    return filled.length ? filled.map((track, index) => ({ ...track, reason: track.reason ?? fallbackReason(track, index, intent) })) : candidates.slice(0, targetCount).map((track, index) => ({ ...track, reason: fallbackReason(track, index, intent) }))
+    return selected.map((track, index) => ({ ...track, reason: notes[index] || track.reason || fallbackReason(track, index, intent) }))
   } catch {
-    return candidates.slice(0, targetCount).map((track, index) => ({ ...track, reason: fallbackReason(track, index, intent) }))
+    return selected.map((track, index) => ({ ...track, reason: track.reason ?? fallbackReason(track, index, intent) }))
   }
 }

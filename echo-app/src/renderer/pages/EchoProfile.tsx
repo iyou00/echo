@@ -1,10 +1,11 @@
-import { type CSSProperties, useEffect, useRef, useState } from 'react'
+import { type CSSProperties, useCallback, useEffect, useRef, useState } from 'react'
 import { Play, RefreshCw, Settings } from 'lucide-react'
 import type { EchoApi, MemoryAuditSummary, PlaybackState, ProfileEvidenceLevel, ProfileEvidenceSource, TasteProfile, Track } from '../../types/ipc'
-import type { AppPageProps } from '../../App'
+import type { AppPageProps } from '../appState'
 import { BrandLogo, EmptyState, Section } from '../components'
 import { RuntimeTaskNotice } from '../components/RuntimeTaskNotice'
 import { latestRunningRuntimeTask, useRuntimeTasks } from '../hooks/useRuntimeTasks'
+import { stableHash } from '../../shared/deterministic'
 
 interface EchoProfileProps extends AppPageProps {
   echo: EchoApi
@@ -32,12 +33,6 @@ function displayAuditDate(value?: string) {
 function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)) }
 
 type MoodItem = NonNullable<TasteProfile['display']>['moodItems'][number]
-
-function stableHash(value: string) {
-  let hash = 0
-  for (let i = 0; i < value.length; i += 1) hash = (hash * 31 + value.charCodeAt(i)) >>> 0
-  return hash
-}
 
 type SignatureDisplayItem = NonNullable<TasteProfile['display']>['signatureItems'][number]
 
@@ -113,6 +108,7 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
   const [playingKey, setPlayingKey] = useState('')
   const playingKeyRef = useRef('')
   const statusTimerRef = useRef<ReturnType<typeof setTimeout>>()
+  const mountedRef = useRef(true)
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle')
   const [statusMessage, setStatusMessage] = useState('')
   const [correctionOpen, setCorrectionOpen] = useState(false)
@@ -138,21 +134,28 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
   const artistItems = profile
     ? (display?.artistItems?.length ? display.artistItems : profile.artists.map((artist) => ({ name: artist.name, affinity: artist.affinity, note: artist.notes ?? '还在观察', evidenceLevel: 'weak' as const, source: 'fallback' as const })))
     : []
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false
+      clearTimeout(statusTimerRef.current)
+    }
+  }, [])
   const moodItems = profile
     ? (display?.moodItems?.length ? display.moodItems : profile.moods.slice(0, 6).map((mood) => ({ tag: mood.tag, frequency: mood.frequency, evidenceLevel: 'weak' as const, source: 'fallback' as const })))
     : []
 
-  async function refreshMemoryAudit() {
+  const refreshMemoryAudit = useCallback(async () => {
     try {
       setMemoryAudit(await echo.taste.getMemoryAudit())
     } catch {
       setMemoryAudit(null)
     }
-  }
+  }, [echo])
 
   useEffect(() => {
     void refreshMemoryAudit()
-  }, [echo, profile?.profile_meta?.updatedAt, profile?.profile_meta?.structuredUpdatedAt])
+  }, [refreshMemoryAudit, profile?.profile_meta?.updatedAt, profile?.profile_meta?.structuredUpdatedAt])
 
   function showStatus(type: 'success' | 'error', message: string, autoHideMs?: number) {
     clearTimeout(statusTimerRef.current)
@@ -174,6 +177,7 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
     // Phase 1: 旧画像模糊消失
     setPhase('out')
     await sleep(400)
+    if (!mountedRef.current) return
 
     // Phase 2: 加载态（模糊中）
     setPhase('loading')
@@ -191,16 +195,18 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
       // Phase 3: 新画像从模糊中显现
       setPhase('in')
       await sleep(400)
+      if (!mountedRef.current) return
 
       setPhase('idle')
       showStatus('success', '已刷新', 2000)
     } catch (error) {
       setPhase('in')
       await sleep(400)
+      if (!mountedRef.current) return
       setPhase('idle')
       showStatus('error', error instanceof Error ? error.message : '画像刷新失败')
     } finally {
-      setBusy(false)
+      if (mountedRef.current) setBusy(false)
     }
   }
 

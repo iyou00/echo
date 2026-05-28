@@ -1,4 +1,5 @@
 import type { Track } from '../../../types/ipc'
+import { trackIdentity, type TrackIdentityInput } from '../../../shared/trackIdentity'
 import type { MusicEntityResolution } from './entityResolver'
 import { normalizeText, uniqueTracks } from './identity'
 
@@ -84,16 +85,10 @@ export function artistMatchesConstraint(artist: string, expected?: string): bool
   return artistParts(artist).some((part) => closeEnough(part, expected)) || closeEnough(artist, expected)
 }
 
-type VerifiableTrack = Pick<Track, 'title' | 'artist'> & Partial<Pick<Track, 'id' | 'neteaseId'>>
-
-function trackKey(track: VerifiableTrack): string {
-  const id = String(track.neteaseId ?? track.id ?? '').trim()
-  if (id) return `id:${id}`
-  return `name:${normalizeText(track.title)}::${normalizeText(track.artist)}`
-}
+type VerifiableTrack = TrackIdentityInput
 
 function violatesExclusions(track: VerifiableTrack, constraint: MusicEntityConstraint): boolean {
-  const key = trackKey(track)
+  const key = trackIdentity(track)
   if (constraint.excludedTrackKeys?.includes(key)) return true
   return (constraint.excludedArtists ?? []).some((artist) => artistMatchesConstraint(track.artist, artist))
 }

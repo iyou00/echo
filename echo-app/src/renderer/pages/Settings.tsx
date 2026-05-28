@@ -1,17 +1,19 @@
-import { FormEvent, useEffect, useRef, useState } from 'react'
+import { FormEvent, useEffect, useRef } from 'react'
 import { Download, Upload } from 'lucide-react'
-import type { CareFrequency, EchoApi, ImportProgressPayload, ImportTaskSnapshot, NeteaseLoginState, NeteasePlaylistSummary, NeteaseQrLogin, ServiceHealth, Settings, Track } from '../../types/ipc'
-import type { AppPageProps } from '../../App'
+import type { CareFrequency, EchoApi, ImportProgressPayload, ImportTaskSnapshot, Settings, Track } from '../../types/ipc'
+import type { AppPageProps } from '../appState'
 import { EmptyState, Section } from '../components'
 import { RuntimeTaskList } from '../components/RuntimeTaskNotice'
 import { latestRunningRuntimeTask, useRuntimeTasks } from '../hooks/useRuntimeTasks'
 import { pageLabels } from '../labels'
 import { serviceHealthLabel, serviceRecoveryHint } from '../../shared/runtimeRecovery'
+import { useSettingsPageState } from './settingsState'
 
 interface SettingsPageProps extends AppPageProps {
   echo: EchoApi
   settings: Settings | null
   setSettings: (settings: Settings) => void
+  reloadSettings: () => Promise<void>
   hasLlmConfig: boolean
   refreshProfile: () => Promise<void>
   refreshQueue: () => Promise<Track[]>
@@ -103,6 +105,7 @@ export function SettingsPage({
   echo,
   settings,
   setSettings,
+  reloadSettings,
   hasLlmConfig,
   refreshProfile,
   refreshQueue,
@@ -110,56 +113,100 @@ export function SettingsPage({
   apiFocusToken = 0,
   importTask,
 }: SettingsPageProps) {
-  const [provider, setProvider] = useState('deepseek')
-  const [baseUrl, setBaseUrl] = useState('')
-  const [apiKey, setApiKey] = useState('')
-  const [model, setModel] = useState('')
+  const {
+    patchSettingsPageState,
+    provider,
+    baseUrl,
+    setBaseUrl,
+    apiKey,
+    setApiKey,
+    model,
+    setModel,
+    generateAt,
+    setGenerateAt,
+    openWithRandom,
+    setOpenWithRandom,
+    restoreOnStart,
+    setRestoreOnStart,
+    city,
+    setCity,
+    ttsBaseUrl,
+    setTtsBaseUrl,
+    ttsVoice,
+    setTtsVoice,
+    ttsSpeed,
+    setTtsSpeed,
+    ttsTestStatus,
+    setTtsTestStatus,
+    ttsTestState,
+    setTtsTestState,
+    careEnabled,
+    setCareEnabled,
+    careFrequency,
+    setCareFrequency,
+    careStatus,
+    setCareStatus,
+    modelStatus,
+    setModelStatus,
+    yinyiStatus,
+    setYinyiStatus,
+    chatStatus,
+    setChatStatus,
+    voiceSettingsStatus,
+    setVoiceSettingsStatus,
+    dataStatus,
+    setDataStatus,
+    dataState,
+    setDataState,
+    testState,
+    setTestState,
+    importStatus,
+    setImportStatus,
+    importState,
+    setImportState,
+    templateStatus,
+    setTemplateStatus,
+    templateState,
+    setTemplateState,
+    neteaseState,
+    setNeteaseState,
+    neteaseQr,
+    setNeteaseQr,
+    neteaseQrStatus,
+    setNeteaseQrStatus,
+    neteasePlaylists,
+    setNeteasePlaylists,
+    neteasePlaylistStatus,
+    setNeteasePlaylistStatus,
+    importingNeteaseId,
+    setImportingNeteaseId,
+    neteaseBusy,
+    setNeteaseBusy,
+    health,
+    setHealth,
+    healthChecking,
+    setHealthChecking,
+    busy,
+    setBusy,
+    showResetConfirm,
+    setShowResetConfirm,
+    resetConfirmChecked,
+    setResetConfirmChecked,
+  } = useSettingsPageState()
 
   function switchProvider(key: string) {
-    setProvider(key)
     const preset = providerPresets[key]
-    if (preset?.baseUrl) setBaseUrl(preset.baseUrl)
-    setTestState('idle')
-    setModelStatus('')
+    patchSettingsPageState({
+      provider: key,
+      baseUrl: preset?.baseUrl ? preset.baseUrl : baseUrl,
+      testState: 'idle',
+      modelStatus: '',
+    })
   }
-  const [generateAt, setGenerateAt] = useState('22:00')
-  const [openWithRandom, setOpenWithRandom] = useState(false)
-  const [restoreOnStart, setRestoreOnStart] = useState(true)
-  const [city, setCity] = useState('')
-  const [ttsBaseUrl, setTtsBaseUrl] = useState('')
-  const [ttsVoice, setTtsVoice] = useState('zh-CN-XiaochenNeural')
-  const [ttsSpeed, setTtsSpeed] = useState(1)
-  const [ttsTestStatus, setTtsTestStatus] = useState('')
-  const [ttsTestState, setTtsTestState] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle')
-  const [careEnabled, setCareEnabled] = useState(false)
-  const [careFrequency, setCareFrequency] = useState<CareFrequency>('normal')
-  const [careStatus, setCareStatus] = useState('')
-  const [modelStatus, setModelStatus] = useState('')
-  const [yinyiStatus, setYinyiStatus] = useState('')
-  const [chatStatus, setChatStatus] = useState('')
-  const [voiceSettingsStatus, setVoiceSettingsStatus] = useState('')
-  const [dataStatus, setDataStatus] = useState('')
-  const [dataState, setDataState] = useState<'idle' | 'working' | 'ok' | 'err'>('idle')
-  const [testState, setTestState] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle')
-  const [importStatus, setImportStatus] = useState('')
-  const [importState, setImportState] = useState<'idle' | 'importing' | 'ok' | 'fail'>('idle')
-  const [templateStatus, setTemplateStatus] = useState('')
-  const [templateState, setTemplateState] = useState<'idle' | 'working' | 'ok' | 'fail'>('idle')
-  const [neteaseState, setNeteaseState] = useState<NeteaseLoginState>({ loggedIn: false, message: '正在检查网易云状态...' })
-  const [neteaseQr, setNeteaseQr] = useState<NeteaseQrLogin | null>(null)
-  const [neteaseQrStatus, setNeteaseQrStatus] = useState('')
-  const [neteasePlaylists, setNeteasePlaylists] = useState<NeteasePlaylistSummary[]>([])
-  const [neteasePlaylistStatus, setNeteasePlaylistStatus] = useState('')
-  const [importingNeteaseId, setImportingNeteaseId] = useState('')
-  const [neteaseBusy, setNeteaseBusy] = useState(false)
-  const [health, setHealth] = useState<ServiceHealth[]>([])
-  const [healthChecking, setHealthChecking] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [showResetConfirm, setShowResetConfirm] = useState(false)
-  const [resetConfirmChecked, setResetConfirmChecked] = useState(false)
   const skipHydrateRef = useRef(false)
   const importSectionRef = useRef<HTMLDivElement | null>(null)
   const apiSectionRef = useRef<HTMLDivElement | null>(null)
+  const ttsSpeedSaveKeyRef = useRef('')
   const runtimeTasks = useRuntimeTasks(echo)
 
   function commitSettings(next: Settings) {
@@ -173,20 +220,22 @@ export function SettingsPage({
       skipHydrateRef.current = false
       return
     }
-    setBaseUrl(settings.llm.baseUrl)
-    setProvider(detectProvider(settings.llm.baseUrl))
-    setApiKey(settings.llm.apiKey)
-    setModel(settings.llm.model)
-    setGenerateAt(settings.yinyi.generateAt)
-    setOpenWithRandom(settings.yinyi.openWithRandom)
-    setRestoreOnStart(settings.chat.restoreOnStart)
-    setCity(settings.user.city)
-    setTtsBaseUrl(settings.tts.baseUrl)
-    setTtsVoice(settings.tts.voice)
-    setTtsSpeed(settings.tts.speed)
-    setCareEnabled(settings.carePings.enabled)
-    setCareFrequency(settings.carePings.frequency)
-  }, [settings])
+    patchSettingsPageState({
+      baseUrl: settings.llm.baseUrl,
+      provider: detectProvider(settings.llm.baseUrl),
+      apiKey: settings.llm.apiKey,
+      model: settings.llm.model,
+      generateAt: settings.yinyi.generateAt,
+      openWithRandom: settings.yinyi.openWithRandom,
+      restoreOnStart: settings.chat.restoreOnStart,
+      city: settings.user.city,
+      ttsBaseUrl: settings.tts.baseUrl,
+      ttsVoice: settings.tts.voice,
+      ttsSpeed: settings.tts.speed,
+      careEnabled: settings.carePings.enabled,
+      careFrequency: settings.carePings.frequency,
+    })
+  }, [patchSettingsPageState, settings])
 
   useEffect(() => {
     let alive = true
@@ -198,7 +247,7 @@ export function SettingsPage({
     return () => {
       alive = false
     }
-  }, [echo])
+  }, [echo, setNeteaseState])
 
   useEffect(() => {
     let alive = true
@@ -210,7 +259,7 @@ export function SettingsPage({
     return () => {
       alive = false
     }
-  }, [echo])
+  }, [echo, setHealth])
 
   useEffect(() => {
     if (!importFocusToken) return
@@ -240,6 +289,7 @@ export function SettingsPage({
           window.clearInterval(timer)
         }
         if (result.status === 'expired' || result.status === 'failed') {
+          setNeteaseQr(null)
           window.clearInterval(timer)
         }
       } catch (error) {
@@ -250,26 +300,29 @@ export function SettingsPage({
       stopped = true
       window.clearInterval(timer)
     }
-  }, [echo, neteaseQr])
+  }, [echo, neteaseQr, setNeteaseQr, setNeteaseQrStatus, setNeteaseState])
 
   async function save(event?: FormEvent): Promise<boolean> {
     event?.preventDefault()
     setBusy(true)
     setTestState('idle')
     try {
-      let next = await echo.settings.update('llm.baseUrl', baseUrl.trim())
-      next = await echo.settings.update('llm.apiKey', apiKey.trim())
-      next = await echo.settings.update('llm.model', model.trim())
-      next = await echo.settings.update('yinyi.generateAt', generateAt)
-      next = await echo.settings.update('yinyi.openWithRandom', openWithRandom)
-      next = await echo.settings.update('chat.restoreOnStart', restoreOnStart)
-      next = await echo.settings.update('user.city', city.trim())
-      next = await echo.settings.update('tts.baseUrl', ttsBaseUrl.trim() || defaultTtsBaseUrl)
-      next = await echo.settings.update('tts.voice', ttsVoice)
-      next = await echo.settings.update('tts.speed', ttsSpeed)
-      next = await echo.settings.update('carePings.enabled', careEnabled)
-      next = await echo.settings.update('carePings.frequency', careFrequency)
+      const next = await echo.settings.updateBatch([
+        { path: 'llm.baseUrl', value: baseUrl.trim() },
+        { path: 'llm.apiKey', value: apiKey.trim() },
+        { path: 'llm.model', value: model.trim() },
+        { path: 'yinyi.generateAt', value: generateAt },
+        { path: 'yinyi.openWithRandom', value: openWithRandom },
+        { path: 'chat.restoreOnStart', value: restoreOnStart },
+        { path: 'user.city', value: city.trim() },
+        { path: 'tts.baseUrl', value: ttsBaseUrl.trim() || defaultTtsBaseUrl },
+        { path: 'tts.voice', value: ttsVoice },
+        { path: 'tts.speed', value: ttsSpeed },
+        { path: 'carePings.enabled', value: careEnabled },
+        { path: 'carePings.frequency', value: careFrequency },
+      ])
       commitSettings(next)
+      setHealth(await echo.health.get().catch(() => health))
       setModelStatus('已保存')
       setTestState('ok')
       return true
@@ -433,14 +486,16 @@ export function SettingsPage({
       setSettings(next)
       await Promise.all([refreshProfile(), refreshQueue()])
       setNeteaseState(await echo.netease.getLoginState().catch(() => ({ loggedIn: false, message: '网易云状态检查失败' })))
-      setNeteaseQr(null)
-      setNeteaseQrStatus('')
-      setNeteasePlaylists([])
-      setNeteasePlaylistStatus('')
-      setImportStatus('')
       setHealth(await echo.health.get().catch(() => []))
-      setDataStatus('数据已清空')
-      setDataState('ok')
+      patchSettingsPageState({
+        neteaseQr: null,
+        neteaseQrStatus: '',
+        neteasePlaylists: [],
+        neteasePlaylistStatus: '',
+        importStatus: '',
+        dataStatus: '数据已清空',
+        dataState: 'ok',
+      })
     } catch (error) {
       setDataStatus(error instanceof Error ? error.message : '清空失败')
       setDataState('err')
@@ -457,10 +512,12 @@ export function SettingsPage({
     const nextSpeed = overrides.ttsSpeed ?? ttsSpeed
     setVoiceSettingsStatus('')
     try {
-      let next = await echo.settings.update('user.city', nextCity.trim())
-      next = await echo.settings.update('tts.baseUrl', nextBaseUrl.trim() || defaultTtsBaseUrl)
-      next = await echo.settings.update('tts.voice', nextVoice)
-      next = await echo.settings.update('tts.speed', Math.max(0.5, Math.min(1.5, nextSpeed)))
+      const next = await echo.settings.updateBatch([
+        { path: 'user.city', value: nextCity.trim() },
+        { path: 'tts.baseUrl', value: nextBaseUrl.trim() || defaultTtsBaseUrl },
+        { path: 'tts.voice', value: nextVoice },
+        { path: 'tts.speed', value: Math.max(0.5, Math.min(1.5, nextSpeed)) },
+      ])
       commitSettings(next)
       setVoiceSettingsStatus('已保存')
       return true
@@ -468,6 +525,17 @@ export function SettingsPage({
       setVoiceSettingsStatus(error instanceof Error ? error.message : '保存失败')
       return false
     }
+  }
+
+  function saveTtsSpeedOnce(value: number) {
+    const key = value.toFixed(1)
+    if (ttsSpeedSaveKeyRef.current === key) return
+    ttsSpeedSaveKeyRef.current = key
+    void saveVoiceSettings({ ttsSpeed: value }).finally(() => {
+      window.setTimeout(() => {
+        if (ttsSpeedSaveKeyRef.current === key) ttsSpeedSaveKeyRef.current = ''
+      }, 250)
+    })
   }
 
   async function testTtsConnection() {
@@ -556,10 +624,12 @@ export function SettingsPage({
     try {
       setNeteaseState(await echo.netease.logout())
       setHealth(await echo.health.get())
-      setNeteaseQr(null)
-      setNeteaseQrStatus('')
-      setNeteasePlaylists([])
-      setNeteasePlaylistStatus('')
+      patchSettingsPageState({
+        neteaseQr: null,
+        neteaseQrStatus: '',
+        neteasePlaylists: [],
+        neteasePlaylistStatus: '',
+      })
     } catch (error) {
       setNeteasePlaylistStatus(error instanceof Error ? error.message : '退出失败')
     } finally {
@@ -610,13 +680,19 @@ export function SettingsPage({
   if (!settings) {
     return (
       <div className="phone-surface settings-page">
-        <EmptyState title="正在读取设置" body="Echo 在打开本地配置。" />
+        <EmptyState
+          title="设置读取失败"
+          body="本地配置读取超时或数据库正忙。"
+          action={<button className="primary-button" type="button" onClick={() => { void reloadSettings() }}>重新读取设置</button>}
+        />
       </div>
     )
   }
 
   const storageHealth = health.find((item) => item.service === 'storage')
   const storageDegraded = storageHealth && storageHealth.status !== 'ok' && storageHealth.status !== 'unknown'
+  const storageCannotSave = storageHealth?.status === 'error'
+    && /未启用加密存储|加密存储检查失败|无法保存|safeStorage unavailable/i.test(`${storageHealth.message} ${storageHealth.technical ?? ''}`)
   const apiKeySaved = settings.llm.apiKey === apiKey.trim()
   const modelSaved = settings.llm.baseUrl === baseUrl.trim() && settings.llm.model === model.trim() && apiKeySaved
   const modelReady = Boolean(baseUrl.trim() && apiKey.trim() && model.trim())
@@ -714,14 +790,14 @@ export function SettingsPage({
 
             <label className="field">
               <div className="field-label">API Key</div>
-              <div className="field-hint">{storageDegraded ? '加密存储不可用，已禁止保存以避免明文写入。' : (providerPresets[provider]?.keyHint ?? '本地加密存储。')}</div>
+              <div className="field-hint">{storageCannotSave ? '加密存储不可用，已禁止保存以避免明文写入。' : (providerPresets[provider]?.keyHint ?? '本地加密存储。')}</div>
               <input
                 className="input"
                 type="password"
                 value={apiKey}
                 onChange={(event) => setApiKey(event.target.value)}
                 placeholder="sk-..."
-                disabled={storageDegraded}
+                disabled={storageCannotSave}
               />
             </label>
 
@@ -839,6 +915,12 @@ export function SettingsPage({
                       {neteaseQrStatus}
                     </div>
                   </div>
+                </div>
+              )}
+              {!neteaseQr && neteaseQrStatus && (
+                <div className="status-ind idle">
+                  <span className="status-dot" />
+                  {neteaseQrStatus}
                 </div>
               )}
               {neteasePlaylists.length > 0 && (
@@ -1032,9 +1114,8 @@ export function SettingsPage({
                 step="0.1"
                 value={ttsSpeed}
                 onChange={(event) => setTtsSpeed(Number(event.target.value))}
-                onBlur={(event) => { void saveVoiceSettings({ ttsSpeed: Number(event.target.value) }) }}
-                onMouseUp={(event) => { void saveVoiceSettings({ ttsSpeed: Number(event.currentTarget.value) }) }}
-                onTouchEnd={(event) => { void saveVoiceSettings({ ttsSpeed: Number(event.currentTarget.value) }) }}
+                onBlur={(event) => saveTtsSpeedOnce(Number(event.target.value))}
+                onPointerUp={(event) => saveTtsSpeedOnce(Number(event.currentTarget.value))}
               />
             </label>
             {voiceSettingsStatus && (

@@ -1,6 +1,6 @@
 import { BrowserWindow } from 'electron'
 import type { PlaybackHeartbeat, PlaybackPlayOptions, PlaybackState, Track } from '../../types/ipc'
-import { trackIdentity } from '../../shared/trackIdentity'
+import { trackIdentity as trackKey } from '../../shared/trackIdentity'
 import { getQueue, markQueueStatus } from './queue'
 import { refreshPlayableUrl } from '../netease/music'
 import { recordHealth } from './health'
@@ -18,14 +18,13 @@ const state: PlaybackState = {
 }
 const loopCounts = new Map<string, { count: number; firstAt: number }>()
 const stateListeners = new Set<(state: PlaybackState) => void>()
+const urlRefreshInFlight = new Set<string>()
+const LOOP_COUNT_TTL_MS = 24 * 60 * 60 * 1000
+const LOOP_COUNT_MAX_ENTRIES = 500
 
 type InternalPlaybackPlayOptions = PlaybackPlayOptions & {
   pushHistory?: boolean
   preserveQueue?: boolean
-}
-
-function trackKey(track?: Track | null): string {
-  return trackIdentity(track)
 }
 
 function cloneState(): PlaybackState {
@@ -34,7 +33,7 @@ function cloneState(): PlaybackState {
 
 function broadcast(channel: string, payload: unknown): void {
   for (const window of BrowserWindow.getAllWindows()) {
-    window.webContents.send(channel, payload)
+    if (!window.isDestroyed()) window.webContents.send(channel, payload)
   }
 }
 
@@ -104,6 +103,18 @@ function replaceTrackInState(track: Track): void {
   state.history = state.history.map((item) => (trackKey(item) === key ? track : item))
 }
 
+function pruneLoopCounts(now = Date.now()): void {
+  for (const [key, value] of loopCounts.entries()) {
+    if (now - value.firstAt >= LOOP_COUNT_TTL_MS) loopCounts.delete(key)
+  }
+  if (loopCounts.size <= LOOP_COUNT_MAX_ENTRIES) return
+  const overflow = loopCounts.size - LOOP_COUNT_MAX_ENTRIES
+  const oldest = Array.from(loopCounts.entries())
+    .sort((a, b) => a[1].firstAt - b[1].firstAt)
+    .slice(0, overflow)
+  for (const [key] of oldest) loopCounts.delete(key)
+}
+
 async function applyPlaybackFeedback(track: Track, completionRate: number): Promise<void> {
   const rate = Math.max(0, Math.min(1, completionRate))
   if (rate >= 0.8) {
@@ -111,8 +122,9 @@ async function applyPlaybackFeedback(track: Track, completionRate: number): Prom
     await applyMemorySignal('played', { artist: track.artist, trackId: track.id ?? track.neteaseId, title: track.title, completionRate: rate }, { source: 'playback', track })
     const key = trackKey(track)
     const now = Date.now()
+    pruneLoopCounts(now)
     const existing = loopCounts.get(key)
-    const next = existing && now - existing.firstAt < 24 * 60 * 60 * 1000
+    const next = existing && now - existing.firstAt < LOOP_COUNT_TTL_MS
       ? { count: existing.count + 1, firstAt: existing.firstAt }
       : { count: 1, firstAt: now }
     loopCounts.set(key, next)
@@ -278,6 +290,7 @@ export function clearQueue(): PlaybackState {
 
 export function reorderQueue(fromIndex: number, toIndex: number): PlaybackState {
   if (fromIndex < 0 || fromIndex >= state.queue.length) return cloneState()
+  if (state.queue.length < 2) return cloneState()
   const boundedTo = Math.max(0, Math.min(state.queue.length - 1, toIndex))
   const next = [...state.queue]
   const [moved] = next.splice(fromIndex, 1)
@@ -290,6 +303,13 @@ export function heartbeat(payload: PlaybackHeartbeat): PlaybackState {
   state.position = Math.max(0, Math.floor(payload.position))
   if (payload.duration && payload.duration > 0) state.duration = Math.floor(payload.duration)
   if (state.current && payload.status) state.status = payload.status
+  if (state.current && isUrlStale(state.current)) {
+    const refreshId = state.current.id ?? state.current.neteaseId
+    if (refreshId && !urlRefreshInFlight.has(refreshId)) {
+      urlRefreshInFlight.add(refreshId)
+      void refreshUrl(refreshId).catch(() => undefined).finally(() => { urlRefreshInFlight.delete(refreshId) })
+    }
+  }
   return cloneState()
 }
 
@@ -333,5 +353,6 @@ export function resetPlaybackState(): PlaybackState {
   state.history = []
   state.error = undefined
   loopCounts.clear()
+  urlRefreshInFlight.clear()
   return emitState()
 }

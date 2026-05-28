@@ -1,5 +1,6 @@
 import type { PingType, Track } from '../../types/ipc'
 import { getDb } from './index'
+import { parseJson } from './json'
 
 export interface CarePingPayload {
   type: PingType
@@ -42,7 +43,7 @@ function toRecord(row: {
     type: row.type,
     title: row.title,
     body: row.body,
-    payload: row.payload_json ? JSON.parse(row.payload_json) as CarePingPayload : { type: row.type },
+    payload: parseJson<CarePingPayload>(row.payload_json, { type: row.type }, 'care_pings.payload_json'),
     triggeredAt: row.triggered_at,
     clickedAt: row.clicked_at,
   }
@@ -79,12 +80,8 @@ export function getRecentCarePingTracks(limit = 20): Track[] {
     .prepare("SELECT payload_json FROM care_pings WHERE type = 'recommend_track' ORDER BY triggered_at DESC LIMIT ?")
     .all(limit)
     .map((row) => {
-      try {
-        const payload = JSON.parse((row as { payload_json?: string | null }).payload_json ?? '{}') as CarePingPayload
-        return payload.track ?? null
-      } catch {
-        return null
-      }
+      const payload = parseJson<CarePingPayload | null>((row as { payload_json?: string | null }).payload_json, null, 'care_pings.payload_json')
+      return payload?.track ?? null
     })
     .filter((track): track is Track => Boolean(track))
 }

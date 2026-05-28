@@ -1,4 +1,5 @@
 import type { Track } from '../../../types/ipc'
+import { trackIdentity } from '../../../shared/trackIdentity'
 import type { MusicEntityConstraint } from './verifier'
 import { normalizeText } from './identity'
 
@@ -24,12 +25,6 @@ function now(): number {
 function prune(): void {
   const cutoff = now() - SESSION_TTL_MS
   entries = entries.filter((entry) => entry.createdAt >= cutoff)
-}
-
-function trackKey(track: Pick<Track, 'id' | 'neteaseId' | 'title' | 'artist'>): string {
-  const id = String(track.neteaseId ?? track.id ?? '').trim()
-  if (id) return `id:${id}`
-  return `name:${normalizeText(track.title)}::${normalizeText(track.artist)}`
 }
 
 function artistParts(artist: string): string[] {
@@ -120,7 +115,7 @@ export function rememberMusicCorrection(input: {
   ]
     .map((artist) => artist.trim())
     .filter(Boolean)
-  const excludedTrackKeys = input.currentTrack ? [trackKey(input.currentTrack)] : []
+  const excludedTrackKeys = input.currentTrack ? [trackIdentity(input.currentTrack)] : []
 
   if (!requiredArtist && !requiredTitle && excludedArtists.length === 0 && excludedTrackKeys.length === 0) return undefined
   entries.unshift({

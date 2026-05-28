@@ -14,7 +14,7 @@ export function loadActiveEvents(limit = 8): ActiveEvent[] {
     .prepare(`
       SELECT kind, content, confidence, weight, started_at, created_at
       FROM events
-      WHERE user_id = 1
+      WHERE user_id = current_user_id()
         AND (expected_end_at IS NULL OR expected_end_at > datetime('now', 'localtime'))
         AND weight > 0.2
       ORDER BY weight DESC, created_at DESC
@@ -39,7 +39,7 @@ export function loadRecentEvents(kind: string, limit = 8): ActiveEvent[] {
     .prepare(`
       SELECT kind, content, confidence, weight, started_at, created_at
       FROM events
-      WHERE user_id = 1 AND kind = ?
+      WHERE user_id = current_user_id() AND kind = ?
       ORDER BY created_at DESC, id DESC
       LIMIT ?
     `)

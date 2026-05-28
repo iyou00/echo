@@ -1,3 +1,5 @@
+import { stableChoice, stableDaySeed } from '../shared/deterministic'
+
 export const HEADER_GREETINGS = {
   morning: ['上午好', '早,精神点了吗', '上午这个点 · 慢慢启动'],
   noon: ['中午了 · 吃饭吗', '中午好 · 我陪你', '正午 · 这会儿适合慢一点'],
@@ -15,8 +17,8 @@ export const HEADER_GREETINGS = {
 
 type GreetingKey = keyof typeof HEADER_GREETINGS
 
-function random(items: readonly string[]) {
-  return items[Math.floor(Math.random() * items.length)] ?? HEADER_GREETINGS.fallback[0]
+function pick(items: readonly string[], seed: string) {
+  return stableChoice(items, seed, HEADER_GREETINGS.fallback[0])
 }
 
 function periodKey(date = new Date()): GreetingKey {
@@ -30,17 +32,21 @@ function periodKey(date = new Date()): GreetingKey {
 }
 
 export function pickHeaderGreeting(weather?: { condition?: string; tempC?: number } | null) {
+  const now = new Date()
   const lastUsed = Number(window.localStorage.getItem('echo:lastUsedAt') ?? 0)
-  window.localStorage.setItem('echo:lastUsedAt', String(Date.now()))
-  if (lastUsed > 0 && Date.now() - lastUsed > 5 * 86400000) return random(HEADER_GREETINGS.long_absence)
+  const current = Date.now()
+  const seed = `${stableDaySeed(now)}:${now.getHours()}`
+  window.localStorage.setItem('echo:lastUsedAt', String(current))
+  if (lastUsed > 0 && current - lastUsed > 5 * 86400000) return pick(HEADER_GREETINGS.long_absence, `${seed}:long_absence`)
 
   const condition = weather?.condition ?? ''
-  if (condition.includes('雨')) return random(HEADER_GREETINGS.rain)
-  if (condition.includes('雪')) return random(HEADER_GREETINGS.snow)
-  if (typeof weather?.tempC === 'number' && weather.tempC > 32) return random(HEADER_GREETINGS.hot)
-  if (typeof weather?.tempC === 'number' && weather.tempC < 0) return random(HEADER_GREETINGS.cold)
+  if (condition.includes('雨')) return pick(HEADER_GREETINGS.rain, `${seed}:rain`)
+  if (condition.includes('雪')) return pick(HEADER_GREETINGS.snow, `${seed}:snow`)
+  if (typeof weather?.tempC === 'number' && weather.tempC > 32) return pick(HEADER_GREETINGS.hot, `${seed}:hot`)
+  if (typeof weather?.tempC === 'number' && weather.tempC < 0) return pick(HEADER_GREETINGS.cold, `${seed}:cold`)
 
-  return random(HEADER_GREETINGS[periodKey()])
+  const period = periodKey(now)
+  return pick(HEADER_GREETINGS[period], `${seed}:${period}`)
 }
 
 export function formatHeaderTime(date = new Date()) {

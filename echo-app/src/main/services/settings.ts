@@ -1,9 +1,10 @@
 import { dialog } from 'electron'
-import fs from 'node:fs'
+import { promises as fs } from 'node:fs'
 import JSZip from 'jszip'
 import { getDb, resetDatabase } from '../db'
-import { getSettings, saveSettings, updateSetting } from '../db/settings'
-import { importPlaylist as savePlaylist, type PlaylistPayload } from '../db/playlists'
+import { getSettings, saveSettings, updateSetting, updateSettingsBatch, type SettingUpdatePatch } from '../db/settings'
+import { parseJson } from '../db/json'
+import { clearImportedTracksCache, importPlaylist as savePlaylist, type PlaylistPayload } from '../db/playlists'
 import { buildInitialProfile } from './taste'
 import { buildSemanticsForTracks } from './semantics'
 import { clearImportTaskSnapshot, hasRunningImportTask, runImportTask } from './importTasks'
@@ -11,7 +12,7 @@ import { completeChat, LlmError } from '../llm/client'
 import type { ImportPlaylistResult, LlmTestResult } from '../../types/ipc'
 import { recordHealth } from './health'
 
-export { getSettings, updateSetting }
+export { getSettings, updateSetting, updateSettingsBatch, type SettingUpdatePatch }
 
 const playlistImportTemplate = {
   _说明: {
@@ -57,7 +58,7 @@ export async function testLlm(): Promise<LlmTestResult> {
     await completeChat(settings, [
       { role: 'system', content: '你是 Echo。只回答 ok。' },
       { role: 'user', content: 'hi' },
-    ])
+    ], { maxTokens: 50 })
     saveSettings({
       ...settings,
       llm: { ...settings.llm, lastTestedAt: new Date().toISOString(), lastTestedOk: true },
@@ -123,7 +124,8 @@ export async function importPlaylistFromDialog(): Promise<ImportPlaylistResult> 
   }
 
   try {
-    const payload = normalizePlaylist(JSON.parse(fs.readFileSync(result.filePaths[0], 'utf8')))
+    const fileContent = await fs.readFile(result.filePaths[0], 'utf8')
+    const payload = normalizePlaylist(JSON.parse(fileContent))
     if (payload.tracks.length === 0) {
       return { imported: false, count: 0, name: payload.name, message: '没有识别到有效歌曲。每首歌至少需要 title 和 artist。' }
     }
@@ -158,7 +160,7 @@ export async function downloadPlaylistTemplate(): Promise<{ ok: boolean; path?: 
   })
   if (result.canceled || !result.filePath) return { ok: false, message: '已取消' }
 
-  fs.writeFileSync(result.filePath, `${JSON.stringify(playlistImportTemplate, null, 2)}\n`, 'utf8')
+  await fs.writeFile(result.filePath, `${JSON.stringify(playlistImportTemplate, null, 2)}\n`, 'utf8')
   return { ok: true, path: result.filePath, message: '模板已保存' }
 }
 
@@ -176,8 +178,11 @@ export async function exportData(): Promise<{ ok: boolean; path?: string; messag
     const rows = getDb().prepare(`SELECT * FROM ${table}`).all() as Array<Record<string, unknown>>
     const safeRows = rows.map((row) => {
       if (table === 'settings' && typeof row.data_json === 'string') {
-        const data = JSON.parse(row.data_json)
-        if (data.llm?.apiKey) data.llm.apiKey = '<API_KEY_REDACTED>'
+        const data = parseJson<Record<string, unknown>>(row.data_json, {}, 'settings.export.data_json')
+        const llm = data.llm && typeof data.llm === 'object' ? data.llm as Record<string, unknown> : {}
+        if (llm.apiKey) {
+          data.llm = { ...llm, apiKey: '<API_KEY_REDACTED>' }
+        }
         return { ...row, data_json: JSON.stringify(data) }
       }
       if (table === 'netease_auth' && row.cookie_encrypted) {
@@ -188,7 +193,7 @@ export async function exportData(): Promise<{ ok: boolean; path?: string; messag
     zip.file(`${table}.json`, JSON.stringify(safeRows, null, 2))
   }
   const bytes = await zip.generateAsync({ type: 'nodebuffer' })
-  fs.writeFileSync(result.filePath, bytes)
+  await fs.writeFile(result.filePath, bytes)
   return { ok: true, path: result.filePath, message: '已导出' }
 }
 
@@ -196,5 +201,6 @@ export function resetAllData(): { ok: boolean } {
   if (hasRunningImportTask()) throw new Error('导入任务还在进行，完成后再清空数据。')
   clearImportTaskSnapshot()
   resetDatabase()
+  clearImportedTracksCache()
   return { ok: true }
 }

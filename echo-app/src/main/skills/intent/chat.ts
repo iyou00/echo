@@ -247,6 +247,7 @@ async function inferChatRouteWithLlm(text: string, signal?: AbortSignal): Promis
     temperature: 0,
     signal,
     timeoutMs: CHAT_ROUTER_TIMEOUT_MS,
+    maxTokens: 200,
   }).catch((error) => {
     if (!signal?.aborted) {
       console.warn('[chat-router] llm route unavailable', error instanceof Error ? error.message : error)

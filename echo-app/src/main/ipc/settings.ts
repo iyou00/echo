@@ -1,10 +1,15 @@
 import { ipcMain } from 'electron'
-import { getSettings, importPlaylistFromDialog, testLlm, updateSetting, downloadPlaylistTemplate, exportData, resetAllData } from '../services/settings'
+import { getSettings, importPlaylistFromDialog, testLlm, updateSetting, updateSettingsBatch, downloadPlaylistTemplate, exportData, resetAllData, type SettingUpdatePatch } from '../services/settings'
 import { StorageUnavailableError } from '../utils/secureStorage'
 import { resetPlaybackState } from '../services/playback'
 import { rescheduleCarePings, rescheduleYinyi } from '../services/scheduler'
 import { getImportTaskSnapshot } from '../services/importTasks'
 import { broadcast, maskSettings } from './shared'
+
+function applySettingsSideEffects(paths: string[]): void {
+  if (paths.some((path) => path.startsWith('yinyi.'))) rescheduleYinyi()
+  if (paths.some((path) => path.startsWith('carePings.'))) rescheduleCarePings()
+}
 
 export function registerSettingsIpc(): void {
   ipcMain.handle('settings:get', () => maskSettings(getSettings()))
@@ -12,9 +17,23 @@ export function registerSettingsIpc(): void {
     if (path === 'llm.apiKey' && value === '••••••') return maskSettings(getSettings())
     try {
       const settings = updateSetting(path, value)
-      if (path.startsWith('yinyi.')) rescheduleYinyi()
-      if (path.startsWith('carePings.')) rescheduleCarePings()
+      applySettingsSideEffects([path])
       broadcast('settings:changed', { path, value })
+      return maskSettings(settings)
+    } catch (error) {
+      if (error instanceof StorageUnavailableError) {
+        throw new Error(error.message)
+      }
+      throw error
+    }
+  })
+  ipcMain.handle('settings:updateBatch', (_event, updates: SettingUpdatePatch[]) => {
+    try {
+      const items = Array.isArray(updates) ? updates : []
+      const settings = updateSettingsBatch(items)
+      const paths = items.map((item) => item.path)
+      applySettingsSideEffects(paths)
+      broadcast('settings:changed', { path: 'settings.batch', value: { paths } })
       return maskSettings(settings)
     } catch (error) {
       if (error instanceof StorageUnavailableError) {

@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module'
-import type { RecommendationSource, Track } from '../../../types/ipc'
+import type { RecommendationSource, TasteProfile, Track } from '../../../types/ipc'
 import { getAllImportedTracks } from '../../db/playlists'
 import { listSemantics } from '../../db/semantics'
 import { getTasteProfile } from '../../db/taste'
@@ -13,12 +13,17 @@ import {
 import { normalizeText, unique, uniqueTracks } from './text'
 import { NeteaseAuthRequiredError } from './errors'
 import { allowsArtistFromCorrection, buildRecommendationMemoryConstraints } from './memoryConstraints'
+import { createRecommendationDeterminismContext, stableInt, stableShuffle, type RecommendationDeterminismContext } from './deterministic'
 
 const require = createRequire(import.meta.url)
 const netease = require('@neteasecloudmusicapienhanced/api') as Record<string, (query: Record<string, unknown>) => Promise<ApiResponse>>
 
 type ApiResponse = {
   body?: Record<string, unknown>
+}
+
+export interface RecommendationRecallContext {
+  profile?: TasteProfile | null
 }
 
 const NET_CALL_TIMEOUT_MS = 6000
@@ -92,26 +97,30 @@ function extractTopPlaylistIds(response: ApiResponse, limit: number): string[] {
     .slice(0, limit)
 }
 
-function shuffleItems<T>(items: T[]): T[] {
-  const next = [...items]
-  for (let index = next.length - 1; index > 0; index -= 1) {
-    const swap = Math.floor(Math.random() * (index + 1))
-    ;[next[index], next[swap]] = [next[swap], next[index]]
-  }
-  return next
+function shuffleItems<T>(items: T[], seed: string): T[] {
+  return stableShuffle(items, seed, (item) => String(item))
 }
 
-function pickWeightedKeywords(): string[] {
-  const profile = getTasteProfile()
+function profileForRecall(context: RecommendationRecallContext): TasteProfile | null {
+  return context.profile ?? getTasteProfile()
+}
+
+function pickWeightedKeywords(determinism: RecommendationDeterminismContext, context: RecommendationRecallContext): string[] {
+  const profile = profileForRecall(context)
   const semanticTracks = listSemantics()
   const pool: string[] = []
+  const { daySeed } = determinism
 
   const moodKeywords = (profile?.moods ?? []).flatMap((mood) => GENERIC_MOOD_KEYWORDS[mood.tag] ?? [mood.tag])
-  const shuffledMoods = shuffleItems(unique(moodKeywords))
+  const profileSeed = [
+    ...(profile?.moods ?? []).map((mood) => `${mood.tag}:${mood.frequency}`),
+    ...(profile?.genres ?? []).map((genre) => `${genre.name}:${genre.weight}`),
+  ].join('|') || 'empty-profile'
+  const shuffledMoods = shuffleItems(unique(moodKeywords), `${daySeed}:profile:moods:${profileSeed}`)
   pool.push(...shuffledMoods.slice(0, 3))
 
   const genreKeywords = (profile?.genres ?? []).flatMap((genre) => GENERIC_GENRE_KEYWORDS[genre.name] ?? [genre.name])
-  const shuffledGenres = shuffleItems(unique(genreKeywords))
+  const shuffledGenres = shuffleItems(unique(genreKeywords), `${daySeed}:profile:genres:${profileSeed}`)
   pool.push(...shuffledGenres.slice(0, 3))
 
   const semanticMoodCounts = new Map<string, number>()
@@ -124,17 +133,17 @@ function pickWeightedKeywords(): string[] {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3)
     .flatMap(([mood]) => GENERIC_MOOD_KEYWORDS[mood] ?? [mood])
-  pool.push(...shuffleItems(unique(semanticMoodKeywords)).slice(0, 2))
+  pool.push(...shuffleItems(unique(semanticMoodKeywords), `${daySeed}:semantic:moods:${semanticMoodKeywords.join('|')}`).slice(0, 2))
   const semanticGenreKeywords = Array.from(semanticGenreCounts.entries())
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3)
     .flatMap(([genre]) => GENERIC_GENRE_KEYWORDS[genre] ?? [genre])
-  pool.push(...shuffleItems(unique(semanticGenreKeywords)).slice(0, 2))
+  pool.push(...shuffleItems(unique(semanticGenreKeywords), `${daySeed}:semantic:genres:${semanticGenreKeywords.join('|')}`).slice(0, 2))
 
   return unique(pool)
 }
 
-function sceneKeyword(intent: RecommendationIntent): string {
+function sceneKeyword(intent: RecommendationIntent, determinism: RecommendationDeterminismContext, context: RecommendationRecallContext): string {
   switch (intent.sceneKey) {
     case 'focus':
       return '安静 轻音乐 舒缓'
@@ -145,8 +154,8 @@ function sceneKeyword(intent: RecommendationIntent): string {
     case 'irritated':
       return '放松 降噪 舒缓'
     case 'random': {
-      const profile = pickWeightedKeywords()
-      const picked = shuffleItems(profile).slice(0, 3)
+      const profile = pickWeightedKeywords(determinism, context)
+      const picked = shuffleItems(profile, `${determinism.daySeed}:scene:random:${profile.join('|')}`).slice(0, 3)
       return picked.join(' ') || '华语流行'
     }
     default:
@@ -154,12 +163,12 @@ function sceneKeyword(intent: RecommendationIntent): string {
   }
 }
 
-function keywordFromIntent(intent: RecommendationIntent): string {
+function keywordFromIntent(intent: RecommendationIntent, determinism: RecommendationDeterminismContext, context: RecommendationRecallContext): string {
   if (intent.seedTitle) {
     return unique([intent.seedTitle, intent.artistQuery ?? ''].filter(Boolean)).join(' ')
   }
   const parts = [
-    sceneKeyword(intent),
+    sceneKeyword(intent, determinism, context),
     intent.artistQuery ?? '',
     intent.language === '粤语' ? '粤语' : intent.language === '英语' ? '欧美' : intent.language === '韩语' ? 'Kpop' : '',
     intent.moods.includes('放松') || intent.tempo === 'slow' ? '慢歌' : '',
@@ -186,7 +195,7 @@ function styleTagIdFromText(text: string): number | null {
   return null
 }
 
-function scenePlaylistCategories(intent: RecommendationIntent): string[] {
+function scenePlaylistCategories(intent: RecommendationIntent, determinism: RecommendationDeterminismContext, context: RecommendationRecallContext): string[] {
   switch (intent.sceneKey) {
     case 'focus':
       return ['工作', '学习', '安静', '轻音乐']
@@ -197,7 +206,7 @@ function scenePlaylistCategories(intent: RecommendationIntent): string[] {
     case 'irritated':
       return ['安静', '放松', '治愈', '轻音乐']
     case 'random': {
-      const profile = pickWeightedKeywords()
+      const profile = pickWeightedKeywords(determinism, context)
       const categoryHints = profile.filter((keyword) => /流行|民谣|电子|说唱|摇滚|爵士|轻快|治愈|放松|清新|怀旧|安静/.test(keyword))
       return unique([...categoryHints, '流行', '清新', '治愈']).slice(0, 4)
     }
@@ -206,20 +215,20 @@ function scenePlaylistCategories(intent: RecommendationIntent): string[] {
   }
 }
 
-function genericDiscoveryKeywords(): string[] {
-  const profileKeywords = pickWeightedKeywords().filter((keyword) => keyword.trim().length > 0)
+function genericDiscoveryKeywords(determinism: RecommendationDeterminismContext, context: RecommendationRecallContext): string[] {
+  const profileKeywords = pickWeightedKeywords(determinism, context).filter((keyword) => keyword.trim().length > 0)
   const fallback = ['华语流行', '轻快 流行', '治愈 华语', '舒服 华语']
   return unique([...profileKeywords, ...fallback]).slice(0, 8)
 }
 
-async function fetchScenePlaylistCandidates(intent: RecommendationIntent, cookie: string, signal?: AbortSignal): Promise<Track[]> {
-  const categories = shuffleItems(scenePlaylistCategories(intent)).slice(0, 3)
+async function fetchScenePlaylistCandidates(intent: RecommendationIntent, cookie: string, determinism: RecommendationDeterminismContext, context: RecommendationRecallContext, signal?: AbortSignal): Promise<Track[]> {
+  const categories = shuffleItems(scenePlaylistCategories(intent, determinism, context), `${determinism.daySeed}:scene-categories:${intent.query}:${intent.sceneKey ?? ''}`).slice(0, 3)
   if (categories.length === 0) return []
   const playlistIds: string[] = []
 
   for (const cat of categories) {
     assertRecallActive(signal)
-    const offset = Math.floor(Math.random() * 3) * 6
+    const offset = stableInt(`${determinism.daySeed}:scene-playlist-offset:${intent.query}:${cat}`, 3) * 6
     const response = await timed(
       netease.top_playlist({ cat, order: 'hot', limit: 6, offset, cookie }),
       NET_CALL_TIMEOUT_MS,
@@ -244,18 +253,19 @@ async function fetchScenePlaylistCandidates(intent: RecommendationIntent, cookie
   return uniqueTracks(groups.flat()).slice(0, 120)
 }
 
-export async function fetchGenericDiscoveryCandidates(intent: RecommendationIntent, signal?: AbortSignal): Promise<Track[]> {
+export async function fetchGenericDiscoveryCandidates(intent: RecommendationIntent, signal?: AbortSignal, determinism = createRecommendationDeterminismContext(), context: RecommendationRecallContext = {}): Promise<Track[]> {
   assertRecallActive(signal)
   const cookie = readNeteaseCookie()
   if (!cookie) throw new NeteaseAuthRequiredError()
-  const keywords = shuffleItems(genericDiscoveryKeywords()).slice(0, Math.max(3, Math.min(5, intent.targetCount + 3)))
+  const { daySeed } = determinism
+  const keywords = shuffleItems(genericDiscoveryKeywords(determinism, context), `${daySeed}:generic-keywords:${intent.query}:${intent.targetCount}`).slice(0, Math.max(3, Math.min(5, intent.targetCount + 3)))
   const calls: Array<Promise<Track[]>> = []
 
   for (const keyword of keywords) {
-    const offset = Math.floor(Math.random() * 4) * 10
+    const offset = stableInt(`${daySeed}:generic-search-offset:${intent.query}:${keyword}`, 4) * 10
     calls.push(netCall(netease.cloudsearch({ keywords: keyword, type: 1, limit: 30, offset, cookie }), 'search'))
     const tagId = styleTagIdFromText(keyword)
-    if (tagId) calls.push(netCall(netease.style_song({ tagId, size: 20, cursor: Math.floor(Math.random() * 3) * 20, cookie }), 'style'))
+    if (tagId) calls.push(netCall(netease.style_song({ tagId, size: 20, cursor: stableInt(`${daySeed}:generic-style-cursor:${intent.query}:${keyword}:${tagId}`, 3) * 20, cookie }), 'style'))
   }
 
   if (calls.length === 0) calls.push(netCall(netease.personalized_newsong({ limit: 30, cookie }), 'new_song'))
@@ -277,8 +287,8 @@ function importedSeedTracks(intent: RecommendationIntent): Track[] {
   return [...semantic, ...imported].filter((track) => track.id || track.neteaseId).slice(0, Math.max(3, intent.targetCount))
 }
 
-function profileArtistQueries(intent: RecommendationIntent): string[] {
-  const profile = getTasteProfile()
+function profileArtistQueries(intent: RecommendationIntent, context: RecommendationRecallContext): string[] {
+  const profile = profileForRecall(context)
   const constraints = buildRecommendationMemoryConstraints(profile)
   const semanticArtists = listSemantics()
     .filter((track) => intent.moods.some((mood) => track.semantic.moods.includes(mood)) || intent.scenes.some((scene) => track.semantic.scenes.includes(scene)))
@@ -289,9 +299,8 @@ function profileArtistQueries(intent: RecommendationIntent): string[] {
     .slice(0, 5)
 }
 
-async function fetchArtistCandidates(intent: RecommendationIntent, cookie: string, signal?: AbortSignal): Promise<Track[]> {
-  const tracks: Track[] = []
-  for (const artist of profileArtistQueries(intent)) {
+async function fetchArtistCandidates(intent: RecommendationIntent, cookie: string, context: RecommendationRecallContext, signal?: AbortSignal): Promise<Track[]> {
+  const artistSearches = profileArtistQueries(intent, context).map(async (artist) => {
     assertRecallActive(signal)
     const search = await timed(
       netease.cloudsearch({ keywords: artist, type: 100, limit: 3, offset: 0, cookie }),
@@ -299,24 +308,26 @@ async function fetchArtistCandidates(intent: RecommendationIntent, cookie: strin
       null as ApiResponse | null,
     )
     assertRecallActive(signal)
-    if (!search) continue
-    for (const id of extractArtistIds(search)) {
-      assertRecallActive(signal)
-      const topSongs = await timed(
-        netease.artist_top_song({ id, cookie }),
-        NET_CALL_TIMEOUT_MS,
-        null as ApiResponse | null,
-      )
-      assertRecallActive(signal)
-      if (topSongs) tracks.push(...extractTracks(topSongs, 'artist'))
-    }
-  }
-  return tracks
+    return search ? extractArtistIds(search) : []
+  })
+  const artistIds = unique((await Promise.all(artistSearches)).flat()).slice(0, 8)
+  assertRecallActive(signal)
+  const topSongCalls = artistIds.map(async (id) => {
+    assertRecallActive(signal)
+    const topSongs = await timed(
+      netease.artist_top_song({ id, cookie }),
+      NET_CALL_TIMEOUT_MS,
+      null as ApiResponse | null,
+    )
+    assertRecallActive(signal)
+    return topSongs ? extractTracks(topSongs, 'artist') : []
+  })
+  return uniqueTracks((await Promise.all(topSongCalls)).flat())
 }
 
-async function fetchPlaylistCandidates(intent: RecommendationIntent, cookie: string, signal?: AbortSignal): Promise<Track[]> {
-  const keywords = `${keywordFromIntent(intent)} 歌单`.trim()
-  const playlistOffset = Math.floor(Math.random() * 3) * 5
+async function fetchPlaylistCandidates(intent: RecommendationIntent, cookie: string, determinism: RecommendationDeterminismContext, context: RecommendationRecallContext, signal?: AbortSignal): Promise<Track[]> {
+  const keywords = `${keywordFromIntent(intent, determinism, context)} 歌单`.trim()
+  const playlistOffset = stableInt(`${determinism.daySeed}:playlist-offset:${intent.query}:${keywords}`, 3) * 5
   assertRecallActive(signal)
   const search = await timed(
     netease.cloudsearch({ keywords, type: 1000, limit: 5, offset: playlistOffset, cookie }),
@@ -325,8 +336,7 @@ async function fetchPlaylistCandidates(intent: RecommendationIntent, cookie: str
   )
   assertRecallActive(signal)
   if (!search) return []
-  const tracks: Track[] = []
-  for (const id of extractPlaylistIds(search)) {
+  const detailCalls = extractPlaylistIds(search).map(async (id) => {
     assertRecallActive(signal)
     const detail = await timed(
       netease.playlist_track_all({ id, limit: 24, offset: 0, cookie }),
@@ -334,9 +344,9 @@ async function fetchPlaylistCandidates(intent: RecommendationIntent, cookie: str
       null as ApiResponse | null,
     )
     assertRecallActive(signal)
-    if (detail) tracks.push(...extractTracks(detail, 'playlist'))
-  }
-  return tracks
+    return detail ? extractTracks(detail, 'playlist') : []
+  })
+  return uniqueTracks((await Promise.all(detailCalls)).flat())
 }
 
 function netCall(promise: Promise<ApiResponse>, source: RecommendationSource): Promise<Track[]> {
@@ -345,15 +355,16 @@ function netCall(promise: Promise<ApiResponse>, source: RecommendationSource): P
     .catch(() => [])
 }
 
-async function fetchCandidatesInternal(intent: RecommendationIntent, signal?: AbortSignal): Promise<Track[]> {
+async function fetchCandidatesInternal(intent: RecommendationIntent, signal?: AbortSignal, determinism = createRecommendationDeterminismContext(), context: RecommendationRecallContext = {}): Promise<Track[]> {
   assertRecallActive(signal)
   const cookie = readNeteaseCookie()
   if (!cookie) throw new NeteaseAuthRequiredError()
   const candidates: Track[] = []
 
-  const searchOffset = Math.floor(Math.random() * 4) * 10
+  const keyword = keywordFromIntent(intent, determinism, context)
+  const searchOffset = stableInt(`${determinism.daySeed}:search-offset:${intent.query}:${keyword}`, 4) * 10
   const sceneCalls = intent.sceneKey
-    ? [timed(fetchScenePlaylistCandidates(intent, cookie, signal), NET_CALL_TIMEOUT_MS + 5000, [] as Track[])]
+    ? [timed(fetchScenePlaylistCandidates(intent, cookie, determinism, context, signal), NET_CALL_TIMEOUT_MS + 5000, [] as Track[])]
     : []
   const personalizedCalls = intent.sceneKey
     ? []
@@ -363,12 +374,12 @@ async function fetchCandidatesInternal(intent: RecommendationIntent, signal?: Ab
       ]
   const calls: Array<Promise<Track[]>> = [
     ...sceneCalls,
-    ...(intent.seedTitle ? [netCall(netease.cloudsearch({ keywords: keywordFromIntent(intent), type: 1, limit: 10, offset: 0, cookie }), 'search')] : []),
+    ...(intent.seedTitle ? [netCall(netease.cloudsearch({ keywords: keyword, type: 1, limit: 10, offset: 0, cookie }), 'search')] : []),
     ...personalizedCalls,
-    netCall(netease.cloudsearch({ keywords: keywordFromIntent(intent), type: 1, limit: 30, offset: searchOffset, cookie }), 'search'),
+    netCall(netease.cloudsearch({ keywords: keyword, type: 1, limit: 30, offset: searchOffset, cookie }), 'search'),
     netCall(netease.personalized_newsong({ limit: 20, cookie }), 'new_song'),
-    timed(fetchArtistCandidates(intent, cookie, signal), NET_CALL_TIMEOUT_MS + 2000, [] as Track[]),
-    timed(fetchPlaylistCandidates(intent, cookie, signal), NET_CALL_TIMEOUT_MS + 2000, [] as Track[]),
+    timed(fetchArtistCandidates(intent, cookie, context, signal), NET_CALL_TIMEOUT_MS + 2000, [] as Track[]),
+    timed(fetchPlaylistCandidates(intent, cookie, determinism, context, signal), NET_CALL_TIMEOUT_MS + 2000, [] as Track[]),
   ]
 
   const tagId = styleTagId(intent)
@@ -387,9 +398,9 @@ async function fetchCandidatesInternal(intent: RecommendationIntent, signal?: Ab
   return uniqueTracks(candidates).slice(0, 120)
 }
 
-export async function fetchCandidates(intent: RecommendationIntent, signal?: AbortSignal): Promise<Track[]> {
+export async function fetchCandidates(intent: RecommendationIntent, signal?: AbortSignal, determinism = createRecommendationDeterminismContext(), context: RecommendationRecallContext = {}): Promise<Track[]> {
   let authError: NeteaseAuthRequiredError | null = null
-  const wrapped = fetchCandidatesInternal(intent, signal).catch((error) => {
+  const wrapped = fetchCandidatesInternal(intent, signal, determinism, context).catch((error) => {
     if (error instanceof NeteaseAuthRequiredError) {
       authError = error
     }

@@ -1,6 +1,6 @@
 import type { Track } from '../../types/ipc'
 import { loadRecentConversations } from '../db/conversations'
-import { appendRecommendedTracks, loadListenedTracksSince, loadRecentRecommendedTracks, loadRecentTracks } from '../db/tracks'
+import { appendRecommendedTracks, loadListenedTrackWindows, loadListenedTracksSince, loadRecentRecommendedTracks, loadRecentTracks } from '../db/tracks'
 import { getAllImportedTracks } from '../db/playlists'
 import { getTasteProfile } from '../db/taste'
 import { getSettings } from '../db/settings'
@@ -15,6 +15,7 @@ import { getWeather } from '../weather/client'
 import { recordHealth } from './health'
 import { inferTrackSemanticFallback } from './semantics'
 import { chineseDayPeriodLabel } from '../../shared/dayPeriod'
+import { stableDaySeed, stableInt, stableShuffle } from './recommendation/deterministic'
 import {
   diversifyByArtist,
   hasTrackIdentity,
@@ -84,10 +85,10 @@ const recentArtists: string[] = []
 
 let lastConversationFingerprint = ''
 
-function recentBlockedKeys(): Set<string> {
+function recentBlockedKeys(recentListened = loadListenedTracksSince(24, 500)): Set<string> {
   const keys = trackIdentitySet([
     ...loadRecentRecommendedTracks(120),
-    ...loadListenedTracksSince(24, 500),
+    ...recentListened,
   ])
   for (const key of recentTrackKeys) keys.add(key)
   return keys
@@ -117,13 +118,12 @@ function rememberScenario(text: string, track: Track | null) {
   }
 }
 
-function shuffled<T>(items: T[]): T[] {
-  const copy = [...items]
-  for (let index = copy.length - 1; index > 0; index -= 1) {
-    const swap = Math.floor(Math.random() * (index + 1))
-    ;[copy[index], copy[swap]] = [copy[swap], copy[index]]
-  }
-  return copy
+function voiceSeed(label: string): string {
+  return `${stableDaySeed()}:voice:${label}:${recentTrackKeys.slice(0, 12).join('|')}:${recentArtists.slice(0, 6).join('|')}`
+}
+
+function shuffled<T>(items: T[], seed: string, keyOf: (item: T, index: number) => string = (_item, index) => String(index)): T[] {
+  return stableShuffle(items, seed, keyOf)
 }
 
 function parseJsonObject(content: string): ListeningText | null {
@@ -175,7 +175,7 @@ function hasListeningTextQuality(text: string): boolean {
   if (!text.includes('我') && !text.includes('你')) return false
   if (/(总的来说|由此可见|为您|用户|画像|轨迹|轮廓|数据|算法|记忆策略|纠正过|说明你|你其实|你总是|你一直|人格|诊断|标签)/.test(text)) return false
   if (BANNED_LISTENING_TEXT_PATTERN.test(text)) return false
-  if (/[-*#]|^\d+[\.、]/m.test(text)) return false
+  if (/[-*#]|^\d+[.、]/m.test(text)) return false
   return true
 }
 
@@ -268,20 +268,21 @@ function fallbackText(track: Track | null): string {
     `${time}了，${topArtist ? `你之前听过不少${topArtist}，` : ''}这次换到${track.artist}的《${track.title}》。先听半分钟，不合适我再换。`,
     `这会儿先听${track.artist}的《${track.title}》。声音可以开小一点，手上的事慢慢做。`,
   ]
-  return variants[Math.floor(Math.random() * variants.length)]
+  return variants[stableInt(voiceSeed(`fallback:${track.title}:${track.artist}`), variants.length)]
 }
 
 async function getFallbackCandidates(signal?: AbortSignal): Promise<Track[]> {
   const imported = getAllImportedTracks()
-  const blocked = recentBlockedKeys()
+  const listenedWindows = loadListenedTrackWindows(24, 500, 2, 200)
+  const blocked = recentBlockedKeys(listenedWindows.history)
   const fresh = imported.filter((track) => !hasTrackIdentity(blocked, track))
   let pool = fresh
   if (fresh.length < 8 && imported.length > fresh.length) {
-    const hardBlocked = trackIdentitySet(loadListenedTracksSince(2, 200))
+    const hardBlocked = trackIdentitySet(listenedWindows.recent)
     const relaxed = imported.filter((track) => !hasTrackIdentity(hardBlocked, track))
     pool = relaxed.length >= fresh.length ? relaxed : imported
   }
-  const candidates = shuffled(pool).slice(0, 24)
+  const candidates = shuffled(pool, voiceSeed('fallback-candidates'), (track) => `${track.title}:${track.artist}`).slice(0, 24)
   return filterPlayableTracks(candidates, 5, signal)
 }
 
@@ -300,8 +301,8 @@ function pickUncoveredDimension(): string {
   const coveredMoods = new Set(recentSegmentSemantics.flatMap((s) => s.moods))
   const uncovered = DIVERSITY_DIMENSIONS.filter((d) => !d.keywords.some((k) => coveredMoods.has(k)))
   const pool = uncovered.length > 0 ? uncovered : DIVERSITY_DIMENSIONS
-  const pick = pool[Math.floor(Math.random() * pool.length)]
-  return pick.keywords[Math.floor(Math.random() * pick.keywords.length)]
+  const pick = pool[stableInt(voiceSeed('dimension'), pool.length)]
+  return pick.keywords[stableInt(voiceSeed(`dimension-keyword:${pick.label}`), pick.keywords.length)]
 }
 
 async function getCandidates(continuation?: boolean, signal?: AbortSignal): Promise<Track[]> {
@@ -568,7 +569,7 @@ export async function generateListeningSegment(options: ListeningSegmentOptions 
           role: 'user',
           content: context,
         },
-      ], { temperature: options?.continuation ? 0.95 : 0.85, signal: options.signal })
+      ], { temperature: options?.continuation ? 0.95 : 0.85, signal: options.signal, maxTokens: 300 })
       assertListeningActive(options.signal)
       const parsed = parseJsonObject(response)
       const nextText = parsed?.text ? limitText(parsed.text) : limitText(response)
@@ -584,7 +585,7 @@ export async function generateListeningSegment(options: ListeningSegmentOptions 
 
 上一版不适合 TTS。重写成一段能直接朗读的话: 70-160 字,最多 4 句,歌名出现在前两句,保留一首候选歌名,用具体听法,不要解释机制。`,
           },
-        ], { temperature: options?.continuation ? 0.95 : 0.85, signal: options.signal })
+        ], { temperature: options?.continuation ? 0.95 : 0.85, signal: options.signal, maxTokens: 300 })
         assertListeningActive(options.signal)
         const retryParsed = parseJsonObject(retry)
         const retryText = retryParsed?.text ? limitText(retryParsed.text) : limitText(retry)

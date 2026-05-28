@@ -63,7 +63,7 @@ async function checkLlm(): Promise<void> {
     await completeChat(settings, [
       { role: 'system', content: '只回答 ok。' },
       { role: 'user', content: 'hi' },
-    ], { temperature: 0 })
+    ], { temperature: 0, maxTokens: 50 })
     recordHealth('llm', 'ok', '模型连接正常。')
   } catch (error) {
     const auth = error instanceof LlmError && (error.kind === 'auth' || error.kind === 'config')

@@ -37,6 +37,15 @@ function localIsoDate(date: Date): string {
   return `${year}-${month}-${day}`
 }
 
+function technicalMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return typeof error === 'string' ? error : ''
+}
+
+function recordScheduledFailure(area: Parameters<typeof recordSchedulerHealth>[0], message: string, error: unknown): void {
+  recordSchedulerHealth(area, 'degraded', message, technicalMessage(error))
+}
+
 export function registerScheduler(): void {
   rescheduleYinyi()
   rescheduleCarePings()
@@ -50,7 +59,9 @@ export function rescheduleYinyi(): void {
 
   const { hour, minute } = parseGenerateAt(getSettings().yinyi.generateAt)
   yinyiTask = cron.schedule(`${minute} ${hour} * * *`, async () => {
-    await runYinyiDailyTask(todayIso()).catch(() => undefined)
+    await runYinyiDailyTask(todayIso()).catch((error) => {
+      recordScheduledFailure('yinyi', '执行失败。', error)
+    })
   })
 }
 
@@ -59,10 +70,14 @@ export function rescheduleTasteProfile(): void {
   tastePortraitTask?.stop()
 
   tasteStructuredTask = cron.schedule(`${TASTE_STRUCTURED_TIME.minute} ${TASTE_STRUCTURED_TIME.hour} * * *`, () => {
-    runTasteStructuredRuntimeJob(todayIso()).catch(() => undefined)
+    runTasteStructuredRuntimeJob(todayIso()).catch((error) => {
+      recordScheduledFailure('taste-structured', '执行失败。', error)
+    })
   })
   tastePortraitTask = cron.schedule(`${TASTE_PORTRAIT_TIME.minute} ${TASTE_PORTRAIT_TIME.hour} * * *`, () => {
-    runTastePortraitRuntimeJob(todayIso()).catch(() => undefined)
+    runTastePortraitRuntimeJob(todayIso()).catch((error) => {
+      recordScheduledFailure('taste-portrait', '执行失败。', error)
+    })
   })
 }
 

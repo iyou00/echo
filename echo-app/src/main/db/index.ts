@@ -1,12 +1,25 @@
 import Database from 'better-sqlite3'
 import { getDbPath } from '../utils/paths'
+import { runMigrations } from './migrations'
+import { currentUserId } from './userContext'
+
+export { currentUserId, currentUserSql, DEFAULT_USER_ID } from './userContext'
 
 let db: Database.Database | null = null
+const registeredFunctionDatabases = new WeakSet<Database.Database>()
+
+function registerDbFunctions(database: Database.Database): void {
+  if (registeredFunctionDatabases.has(database)) return
+  database.function('current_user_id', { deterministic: true }, currentUserId)
+  registeredFunctionDatabases.add(database)
+}
 
 export function getDb(): Database.Database {
   if (!db) {
     db = new Database(getDbPath())
+    registerDbFunctions(db)
     db.pragma('journal_mode = WAL')
+    db.pragma('foreign_keys = ON')
     initializeDatabase(db)
   }
   return db
@@ -18,6 +31,7 @@ export function closeDb(): void {
 }
 
 export function initializeDatabase(database = getDb()): void {
+  registerDbFunctions(database)
   database.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY,
@@ -70,11 +84,12 @@ export function initializeDatabase(database = getDb()): void {
     CREATE TABLE IF NOT EXISTS yinyi (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER,
-      date DATE NOT NULL UNIQUE,
+      date DATE NOT NULL,
       content TEXT NOT NULL,
       style TEXT DEFAULT 'dialogue',
       meta_json TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, date),
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
 
@@ -111,7 +126,7 @@ export function initializeDatabase(database = getDb()): void {
 
     CREATE TABLE IF NOT EXISTS scene_sessions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL DEFAULT 1,
+      user_id INTEGER NOT NULL,
       scene_key TEXT NOT NULL,
       label TEXT NOT NULL,
       started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -158,7 +173,7 @@ export function initializeDatabase(database = getDb()): void {
     CREATE INDEX IF NOT EXISTS idx_tracks_recent ON tracks_listened(user_id, listened_at DESC);
 
     CREATE TABLE IF NOT EXISTS queue_history_hidden_dates (
-      user_id INTEGER NOT NULL DEFAULT 1,
+      user_id INTEGER NOT NULL,
       date TEXT NOT NULL,
       hidden_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (user_id, date),
@@ -167,22 +182,23 @@ export function initializeDatabase(database = getDb()): void {
 
     CREATE TABLE IF NOT EXISTS favorite_tracks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL DEFAULT 1,
-      track_key TEXT NOT NULL UNIQUE,
+      user_id INTEGER NOT NULL,
+      track_key TEXT NOT NULL,
       title TEXT NOT NULL,
       artist TEXT NOT NULL,
       album TEXT,
       source TEXT,
       track_json TEXT NOT NULL,
       favorited_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, track_key),
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
     CREATE INDEX IF NOT EXISTS idx_favorite_tracks_recent ON favorite_tracks(user_id, favorited_at DESC);
 
     CREATE TABLE IF NOT EXISTS track_semantics (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL DEFAULT 1,
-      track_key TEXT NOT NULL UNIQUE,
+      user_id INTEGER NOT NULL,
+      track_key TEXT NOT NULL,
       netease_id TEXT,
       title TEXT NOT NULL,
       artist TEXT NOT NULL,
@@ -196,7 +212,8 @@ export function initializeDatabase(database = getDb()): void {
       familiarity TEXT NOT NULL,
       confidence REAL NOT NULL,
       source_json TEXT NOT NULL,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, track_key)
     );
     CREATE INDEX IF NOT EXISTS idx_track_semantics_user ON track_semantics(user_id, updated_at DESC);
 
@@ -212,8 +229,8 @@ export function initializeDatabase(database = getDb()): void {
 
     CREATE TABLE IF NOT EXISTS track_feedback (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL DEFAULT 1,
-      track_key TEXT NOT NULL UNIQUE,
+      user_id INTEGER NOT NULL,
+      track_key TEXT NOT NULL,
       title TEXT NOT NULL,
       artist TEXT NOT NULL,
       album TEXT,
@@ -224,13 +241,14 @@ export function initializeDatabase(database = getDb()): void {
       favorite_count INTEGER NOT NULL DEFAULT 0,
       last_completion REAL,
       track_json TEXT NOT NULL,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, track_key)
     );
     CREATE INDEX IF NOT EXISTS idx_track_feedback_user ON track_feedback(user_id, updated_at DESC);
 
     CREATE TABLE IF NOT EXISTS track_feedback_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL DEFAULT 1,
+      user_id INTEGER NOT NULL,
       track_key TEXT NOT NULL,
       action TEXT NOT NULL,
       context TEXT,
@@ -270,7 +288,7 @@ export function initializeDatabase(database = getDb()): void {
 
     CREATE TABLE IF NOT EXISTS taste_question_prompts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL DEFAULT 1,
+      user_id INTEGER NOT NULL,
       question_id INTEGER NOT NULL,
       conversation_id INTEGER,
       asked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -292,39 +310,43 @@ export function initializeDatabase(database = getDb()): void {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
-    INSERT OR IGNORE INTO users (id, name) VALUES (1, '你');
+    INSERT OR IGNORE INTO users (id, name) VALUES (current_user_id(), '你');
     INSERT OR IGNORE INTO settings (id, data_json) VALUES (1, '{}');
     INSERT OR IGNORE INTO netease_auth (id, cookie_encrypted, profile_json) VALUES (1, '', '{}');
   `)
+  runMigrations(database)
 }
 
 export function resetDatabase(): void {
   const database = getDb()
-  database.exec(`
-    PRAGMA foreign_keys = OFF;
-    DELETE FROM taste_question_prompts;
-    DELETE FROM taste_questions;
-    DELETE FROM playlists_imported;
-    DELETE FROM recommendation_cache;
-    DELETE FROM track_semantics;
-    DELETE FROM track_feedback_events;
-    DELETE FROM track_feedback;
-    DELETE FROM queue_history_hidden_dates;
-    DELETE FROM tracks_listened;
-    DELETE FROM favorite_tracks;
-    DELETE FROM yinyi;
-    DELETE FROM scheduled_jobs;
-    DELETE FROM service_health;
-    DELETE FROM care_pings_mute;
-    DELETE FROM care_pings;
-    DELETE FROM care_ping_schedule;
-    DELETE FROM scene_sessions;
-    DELETE FROM conversation_summaries;
-    DELETE FROM conversations;
-    DELETE FROM events;
-    DELETE FROM taste_profile;
-    UPDATE netease_auth SET cookie_encrypted = '', profile_json = '{}', updated_at = CURRENT_TIMESTAMP WHERE id = 1;
-    UPDATE settings SET data_json = '{}', updated_at = CURRENT_TIMESTAMP WHERE id = 1;
-    PRAGMA foreign_keys = ON;
-  `)
+  database.pragma('foreign_keys = OFF')
+  try {
+    database.exec(`
+      DELETE FROM taste_question_prompts;
+      DELETE FROM taste_questions;
+      DELETE FROM playlists_imported;
+      DELETE FROM recommendation_cache;
+      DELETE FROM track_semantics;
+      DELETE FROM track_feedback_events;
+      DELETE FROM track_feedback;
+      DELETE FROM queue_history_hidden_dates;
+      DELETE FROM tracks_listened;
+      DELETE FROM favorite_tracks;
+      DELETE FROM yinyi;
+      DELETE FROM scheduled_jobs;
+      DELETE FROM service_health;
+      DELETE FROM care_pings_mute;
+      DELETE FROM care_pings;
+      DELETE FROM care_ping_schedule;
+      DELETE FROM scene_sessions;
+      DELETE FROM conversation_summaries;
+      DELETE FROM conversations;
+      DELETE FROM events;
+      DELETE FROM taste_profile;
+      UPDATE netease_auth SET cookie_encrypted = '', profile_json = '{}', updated_at = CURRENT_TIMESTAMP WHERE id = 1;
+      UPDATE settings SET data_json = '{}', updated_at = CURRENT_TIMESTAMP WHERE id = 1;
+    `)
+  } finally {
+    database.pragma('foreign_keys = ON')
+  }
 }

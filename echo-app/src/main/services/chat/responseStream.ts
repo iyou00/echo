@@ -140,7 +140,7 @@ function createStreamDisplaySanitizer(): (chunk: string, done?: boolean) => stri
 
 export function sanitizeAssistantOutput(content: string): string {
   const clean = removeChatSurfacePhrasing(sanitizeAssistantDisplayText(stripSystemBlocks(content)))
-  return checkOutputSafe(clean).safe ? clean : pickJailbreakResponse()
+  return checkOutputSafe(clean).safe ? clean : pickJailbreakResponse(clean)
 }
 
 export function friendlyError(error: unknown): string {
@@ -198,6 +198,7 @@ export async function streamPendingAnswerReply(
     const title = typeof capture.question?.context?.title === 'string' ? capture.question.context.title.trim() : ''
     const artist = typeof capture.question?.context?.artist === 'string' ? capture.question.context.artist.trim() : ''
     for await (const chunk of streamChat(settings, [
+
       {
         role: 'system',
         content: `${buildSoulPolicyPrompt('pending_answer')}
@@ -216,7 +217,7 @@ export async function streamPendingAnswerReply(
 焦点:${capture.focus || '未明确'}`,
       },
       { role: 'user', content: userText },
-    ], { signal: active.signal })) {
+    ], { signal: active.signal, maxTokens: 300 })) {
       if (active.canceled) break
       content += chunk.content
       const displayChunk = sanitizeChunk(chunk.content)
@@ -254,7 +255,7 @@ export async function streamChatReply(options: {
     followUpQuestion: options.followUpQuestion,
   })
   try {
-    for await (const chunk of streamChat(options.settings, messages, { signal: options.active.signal })) {
+    for await (const chunk of streamChat(options.settings, messages, { signal: options.active.signal, maxTokens: 300 })) {
       if (options.active.canceled) break
       content += chunk.content
       const displayChunk = sanitizeChunk(chunk.content)

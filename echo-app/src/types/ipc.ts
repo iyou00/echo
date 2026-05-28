@@ -33,7 +33,7 @@ export type SceneKey = 'focus' | 'sleepy' | 'relax' | 'irritated' | 'random'
 export type PingType = 'recommend_track' | 'casual_check' | 'voice_invite'
 export type CareFrequency = 'gentle' | 'normal' | 'frequent'
 export type OnboardingStep = 'playlist' | 'done'
-export type AppPageKey = 'chat' | 'profile' | 'yinyi' | 'voice' | 'queue' | 'settings'
+export type AppPageKey = 'chat' | 'profile' | 'yinyi' | 'voice' | 'queue' | 'settings' | 'about'
 export type ServiceHealthKind = 'llm' | 'netease' | 'tts' | 'weather' | 'scheduler' | 'storage'
 export type ServiceHealthStatus = 'ok' | 'degraded' | 'error' | 'unknown'
 export type RuntimeTaskStatus = 'running' | 'succeeded' | 'failed' | 'canceled'
@@ -334,7 +334,7 @@ export interface Settings {
   }
   ui: {
     theme?: 'light' | 'dark' | 'system'
-    closeBehavior?: 'ask' | 'minimize'
+    closeBehavior?: 'ask' | 'minimize' | 'quit'
   }
   window: {
     closeHintShown: boolean
@@ -358,6 +358,42 @@ export interface Settings {
     lastPrunedAt?: string
   }
 }
+
+export interface SettingPathValueMap {
+  'llm.baseUrl': string
+  'llm.apiKey': string
+  'llm.model': string
+  'llm.lastTestedAt': string
+  'llm.lastTestedOk': boolean
+  'yinyi.generateAt': string
+  'yinyi.openWithRandom': boolean
+  'carePings.enabled': boolean
+  'carePings.frequency': CareFrequency
+  'carePings.detectFullscreen': boolean
+  'chat.restoreOnStart': boolean
+  'playback.autoPlayNext': boolean
+  'ui.theme': NonNullable<Settings['ui']['theme']>
+  'ui.closeBehavior': NonNullable<Settings['ui']['closeBehavior']>
+  'window.closeHintShown': boolean
+  'user.city': string
+  'tts.baseUrl': string
+  'tts.voice': string
+  'tts.speed': number
+  'tts.pitch': string
+  'meta.schemaVersion': number
+  'meta.firstUsedAt': string
+  'meta.lastViewedYinyiAt': string | undefined
+  'meta.firstRunWelcomeCompletedAt': string | undefined
+  'meta.onboardingCompletedAt': string | undefined
+  'meta.onboardingStep': OnboardingStep
+  'meta.lastPrunedAt': string | undefined
+}
+
+export type SettingPath = keyof SettingPathValueMap
+
+export type SettingUpdatePatch<P extends SettingPath = SettingPath> = {
+  [K in P]: { path: K; value: SettingPathValueMap[K] }
+}[P]
 
 export interface YinyiEntry {
   id?: number
@@ -448,7 +484,8 @@ export interface EchoApi {
   }
   settings: {
     get(): Promise<Settings>
-    update(path: string, value: unknown): Promise<Settings>
+    update<P extends SettingPath>(path: P, value: SettingPathValueMap[P]): Promise<Settings>
+    updateBatch(updates: SettingUpdatePatch[]): Promise<Settings>
     testLlm(): Promise<LlmTestResult>
     importPlaylist(): Promise<ImportPlaylistResult>
     downloadPlaylistTemplate(): Promise<{ ok: boolean; path?: string; message: string }>

@@ -133,7 +133,7 @@ energy/confidence 是 0-1 数字。tempo 是 slow/medium/fast。familiarity 对�
         role: 'user',
         content: tracks.map((track, index) => `${index + 1}. ${track.title} - ${track.artist}${track.album ? ` / ${track.album}` : ''}${track.year ? ` / ${track.year}` : ''}`).join('\n'),
       },
-    ], { temperature: 0.2, signal })
+    ], { temperature: 0.2, signal, maxTokens: 500 })
     assertSemanticsActive(signal)
     const parsed = parseJsonArray(response)
     if (!parsed || parsed.length !== tracks.length) return fallbacks

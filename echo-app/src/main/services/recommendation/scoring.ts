@@ -6,9 +6,15 @@ import { inferTrackSemanticFallback } from '../semantics'
 import type { RecommendationIntent } from './intent'
 import { recommendationMemoryConstraintScore, type RecommendationMemoryConstraints } from './memoryConstraints'
 import { hasTrackIdentity, normalizeText, trackKey } from './text'
+import { stableUnit, type RecommendationDeterminismContext } from './deterministic'
 
 const EXPLICIT_FEEDBACK_LIMIT = 50
 const FAVORITE_DIRECTION_LIMIT = 60
+const GENERIC_DISCOVERY_JITTER_MAX = 3
+const EXPLORE_FAMILIARITY_BONUS = 0.6
+const STYLE_SOURCE_BONUS = 0.9
+const SEARCH_SOURCE_BONUS = 0.4
+const RECENT_DISCOVERY_PENALTY = 8
 
 export interface DirectionMemoryItem {
   action: 'more_like_this' | 'not_right' | 'favorite'
@@ -100,10 +106,11 @@ function scoreCandidateWithFeedback(
     else score -= 3
   }
   if (intent.tempo && semantic.tempo === intent.tempo) score += 2
-  if (intent.energy === 'low') score += Math.max(0, 2 - semantic.energy * 2)
+  const energy = semantic.energy ?? 0.5
+  if (intent.energy === 'low') score += Math.max(0, 2 - energy * 2)
   if (intent.energy === 'high') {
-    score += semantic.energy * 5
-    if (semantic.energy < 0.55) score -= 5
+    score += energy * 5
+    if (energy < 0.55) score -= 5
   }
   if (intent.familiarity === 'safe' && semantic.familiarity === 'safe') score += 1.5
   if (intent.familiarity === 'explore' && track.recommendSource === 'new_song') score += 1.5
@@ -118,7 +125,7 @@ function scoreCandidateWithFeedback(
   if (constraints) score += recommendationMemoryConstraintScore(track, intent, constraints)
   if (hasTrackIdentity(recentKeys, track) && !(intent.seedTitle && normalizeText(track.title).includes(normalizeText(intent.seedTitle)))) score -= 12
   if (profile?.energy_preference != null && intent.energy == null) {
-    const gap = Math.abs(semantic.energy - profile.energy_preference)
+    const gap = Math.abs((semantic.energy ?? 0.5) - profile.energy_preference)
     if (gap <= 0.15) score += 1.0
     else if (gap <= 0.3) score += 0.4
     else if (gap > 0.5) score -= 1.5
@@ -146,26 +153,39 @@ export function scoreCandidateForTest(track: Track, intent: RecommendationIntent
 }
 
 export function genericDiscoveryScore(track: Track, recentSevenDayKeys: Set<string>, memory: DirectionMemoryItem[], intent?: RecommendationIntent, constraints?: RecommendationMemoryConstraints): number {
+  return genericDiscoveryScoreWithContext(track, recentSevenDayKeys, memory, {}, intent, constraints)
+}
+
+export function genericDiscoveryScoreWithContext(
+  track: Track,
+  recentSevenDayKeys: Set<string>,
+  memory: DirectionMemoryItem[],
+  determinism: Partial<RecommendationDeterminismContext>,
+  intent?: RecommendationIntent,
+  constraints?: RecommendationMemoryConstraints,
+): number {
   const semantic = semanticForCandidate(track)
-  let score = Math.random() * 3
-  if (semantic.familiarity === 'explore') score += 0.6
-  if (track.recommendSource === 'style') score += 0.9
-  if (track.recommendSource === 'search') score += 0.4
+  const seed = `${determinism.daySeed ?? 'stable'}:${intent?.query ?? 'generic'}:${trackKey(track)}:${track.recommendSource ?? ''}`
+  let score = stableUnit(seed) * GENERIC_DISCOVERY_JITTER_MAX
+  if (semantic.familiarity === 'explore') score += EXPLORE_FAMILIARITY_BONUS
+  if (track.recommendSource === 'style') score += STYLE_SOURCE_BONUS
+  if (track.recommendSource === 'search') score += SEARCH_SOURCE_BONUS
   score += directionMemoryScore(track, semantic, memory)
   if (intent && constraints) score += recommendationMemoryConstraintScore(track, intent, constraints)
-  if (hasTrackIdentity(recentSevenDayKeys, track)) score -= 8
+  if (hasTrackIdentity(recentSevenDayKeys, track)) score -= RECENT_DISCOVERY_PENALTY
   return score
 }
 
 export function matchesIntentFloor(track: Track, intent: RecommendationIntent): boolean {
   const semantic = track.semantic ?? semanticForCandidate(track)
-  if (typeof intent.rejectIf?.minEnergy === 'number' && semantic.energy < intent.rejectIf.minEnergy) return false
-  if (typeof intent.rejectIf?.maxEnergy === 'number' && semantic.energy > intent.rejectIf.maxEnergy) return false
+  const energy = semantic.energy ?? 0.5
+  if (typeof intent.rejectIf?.minEnergy === 'number' && energy < intent.rejectIf.minEnergy) return false
+  if (typeof intent.rejectIf?.maxEnergy === 'number' && energy > intent.rejectIf.maxEnergy) return false
   if (intent.rejectIf?.forbidTempo?.includes(semantic.tempo)) return false
   if (intent.rejectIf?.requireTempo?.length && !intent.rejectIf.requireTempo.includes(semantic.tempo)) return false
-  if (intent.energy === 'high' && semantic.energy < 0.5 && semantic.tempo !== 'fast') return false
-  if (intent.tempo === 'fast' && semantic.tempo === 'slow' && semantic.energy < 0.6) return false
-  if (intent.energy === 'low' && semantic.energy > 0.78) return false
-  if (intent.tempo === 'slow' && semantic.tempo === 'fast' && semantic.energy > 0.72) return false
+  if (intent.energy === 'high' && energy < 0.5 && semantic.tempo !== 'fast') return false
+  if (intent.tempo === 'fast' && semantic.tempo === 'slow' && energy < 0.6) return false
+  if (intent.energy === 'low' && energy > 0.78) return false
+  if (intent.tempo === 'slow' && semantic.tempo === 'fast' && energy > 0.72) return false
   return true
 }

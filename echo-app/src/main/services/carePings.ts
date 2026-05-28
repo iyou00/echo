@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Notification, nativeImage } from 'electron'
 import path from 'node:path'
 import type { PingType, Track } from '../../types/ipc'
+import { trackIdentity } from '../../shared/trackIdentity'
 import { getSettings } from '../db/settings'
 import {
   getRecentCarePingBodies,
@@ -19,8 +20,10 @@ import { buildSoulPolicyPrompt } from '../skills/soul/policy'
 import { readRootFile } from '../utils/paths'
 import { getWeather } from '../weather/client'
 import { getMostRecentSeal } from './daySeal'
+import { recordSchedulerHealth } from './health'
 import { play } from './playback'
 import { recommendFromNetease } from './recommendation'
+import { stableDaySeed, stableInt } from './recommendation/deterministic'
 
 export interface TimeSlot {
   key?: string
@@ -46,13 +49,6 @@ function assertCarePingActive(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException('任务已取消', 'AbortError')
 }
 
-function trackKey(track?: Track | null): string {
-  if (!track) return ''
-  if (track.neteaseId) return `netease:${track.neteaseId}`
-  if (track.id) return `id:${track.id}`
-  return `name:${track.title.trim().toLowerCase()}::${track.artist.trim().toLowerCase()}`
-}
-
 function appIcon() {
   const iconPath = path.join(process.env.VITE_PUBLIC ?? '', 'brand', 'icon.ico')
   const icon = nativeImage.createFromPath(iconPath)
@@ -64,7 +60,8 @@ function appIcon() {
 }
 
 function pickPingType(): PingType {
-  const value = Math.random()
+  const hour = new Date().getHours()
+  const value = stableInt(`${stableDaySeed()}:care-ping-type:${hour}`, 10) / 10
   if (value < 0.4) return 'recommend_track'
   if (value < 0.7) return 'casual_check'
   return 'voice_invite'
@@ -199,7 +196,7 @@ async function writePingBody(type: PingType, track?: Track, options: CarePingRun
         ].join('\n'),
       },
       { role: 'user', content: `${user}\n\n最近 7 条已经发过的通知，避免重复:\n${context.recentNotifications}\n\n现在输出最终通知正文。` },
-    ], { temperature: 0.86, signal: options.signal }), type === 'recommend_track' ? 96 : 72)
+    ], { temperature: 0.86, signal: options.signal, maxTokens: 100 }), type === 'recommend_track' ? 96 : 72)
     assertCarePingActive(options.signal)
     if (!body || isUnsafeBody(body)) return fallback
     if (track && (!body.includes(track.title) || !body.includes(track.artist))) {
@@ -207,8 +204,10 @@ async function writePingBody(type: PingType, track?: Track, options: CarePingRun
       return isUnsafeBody(withTrack) ? fallback : withTrack
     }
     return body
-  } catch {
+  } catch (error) {
     assertCarePingActive(options.signal)
+    const detail = error instanceof Error ? error.message : 'LLM 通知正文生成失败'
+    recordSchedulerHealth('care-ping', 'degraded', '通知正文生成失败，已使用备用文案。', detail)
     return fallback
   }
 }
@@ -220,8 +219,8 @@ async function pickCareTrack(options: CarePingRunOptions = {}): Promise<Track | 
     return []
   })
   assertCarePingActive(options.signal)
-  const recentKeys = new Set(getRecentCarePingTracks(20).map(trackKey).filter(Boolean))
-  return candidates.find((track) => !recentKeys.has(trackKey(track))) ?? candidates[0] ?? null
+  const recentKeys = new Set(getRecentCarePingTracks(20).map(trackIdentity).filter(Boolean))
+  return candidates.find((track) => !recentKeys.has(trackIdentity(track))) ?? candidates[0] ?? null
 }
 
 function showMainWindow(payload: { page: 'chat' | 'voice'; action?: 'start_listening'; carePingId: number; canMuteToday: boolean }): void {
@@ -270,7 +269,10 @@ function sendNotification(record: CarePingRecord): void {
   activeNotifications.add(notification)
   const release = () => activeNotifications.delete(notification)
   notification.on('click', () => {
-    handleNotificationClick(record).catch(() => undefined)
+    handleNotificationClick(record).catch((error) => {
+      const technical = error instanceof Error ? error.message : String(error)
+      recordSchedulerHealth('care-ping', 'degraded', '通知点击处理失败。', technical)
+    })
   })
   notification.on('action', () => {
     muteCarePingsToday()

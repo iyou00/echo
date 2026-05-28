@@ -1,4 +1,5 @@
 import type { Track } from '../../../types/ipc'
+import { trackIdentity } from '../../../shared/trackIdentity'
 import { resolvePlayableTrack } from '../../netease/music'
 import { type MusicEntityConstraint, filterTracksByMusicEntity } from '../../skills/music/verifier'
 
@@ -10,10 +11,6 @@ export interface TrackSelectionOptions {
   authRequired: boolean
   entityConstraint?: MusicEntityConstraint
   signal?: AbortSignal
-}
-
-function trackKey(track: Track): string {
-  return `${track.id ?? track.neteaseId ?? ''}::${track.title.trim().toLowerCase()}::${track.artist.trim().toLowerCase()}`
 }
 
 function compactText(value: string): string {
@@ -34,7 +31,7 @@ function pickCandidatesFromText(text: string, candidates: Track[], limit: number
   const picked: Array<{ track: Track; order: number }> = []
 
   function pushIfNew(track: Track, order: number) {
-    const key = trackKey(track)
+    const key = trackIdentity(track)
     if (seen.has(key)) return
     seen.add(key)
     picked.push({ track, order })
@@ -136,6 +133,7 @@ async function resolveMentionedTracks(content: string, limit: number, constraint
       constraint,
       strictArtist: Boolean(constraint?.artistQuery || constraint?.verifiedArtistName),
       strictTitle: Boolean(constraint?.verifiedTrackTitle),
+      signal,
     }).catch(() => null)
     assertTrackSelectionActive(signal)
     if (track) resolved.push(track)
@@ -155,8 +153,8 @@ export async function selectTracksForChatResponse(options: TrackSelectionOptions
     else if (constrainedCandidates.length === 1) tracks.push(constrainedCandidates[0])
 
     if (options.explicit && tracks.length < options.targetCount) {
-      const existing = new Set(tracks.map(trackKey))
-      tracks.push(...constrainedCandidates.filter((track) => !existing.has(trackKey(track))).slice(0, options.targetCount - tracks.length))
+      const existing = new Set(tracks.map(trackIdentity))
+      tracks.push(...constrainedCandidates.filter((track) => !existing.has(trackIdentity(track))).slice(0, options.targetCount - tracks.length))
     }
   }
 

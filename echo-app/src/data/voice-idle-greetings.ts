@@ -1,4 +1,5 @@
 import type { PlaybackState } from '../types/ipc'
+import { stableChoice, stableDaySeed } from '../shared/deterministic'
 
 const FIVE_DAYS = 5 * 86400000
 const VOICE_LAST_SEEN_KEY = 'echo:voiceLastSeenAt'
@@ -27,8 +28,8 @@ export interface VoiceIdleGreetingInput {
   now?: Date
 }
 
-function random(items: readonly string[]) {
-  return items[Math.floor(Math.random() * items.length)] ?? VOICE_IDLE_GREETINGS.fallback[0]
+function pick(items: readonly string[], seed: string) {
+  return stableChoice(items, seed, VOICE_IDLE_GREETINGS.fallback[0])
 }
 
 function periodKey(date = new Date()): VoiceGreetingKey {
@@ -57,18 +58,20 @@ export function markVoiceSeen(now = Date.now()) {
 
 export function pickVoiceIdleGreeting(input: VoiceIdleGreetingInput = {}) {
   const now = input.now ?? new Date()
-  if (input.longAbsent) return random(VOICE_IDLE_GREETINGS.long_absence)
+  const seed = `${stableDaySeed(now)}:${now.getHours()}`
+  if (input.longAbsent) return pick(VOICE_IDLE_GREETINGS.long_absence, `${seed}:long_absence`)
 
   const hasCurrentTrack = Boolean(input.playbackState?.current)
   const playbackStatus = input.playbackState?.status
   if (hasCurrentTrack && (playbackStatus === 'playing' || playbackStatus === 'paused')) {
-    return random(VOICE_IDLE_GREETINGS.music_playing)
+    return pick(VOICE_IDLE_GREETINGS.music_playing, `${seed}:music_playing:${input.playbackState?.current?.title ?? ''}`)
   }
 
   const condition = input.weather?.condition ?? ''
-  if (condition.includes('雨')) return random(VOICE_IDLE_GREETINGS.rain)
+  if (condition.includes('雨')) return pick(VOICE_IDLE_GREETINGS.rain, `${seed}:rain`)
 
-  if (isWeekend(now) && now.getHours() < 12) return random(VOICE_IDLE_GREETINGS.weekend_morning)
-  if (isWeekend(now) && now.getHours() >= 19) return random(VOICE_IDLE_GREETINGS.weekend_night)
-  return random(VOICE_IDLE_GREETINGS[periodKey(now)])
+  if (isWeekend(now) && now.getHours() < 12) return pick(VOICE_IDLE_GREETINGS.weekend_morning, `${seed}:weekend_morning`)
+  if (isWeekend(now) && now.getHours() >= 19) return pick(VOICE_IDLE_GREETINGS.weekend_night, `${seed}:weekend_night`)
+  const period = periodKey(now)
+  return pick(VOICE_IDLE_GREETINGS[period], `${seed}:${period}`)
 }

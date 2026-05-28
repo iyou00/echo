@@ -134,7 +134,7 @@ export async function generateYinyi(date = todayIso(), options: GenerateYinyiOpt
     const weather = await getWeather(settings.user.city, { signal: options.signal })
     assertYinyiActive(options.signal)
     const messages = buildYinyiContext(date, weather?.summary)
-    let content = cleanYinyiContent(await completeChat(settings, messages, { temperature: 0.85, signal: options.signal }))
+    let content = cleanYinyiContent(await completeChat(settings, messages, { temperature: 0.85, signal: options.signal, maxTokens: 800 }))
     assertYinyiActive(options.signal)
     let qualityPassed = Boolean(content && hasYinyiQuality(content))
     if (content && !qualityPassed) {
@@ -145,7 +145,7 @@ export async function generateYinyi(date = todayIso(), options: GenerateYinyiOpt
             role: 'user',
             content: yinyiQualityRetryInstruction(),
           },
-        ], { temperature: 0.85, signal: options.signal }))
+        ], { temperature: 0.85, signal: options.signal, maxTokens: 800 }))
         assertYinyiActive(options.signal)
         if (retry && hasYinyiQuality(retry)) {
           content = retry

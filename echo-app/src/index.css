@@ -440,6 +440,15 @@ button:disabled {
   text-align: left;
 }
 
+.chat-notice {
+  display: flex;
+  margin: 10px 16px 0;
+  padding: 8px 10px;
+  border: 0.5px solid rgba(183, 74, 58, 0.25);
+  border-radius: 10px;
+  background: rgba(183, 74, 58, 0.06);
+}
+
 .conversation {
   flex: 1;
   overflow: auto;
@@ -2706,6 +2715,15 @@ button:disabled {
   overflow-y: auto;
 }
 
+.queue-notice {
+  display: flex;
+  margin: 12px 18px 0;
+  padding: 8px 10px;
+  border: 0.5px solid rgba(183, 74, 58, 0.25);
+  border-radius: 10px;
+  background: rgba(183, 74, 58, 0.06);
+}
+
 .queue-section {
   padding: 20px 0 4px;
 }
@@ -3010,17 +3028,6 @@ button:disabled {
   font-family: var(--font-serif);
   font-size: 12px;
   line-height: 1.7;
-}
-
-.queue-notice {
-  margin: -4px 22px 14px;
-  padding: 9px 11px;
-  border: 0.5px solid rgba(99, 153, 34, 0.22);
-  border-radius: var(--radius-md);
-  background: var(--ayin-green-50);
-  color: var(--ayin-green-900);
-  font-size: 12px;
-  line-height: 1.5;
 }
 
 .stash-grid {

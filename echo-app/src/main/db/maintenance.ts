@@ -3,6 +3,7 @@ import { getStoredSettingsRaw, updateSettingsSilent } from './settings'
 
 const PRUNE_TABLES: Array<{ table: string; dateColumn: string; retentionDays: number; extraWhere?: string }> = [
   { table: 'tracks_listened', dateColumn: 'listened_at', retentionDays: 60 },
+  { table: 'taste_question_prompts', dateColumn: 'asked_at', retentionDays: 30 },
   { table: 'conversations', dateColumn: 'created_at', retentionDays: 60 },
   { table: 'track_feedback_events', dateColumn: 'created_at', retentionDays: 90 },
   { table: 'care_pings', dateColumn: 'triggered_at', retentionDays: 30 },
@@ -12,7 +13,6 @@ const PRUNE_TABLES: Array<{ table: string; dateColumn: string; retentionDays: nu
   { table: 'scene_sessions', dateColumn: 'created_at', retentionDays: 7, extraWhere: "AND status = 'expired'" },
   { table: 'recommendation_cache', dateColumn: 'expires_at', retentionDays: 0 },
   { table: 'taste_questions', dateColumn: 'created_at', retentionDays: 30, extraWhere: "AND status != 'pending'" },
-  { table: 'taste_question_prompts', dateColumn: 'asked_at', retentionDays: 90 },
   { table: 'queue_history_hidden_dates', dateColumn: 'hidden_at', retentionDays: 90 },
 ]
 

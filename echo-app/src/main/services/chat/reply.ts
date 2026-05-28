@@ -2,6 +2,7 @@ import type { WebContents } from 'electron'
 import type { ChatHints, SendChatResult, Track } from '../../../types/ipc'
 import { appendConversation } from '../../db/conversations'
 import { appendRecommendedTracks } from '../../db/tracks'
+import { assertAssistantReplyInputContract, assertSendChatResultContract } from './pipelineContract'
 
 export type ChatRuntimeEmit = (channel: string, payload: unknown) => void
 
@@ -17,6 +18,7 @@ export interface AssistantReplyOptions {
 
 export function appendAssistantReply(options: AssistantReplyOptions): SendChatResult {
   const tracks = options.tracks ?? []
+  assertAssistantReplyInputContract(options.content, tracks)
   if (options.persistTracks) appendRecommendedTracks(tracks)
   const message = appendConversation('assistant', options.content, tracks)
   const payload = {
@@ -25,11 +27,11 @@ export function appendAssistantReply(options: AssistantReplyOptions): SendChatRe
     durationMs: options.durationMs ?? 0,
     ...(options.hints ? { hints: options.hints } : {}),
   }
-  options.sender?.send('chat:stream:end', payload)
+  if (options.sender && !options.sender.isDestroyed()) options.sender.send('chat:stream:end', payload)
   options.runtimeEmit?.('runtime:chat-stream-end', payload)
-  return {
+  return assertSendChatResultContract({
     message,
     tracks,
     ...(options.hints ? { hints: options.hints } : {}),
-  }
+  })
 }

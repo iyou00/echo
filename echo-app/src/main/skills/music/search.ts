@@ -109,6 +109,23 @@ function withResolvedEntities(
   return Object.keys(next).length > 0 ? next : undefined
 }
 
+function emptyEntityResolution(targetCount?: number): MusicEntityResolution {
+  return {
+    targetCount,
+    requestedCount: targetCount ?? 1,
+    explicitCount: Boolean(targetCount),
+    entities: [],
+    ambiguity: 'none',
+    confidence: 0,
+    source: 'rules',
+    verificationStatus: 'not_needed',
+  }
+}
+
+function shouldResolveEntities(mode: MusicSearchMode): boolean {
+  return mode !== 'scene'
+}
+
 function resolutionWithIntentOverride(
   resolution: MusicEntityResolution,
   override: IntentOverride | null | undefined,
@@ -198,23 +215,32 @@ export async function searchMusic(request: MusicSearchRequest): Promise<Track[]>
   const query = normalizeQuery(request.query)
   if (!query) return []
   const modeDefaultCandidatePoolSize = defaultCandidatePoolSize(request.mode, request.targetCount)
-  request.onProgress?.({ phase: 'entity', message: '识别音乐实体' })
-  const ruleEntities = resolutionWithIntentOverride(resolveMusicEntitiesFromText(query), request.intentOverride)
-  request.onProgress?.({ phase: 'entity-verify', message: '校验艺人和歌名' })
-  const verifiedEntities = await verifyMusicEntitiesWithNetease(ruleEntities, { signal: request.signal }).catch((error) => {
-    assertMusicSearchActive(request.signal)
-    console.warn('[music-search] entity verification unavailable', error)
-    return ruleEntities
-  })
+  const resolveEntities = shouldResolveEntities(request.mode)
+  const ruleEntities = resolveEntities
+    ? resolutionWithIntentOverride(resolveMusicEntitiesFromText(query), request.intentOverride)
+    : emptyEntityResolution(request.targetCount)
+  let verifiedEntities = ruleEntities
+  if (resolveEntities) {
+    request.onProgress?.({ phase: 'entity', message: '识别音乐实体' })
+    request.onProgress?.({ phase: 'entity-verify', message: '校验艺人和歌名' })
+    verifiedEntities = await verifyMusicEntitiesWithNetease(ruleEntities, { signal: request.signal }).catch((error) => {
+      assertMusicSearchActive(request.signal)
+      console.warn('[music-search] entity verification unavailable', error)
+      return ruleEntities
+    })
+  }
   assertMusicSearchActive(request.signal)
   request.onEntitiesResolved?.(verifiedEntities)
   const tracks = await recommendFromNetease(
     query,
-    withResolvedEntities(request.intentOverride, verifiedEntities, query, request.targetCount),
+    resolveEntities
+      ? withResolvedEntities(request.intentOverride, verifiedEntities, query, request.targetCount)
+      : withTargetCount(request.intentOverride, request.targetCount),
     {
       signal: request.signal,
       candidatePoolSize: request.candidatePoolSize ?? request.candidateCount ?? modeDefaultCandidatePoolSize,
       ignoreScene: request.ignoreScene ?? defaultIgnoreScene(request.mode),
+      disableEntityInference: !resolveEntities,
       onProgress: request.onProgress,
     },
   )

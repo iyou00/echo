@@ -60,25 +60,12 @@ ${formatCandidates(candidates)}
 </taste_curiosity>`
     : ''
 
-  const chatContract = [
-    '输出像即时聊天,保持短句。',
-    '画像、记忆、候选来源和策略只用于内部判断,不要直接说给用户。',
-    '不要 Markdown、加粗、标题、编号或列表。',
-    '不要用“收到”做默认开头。',
-    '有 recommendation_candidates 时,只说候选里的歌名和艺人。',
-    '没有候选时不要编歌名。',
-  ].map((line) => `- ${line}`).join('\n')
-
   const messages: LlmMessage[] = [
     {
       role: 'system',
       content: `${buildSoulPolicyPrompt('chat')}
 
 ${system}
-
-<chat_output_contract>
-${chatContract}
-</chat_output_contract>
 
 <taste_profile_summary>
 ${profile?.echo_portrait ?? '用户还没有导入歌单，Echo 对 Ta 的品味只有很少线索。'}

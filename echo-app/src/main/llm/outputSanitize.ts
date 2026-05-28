@@ -14,7 +14,6 @@ export const SYSTEM_CONTEXT_TAGS = [
   'soul_policy',
   'agent_soul',
   'surface_contract',
-  'chat_output_contract',
   'active_events',
   'recent_conversations',
   'recent_dialog',
@@ -52,13 +51,26 @@ export function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-export function stripKnownSystemBlocks(text: string, tags = SYSTEM_CONTEXT_TAGS): string {
-  let result = text
-  for (const tag of tags) {
+const MAX_SANITIZE_INPUT_CHARS = 30_000
+
+function compileSystemContextPatterns(tags: readonly string[]): RegExp[] {
+  return tags.flatMap((tag) => {
     const escaped = escapeRegExp(tag)
-    result = result.replace(new RegExp(`<${escaped}(?:\\s+[^>]*)?>[\\s\\S]*?<\\/${escaped}>`, 'gi'), '')
-    result = result.replace(new RegExp(`<${escaped}(?:\\s+[^>]*)?>[\\s\\S]*$`, 'gi'), '')
-    result = result.replace(new RegExp(`<\\/?${escaped}(?:\\s+[^>]*)?>`, 'gi'), '')
+    return [
+      new RegExp(`<${escaped}(?:\\s+[^>]*)?>[\\s\\S]*?<\\/${escaped}>`, 'gi'),
+      new RegExp(`<${escaped}(?:\\s+[^>]*)?>[\\s\\S]*$`, 'gi'),
+      new RegExp(`<\\/?${escaped}(?:\\s+[^>]*)?>`, 'gi'),
+    ]
+  })
+}
+
+const DEFAULT_SYSTEM_CONTEXT_PATTERNS = compileSystemContextPatterns(SYSTEM_CONTEXT_TAGS)
+
+export function stripKnownSystemBlocks(text: string, tags = SYSTEM_CONTEXT_TAGS): string {
+  let result = text.length > MAX_SANITIZE_INPUT_CHARS ? text.slice(0, MAX_SANITIZE_INPUT_CHARS) : text
+  const patterns = tags === SYSTEM_CONTEXT_TAGS ? DEFAULT_SYSTEM_CONTEXT_PATTERNS : compileSystemContextPatterns(tags)
+  for (const pattern of patterns) {
+    result = result.replace(pattern, '')
   }
   return result.replace(/\n{3,}/g, '\n\n').trim()
 }

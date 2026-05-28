@@ -1,14 +1,14 @@
 import { BrowserWindow } from 'electron'
 import type { ActiveScene, ChatMessage, PlaybackState, SceneKey, ScenePlaybackOptions, Track } from '../../types/ipc'
 import { appendConversation } from '../db/conversations'
-import { appendRecommendedTracks, loadListenedTracksSince, loadRecentRecommendedTracks, skipTodayRecommendedTracks } from '../db/tracks'
+import { appendRecommendedTracks, loadListenedTrackWindows, loadRecentRecommendedTracks, skipTodayRecommendedTracks } from '../db/tracks'
 import { getDb } from '../db'
 import { getTasteProfile } from '../db/taste'
 import { getSettings } from '../db/settings'
 import { completeChat } from '../llm/client'
 import { stripKnownSystemBlocks } from '../llm/outputSanitize'
-import { primaryArtist, trackKey } from '../skills/music/identity'
-import { searchMusic } from '../skills/music/search'
+import { primaryArtist, trackKey, uniqueTracks } from '../skills/music/identity'
+import { isMusicSearchAuthError, searchMusic } from '../skills/music/search'
 import { selectDiverseTracks } from '../skills/music/selection'
 import { buildSoulPolicyPrompt } from '../skills/soul/policy'
 import { clearQueue, enqueue, getState, play } from './playback'
@@ -25,6 +25,13 @@ export interface ScenePlaybackResult {
 export interface ScenePlaybackRuntimeOptions {
   signal?: AbortSignal
   report?: (patch: { phase?: string; current?: number; total?: number; message?: string }) => void
+}
+
+class SceneNoPlayableTrackError extends Error {
+  constructor() {
+    super('Echo 这次没找到能播的歌。')
+    this.name = 'SceneNoPlayableTrackError'
+  }
 }
 
 function assertScenePlaybackActive(signal?: AbortSignal): void {
@@ -54,30 +61,83 @@ function isSuperseded(scene: ActiveScene): boolean {
 
 function broadcastChatMessage(message: ChatMessage): void {
   for (const window of BrowserWindow.getAllWindows()) {
-    window.webContents.send('chat:message-injected', message)
+    if (!window.isDestroyed()) window.webContents.send('chat:message-injected', message)
   }
 }
 
-function recentArtistSet(): Set<string> {
-  const tracks = [
-    ...loadRecentRecommendedTracks(80),
-    ...loadListenedTracksSince(48, 240),
-  ]
+function recentArtistSet(tracks: Track[]): Set<string> {
   return new Set(tracks.map((track) => primaryArtist(track.artist)).filter(Boolean))
 }
 
 function pickSceneTracks(candidates: Track[], targetCount: number): Track[] {
-  const excluded = [
-    ...loadRecentRecommendedTracks(120),
-    ...loadListenedTracksSince(24 * 7, 500),
-  ]
-  return selectDiverseTracks(candidates, {
+  const recentRecommended = loadRecentRecommendedTracks(120)
+  const listenedWindows = loadListenedTrackWindows(24 * 7, 500, 48, 240)
+  const excluded = [...recentRecommended, ...listenedWindows.history]
+  const strict = selectDiverseTracks(candidates, {
     targetCount,
     maxPerArtist: 1,
-    avoidArtists: recentArtistSet(),
+    avoidArtists: recentArtistSet([...recentRecommended.slice(0, 80), ...listenedWindows.recent]),
     excludeTracks: excluded,
     allowAvoidedArtistFallback: true,
   })
+  if (strict.length > 0) return strict
+
+  return selectDiverseTracks(candidates, {
+    targetCount,
+    maxPerArtist: 2,
+    allowAvoidedArtistFallback: true,
+  })
+}
+
+function sceneFallbackQueries(scene: ActiveScene): string[] {
+  const moodLine = scene.moods.join(' ')
+  switch (scene.key) {
+    case 'focus':
+      return ['安静 舒缓 工作 背景音乐', '轻音乐 放松 专注']
+    case 'sleepy':
+      return ['提神 轻快 流行', '清醒 节奏 明亮']
+    case 'relax':
+      return ['放松 治愈 舒缓', '轻松 清新 华语']
+    case 'irritated':
+      return ['安静 放松 舒缓', '降噪 治愈 慢歌']
+    case 'random':
+      return ['华语流行 轻快', '治愈 流行', '舒服 华语']
+    default:
+      return [`${scene.label} ${moodLine} 歌`, '华语流行']
+  }
+}
+
+async function searchSceneTracks(scene: ActiveScene, targetCount: number, runtime: ScenePlaybackRuntimeOptions): Promise<Track[]> {
+  const queries = Array.from(new Set([scene.prompt, ...sceneFallbackQueries(scene)]))
+  const candidates: Track[] = []
+  const desiredPoolSize = Math.max(targetCount * 8, 12)
+  for (const query of queries) {
+    assertScenePlaybackActive(runtime.signal)
+    const tracks = await searchMusic({
+      query,
+      mode: 'scene',
+      targetCount,
+      candidatePoolSize: Math.max(72, targetCount * 24),
+      signal: runtime.signal,
+      onProgress: (patch) => runtime.report?.({
+        ...patch,
+        phase: patch.phase ? `recommend-${patch.phase}` : 'recommend',
+        current: 1,
+        total: 4,
+      }),
+    }).catch((error) => {
+      assertScenePlaybackActive(runtime.signal)
+      if (isMusicSearchAuthError(error)) throw error
+      console.warn('[scene] search failed', { key: scene.key, query, error })
+      return []
+    })
+    assertScenePlaybackActive(runtime.signal)
+    if (tracks.length > 0) {
+      candidates.push(...tracks)
+      if (uniqueTracks(candidates).length >= desiredPoolSize) break
+    }
+  }
+  return uniqueTracks(candidates)
 }
 
 function getTimeLabel(): string {
@@ -103,7 +163,7 @@ function getSceneTransition(currentKey: SceneKey): string {
   const row = getDb()
     .prepare(`
       SELECT label, scene_key FROM scene_sessions
-      WHERE user_id = 1 AND status = 'ended'
+      WHERE user_id = current_user_id() AND status = 'ended'
       ORDER BY ended_at DESC, id DESC
       LIMIT 1
     `)
@@ -150,7 +210,7 @@ async function generateSceneLine(scene: ActiveScene, first: Track, signal?: Abor
         { role: 'system', content: SCENE_LINE_SYSTEM },
         { role: 'user', content: lines.join('\n') },
       ],
-      { temperature: 0.7, signal },
+      { temperature: 0.7, signal, maxTokens: 300 },
     )
 
     const trimmed = stripKnownSystemBlocks(content).replace(/^[""「]|[""」]$/g, '').trim()
@@ -194,18 +254,7 @@ export async function startScenePlayback(key: SceneKey, options: ScenePlaybackOp
   try {
     runtime.report?.({ phase: 'recommend', current: 1, total: 4, message: scene.label })
     const targetCount = Math.max(1, Math.min(scene.targetCount, options.targetCount ?? scene.targetCount))
-    const recommended = await searchMusic({
-      query: scene.prompt,
-      mode: 'scene',
-      targetCount,
-      signal: runtime.signal,
-      onProgress: (patch) => runtime.report?.({
-        ...patch,
-        phase: patch.phase ? `recommend-${patch.phase}` : 'recommend',
-        current: 1,
-        total: 4,
-      }),
-    })
+    const recommended = await searchSceneTracks(scene, targetCount, runtime)
     assertScenePlaybackActive(runtime.signal)
     if (isSuperseded(scene)) {
       return { scene, tracks: [], state: getState() }
@@ -213,7 +262,7 @@ export async function startScenePlayback(key: SceneKey, options: ScenePlaybackOp
 
     const tracks = attachScene(scene, pickSceneTracks(recommended, targetCount))
     if (tracks.length === 0) {
-      throw new Error('Echo 这次没找到能播的歌。')
+      throw new SceneNoPlayableTrackError()
     }
 
     if (isSuperseded(scene)) {
@@ -269,6 +318,9 @@ export async function startScenePlayback(key: SceneKey, options: ScenePlaybackOp
     if (message) broadcastChatMessage(message)
     return { scene, tracks, state, message }
   } catch (error) {
+    if (options.continueSession && error instanceof SceneNoPlayableTrackError) {
+      return { scene, tracks: [], state: getState() }
+    }
     if (isSceneSessionCurrent(scene.id)) endCurrentScene()
     throw error
   }

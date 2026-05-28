@@ -53,11 +53,17 @@ function extractBlockedTerms(content: string): string[] {
   return unique(terms)
 }
 
+function profileAntiPatternTerms(profile: TasteProfile | null): string[] {
+  return unique((profile?.anti_patterns ?? [])
+    .map((pattern) => cleanTerm(pattern.replace(/^(跳过|不喜欢|不爱听|少推|别推)[:：]/, '')))
+    .filter((term) => normalizeText(term).length >= 2))
+}
+
 export function buildRecommendationMemoryConstraints(profile = getTasteProfile()): RecommendationMemoryConstraints {
   const corrections = loadRecentEvents('correction', 12)
   const artists = profileArtistNames(profile)
   const softenedArtists: string[] = []
-  const blockedTerms: string[] = []
+  const blockedTerms: string[] = [...profileAntiPatternTerms(profile)]
   const notes: string[] = []
 
   for (const event of corrections) {

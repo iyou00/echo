@@ -1,59 +1,37 @@
 import type { WebContents } from 'electron'
-import type { ChatHints, RuntimeTaskSnapshot, SendChatResult, TasteQuestion, Track } from '../../../types/ipc'
+import type { RuntimeTaskSnapshot, SendChatResult, Track } from '../../../types/ipc'
 import { appendConversation } from '../../db/conversations'
 import { getSettings } from '../../db/settings'
-import { similarTrackSearchQuery } from '../../skills/music/query'
-import { excludeTracks } from '../../skills/music/selection'
-import { OVER_LIMIT_RECOMMENDATION_LINE, parseRequestedTrackCount } from '../recommendation'
 import { getState as getPlaybackState } from '../playback'
 import { getCurrentScene } from '../scene'
 import { applyMemorySignal } from '../memoryPolicy'
 import { getWeather } from '../../weather/client'
 import {
   capturePendingQuestionAnswer,
-  generateDynamicTasteQuestions,
   type PendingQuestionReplyCapture,
-  pickTasteFollowUpQuestion,
-  recordFollowUpQuestionAsked,
 } from '../tasteQuestionScheduler'
 import { checkJailbreak, pickJailbreakResponse } from '../safety/jailbreak-filter'
 import { classifyChatIntent, refineChatIntentWithLlm, type ChatIntent } from './intent'
-import { fetchRecommendationCandidates, type ChatActiveTask } from './recommendationCandidates'
-import type { MusicSearchFailure } from '../../skills/music/search'
+import type { ChatActiveTask } from './recommendationCandidates'
 import {
-  clearPendingDirectSongState,
-  directSongChoiceContent,
-  directSongClarificationContent,
-  musicEntityClarificationContent,
   resolvePendingDirectSongChoiceReply,
   resolvePendingDirectSongReply,
   resolvePendingMusicEntityReply,
-  setPendingDirectSongChoice,
-  setPendingDirectSongClarification,
-  setPendingMusicEntityClarification,
 } from './pendingIntents'
 import { appendAssistantReply } from './reply'
 import {
-  fallbackRecommendationContent,
-  friendlyError,
-  recordChatStreamError,
   sanitizeAssistantOutput,
-  streamChatReply,
   streamPendingAnswerReply,
 } from './responseStream'
 import { handleCurrentTrackFeedback, trackLabel } from './trackFeedback'
-import { selectTracksForChatResponse } from './trackSelection'
 import {
-  armChatMusicSessionAffirmation,
-  clearChatMusicSession,
-  inferSessionAffirmationAction,
   rememberChatMusicSession,
   resolveSessionMusicFollowUp,
   type SessionMusicFollowUp,
 } from './sessionContext'
-import type { MusicEntityResolution } from '../../skills/music/entityResolver'
-import { currentMusicCorrectionConstraintForQuery } from '../../skills/music/correctionMemory'
-import { constraintFromResolution, filterTracksByMusicEntity, mergeMusicEntityConstraints } from '../../skills/music/verifier'
+import { prepareCandidateStage } from './candidateStage'
+import { runRecommendationResponseStage } from './responseStage'
+import type { PendingIntentState, ReplyFn } from './sendPipelineTypes'
 
 type ActiveChat = ChatActiveTask
 
@@ -117,86 +95,6 @@ function attachSceneToTracks(tracks: Track[]): Track[] {
   }))
 }
 
-function shouldExcludeCurrentPlaybackTrack(
-  intent: ChatIntent,
-  pendingReply: PendingQuestionReplyCapture,
-  currentTrack: Track | null | undefined,
-): boolean {
-  if (!currentTrack) return false
-  if (pendingReply.action === 'extend_recommendation') return true
-  return intent.kind === 'feedback_current_track' && intent.feedbackAction === 'more_like_this'
-}
-
-function excludeCurrentPlaybackTrack(tracks: Track[], currentTrack: Track | null | undefined): Track[] {
-  return currentTrack ? excludeTracks(tracks, [currentTrack]) : tracks
-}
-
-function shouldAskMusicEntityClarification(entity: MusicEntityResolution | undefined, candidates: Track[], authRequired: boolean): boolean {
-  if (!entity || authRequired || candidates.length > 0) return false
-  if (entity.ambiguity === 'artist_or_title' || entity.ambiguity === 'missing_artist') return true
-  if (entity.verificationStatus === 'unverified' && (entity.artistQuery || entity.seedTitle)) return true
-  return false
-}
-
-function shouldExplainSearchFailure(failure: MusicSearchFailure | undefined): boolean {
-  if (!failure) return false
-  return failure.reason !== 'auth_required' && failure.reason !== 'search_failed'
-}
-
-function failureEntityPatch(failure: MusicSearchFailure | undefined, entity: MusicEntityResolution | undefined): {
-  artistQuery?: string
-  seedTitle?: string
-  ambiguity: MusicEntityResolution['ambiguity']
-  failureReason?: MusicSearchFailure['reason']
-} {
-  return {
-    artistQuery: failure?.artistQuery ?? entity?.artistQuery,
-    seedTitle: failure?.seedTitle ?? entity?.seedTitle,
-    ambiguity: entity?.ambiguity ?? 'too_vague',
-    failureReason: failure?.reason,
-  }
-}
-
-function hasMusicActionIntent(intent: ChatIntent): boolean {
-  return intent.wantsMusic && (
-    intent.kind === 'direct_song'
-    || intent.kind === 'artist_request'
-    || intent.kind === 'mood_request'
-    || intent.kind === 'scene_request'
-    || intent.kind === 'similar_to_track'
-  )
-}
-
-function noMusicCandidateContent(intent: ChatIntent, authRequired: boolean, failure?: MusicSearchFailure): string {
-  if (authRequired) return '现在还没接上网易云。去设置里扫码登录后，我就能继续给你挑歌。'
-  if (failure?.reason === 'search_failed') return '这次音乐服务没拿到可播放结果。你换个歌手、语种或感觉，我再试一次。'
-  if (intent.artistQuery) return `我知道你想听${intent.artistQuery}，但这次没拿到可播放的结果。你换个关键词，我再找。`
-  if (intent.seedTitle) return `我知道你想听《${intent.seedTitle}》，但这次没拿到可播放的结果。你把歌手或版本补一下，我再找。`
-  return '我知道你是想听歌，但这次没拿到可播放的结果。你换个歌手、语种或感觉再说一句，我再找。'
-}
-
-function mentionedTrackCount(content: string, tracks: Track[]): number {
-  const normalized = content.toLowerCase().replace(/\s+/g, '')
-  return tracks.filter((track) => {
-    const title = track.title.toLowerCase().replace(/\s+/g, '')
-    const artist = track.artist.toLowerCase().replace(/\s+/g, '')
-    return Boolean(title && normalized.includes(title)) || Boolean(artist && normalized.includes(artist) && title && normalized.includes(`《${title}》`))
-  }).length
-}
-
-function boundMusicActionContent(content: string, tracks: Track[]): string {
-  const first = tracks[0]
-  if (!first) return content
-  const requiredMentionCount = Math.min(tracks.length, 3)
-  if (mentionedTrackCount(content, tracks) >= requiredMentionCount) return content
-  if (tracks.length > 1) {
-    const names = tracks.slice(0, 3).map((track) => trackLabel(track)).join('、')
-    return `行，我先挑这几首：${names}。先从第一首开始。`
-  }
-  const reason = first.reason || first.echoNote
-  return `行，先放${trackLabel(first)}。${reason ? ` ${reason}` : '先听开头。'}`
-}
-
 async function inferTasteSignal(text: string): Promise<void> {
   const patterns: Array<{ regex: RegExp; kind: string }> = [
     { regex: /(?:喜欢|爱听|最近迷上|新发现)([^,，。.!！?？]{1,24})/, kind: 'like_artist' },
@@ -214,6 +112,42 @@ async function inferTasteSignal(text: string): Promise<void> {
   }
 }
 
+async function handleStaticReply(input: {
+  trimmed: string
+  settings: ReturnType<typeof getSettings>
+  signal: AbortSignal
+  reply: ReplyFn
+}): Promise<SendChatResult | null> {
+  const jailbreak = checkJailbreak(input.trimmed)
+  if (jailbreak.isJailbreak) return input.reply(pickJailbreakResponse(input.trimmed))
+  if (isIdentityQuestion(input.trimmed)) return input.reply(identityReply())
+  if (isWeatherQuestion(input.trimmed)) return input.reply(await buildWeatherReply(input.settings, input.signal))
+  return null
+}
+
+function resolvePendingIntentState(trimmed: string): PendingIntentState {
+  const pendingDirectSongReply = resolvePendingDirectSongReply(trimmed)
+  const pendingMusicEntityReply = pendingDirectSongReply?.query ? null : resolvePendingMusicEntityReply(trimmed)
+  const pendingDirectSongChoiceReply = pendingDirectSongReply?.query || pendingMusicEntityReply?.query ? null : resolvePendingDirectSongChoiceReply(trimmed)
+  return {
+    pendingDirectSongReply,
+    pendingMusicEntityReply,
+    pendingDirectSongChoiceReply,
+    effectiveText: pendingDirectSongReply?.query ?? pendingMusicEntityReply?.query ?? trimmed,
+  }
+}
+
+function handlePendingIntentReply(state: PendingIntentState, reply: ReplyFn): SendChatResult | null {
+  if (state.pendingDirectSongReply?.response) return reply(state.pendingDirectSongReply.response)
+  if (state.pendingMusicEntityReply?.response) return reply(state.pendingMusicEntityReply.response)
+  if (state.pendingDirectSongChoiceReply?.response) return reply(state.pendingDirectSongChoiceReply.response)
+  if (state.pendingDirectSongChoiceReply?.track) {
+    const tracks = attachSceneToTracks([state.pendingDirectSongChoiceReply.track])
+    return reply(`好，就放${trackLabel(tracks[0])}。`, tracks, { persistTracks: true })
+  }
+  return null
+}
+
 export async function runChatSendPipeline(
   text: string,
   sender: WebContents | undefined,
@@ -224,7 +158,7 @@ export async function runChatSendPipeline(
   const trimmed = text.trim()
   if (!trimmed) throw new Error('消息不能为空')
   if (trimmed.length > 2000) throw new Error('这么长我得分两口气听,你要不分两次发?')
-  const reply = (content: string, tracks: Track[] = [], options: { durationMs?: number; hints?: ChatHints; persistTracks?: boolean } = {}) => appendAssistantReply({
+  const reply: ReplyFn = (content, tracks = [], options = {}) => appendAssistantReply({
     content,
     tracks,
     sender,
@@ -235,261 +169,110 @@ export async function runChatSendPipeline(
   runtimeReport?.({ phase: 'input', current: 1, total: 5, message: '记录用户消息' })
   appendConversation('user', trimmed)
 
-  const jailbreak = checkJailbreak(trimmed)
-  if (jailbreak.isJailbreak) {
-    return reply(pickJailbreakResponse())
-  }
-
-  const playbackState = getPlaybackState()
-  const currentPlaybackTrack = playbackState.current
-  const settings = getSettings()
-  if (isIdentityQuestion(trimmed)) {
-    return reply(identityReply())
-  }
-  if (isWeatherQuestion(trimmed)) {
-    runtimeReport?.({ phase: 'weather', current: 2, total: 5, message: '查询设置城市天气' })
-    return reply(await buildWeatherReply(settings, signal))
-  }
-
-  const pendingDirectSongReply = resolvePendingDirectSongReply(trimmed)
-  if (pendingDirectSongReply?.response) {
-    return reply(pendingDirectSongReply.response)
-  }
-  const pendingMusicEntityReply = pendingDirectSongReply?.query ? null : resolvePendingMusicEntityReply(trimmed)
-  if (pendingMusicEntityReply?.response) {
-    return reply(pendingMusicEntityReply.response)
-  }
-  const pendingDirectSongChoiceReply = pendingDirectSongReply?.query || pendingMusicEntityReply?.query ? null : resolvePendingDirectSongChoiceReply(trimmed)
-  if (pendingDirectSongChoiceReply?.response) {
-    return reply(pendingDirectSongChoiceReply.response)
-  }
-  if (pendingDirectSongChoiceReply?.track) {
-    const tracks = attachSceneToTracks([pendingDirectSongChoiceReply.track])
-    return reply(`好，就放${trackLabel(tracks[0])}。`, tracks, { persistTracks: true })
-  }
-
-  const effectiveText = pendingDirectSongReply?.query ?? pendingMusicEntityReply?.query ?? trimmed
-  const initialChatIntent = await refineChatIntentWithLlm(
-    classifyChatIntent(effectiveText, { currentTrack: currentPlaybackTrack }),
-    { currentTrack: currentPlaybackTrack },
-    signal,
-  )
-  if (initialChatIntent.kind === 'out_of_scope') {
-    return reply(outOfScopeContent(initialChatIntent))
-  }
-
-  runtimeReport?.({ phase: 'taste', current: 2, total: 5, message: '更新口味信号' })
-  await inferTasteSignal(trimmed)
-  const pendingReply: PendingQuestionReplyCapture = pendingDirectSongReply?.query
-    ? { action: 'none' }
-    : await capturePendingQuestionAnswer(trimmed, signal)
-
-  const sessionFollowUp: SessionMusicFollowUp = pendingReply.action === 'none' && !pendingDirectSongReply?.query && !pendingMusicEntityReply?.query
-    ? resolveSessionMusicFollowUp(trimmed)
-    : { kind: 'none' }
-  if (sessionFollowUp.kind === 'play_track') {
-    const tracks = attachSceneToTracks([sessionFollowUp.track])
-    rememberChatMusicSession({
-      sourceText: trimmed,
-      intentKind: 'session_play',
-      tracks,
-      artistQuery: sessionFollowUp.track.artist,
-      seedTitle: sessionFollowUp.track.title,
-    })
-    return reply(sessionFollowUp.content, tracks, { persistTracks: true })
-  }
-
-  if (pendingReply.action === 'none' && initialChatIntent.kind === 'feedback_current_track' && currentPlaybackTrack) {
-    const feedbackResult = await handleCurrentTrackFeedback(initialChatIntent, currentPlaybackTrack, trimmed, signal)
-    if (feedbackResult.handled) {
-      return reply(feedbackResult.content, feedbackResult.tracks)
+  try {
+    const playbackState = getPlaybackState()
+    const currentPlaybackTrack = playbackState.current
+    const settings = getSettings()
+    if (isWeatherQuestion(trimmed)) {
+      runtimeReport?.({ phase: 'weather', current: 2, total: 5, message: '查询设置城市天气' })
     }
-  }
+    const staticReply = await handleStaticReply({ trimmed, settings, signal, reply })
+    if (staticReply) return staticReply
 
-  const active: ActiveChat = {
-    signal,
-    get canceled() {
-      return signal.aborted
-    },
-  }
-  const emitChunk = (chunk: string) => {
-    sender?.send('chat:stream:chunk', chunk)
-    runtimeEmit?.('runtime:chat-stream-chunk', { chunk })
-  }
-  if (pendingReply.action === 'answer_only') {
-    const started = Date.now()
-    let content = await streamPendingAnswerReply(trimmed, pendingReply, active, settings, emitChunk)
-    content = sanitizeAssistantOutput(content)
-    return reply(content.trim(), [], { durationMs: Date.now() - started })
-  }
+    const pendingState = resolvePendingIntentState(trimmed)
+    const pendingIntentReply = handlePendingIntentReply(pendingState, reply)
+    if (pendingIntentReply) return pendingIntentReply
 
-  const recommendationQuery = sessionFollowUp.kind === 'search'
-    ? sessionFollowUp.query
-    : pendingDirectSongReply?.query ?? pendingMusicEntityReply?.query
-    ?? (initialChatIntent.kind === 'feedback_current_track' && initialChatIntent.feedbackAction === 'more_like_this' && currentPlaybackTrack
-      ? similarTrackSearchQuery(currentPlaybackTrack, trimmed)
-      : pendingReply.action === 'extend_recommendation' && pendingReply.recommendationText
-        ? pendingReply.recommendationText
-        : trimmed)
-  const recommendationIntent = recommendationQuery === effectiveText
-    ? initialChatIntent
-    : await refineChatIntentWithLlm(
-      classifyChatIntent(recommendationQuery, { currentTrack: currentPlaybackTrack }),
+    const { pendingDirectSongReply, pendingMusicEntityReply, effectiveText } = pendingState
+    const initialChatIntent = await refineChatIntentWithLlm(
+      classifyChatIntent(effectiveText, { currentTrack: currentPlaybackTrack }),
       { currentTrack: currentPlaybackTrack },
       signal,
-  )
-  const requested = parseRequestedTrackCount(trimmed)
-  const targetCount = Math.max(1, Math.min(5, Math.floor(recommendationIntent.targetCount || requested.targetCount)))
-  const countExplicit = requested.explicit || targetCount > requested.targetCount
-  runtimeReport?.({ phase: 'recommendation', current: 3, total: 5, message: '准备推荐候选' })
-  const { candidates, authRequired, canceled: candidatesCanceled, directSong, entityResolution, failure } = await fetchRecommendationCandidates(recommendationQuery, active, (patch) => {
-    runtimeReport?.({
-      ...patch,
-      phase: patch.phase ?? 'recommendation',
-      current: 3,
-      total: 5,
-    })
-  }, recommendationIntent)
-  if (candidatesCanceled || active.canceled) {
-    return reply('行,我先停在这里。')
-  }
-  if (candidates.length === 0 && shouldExplainSearchFailure(failure)) {
-    const patch = failureEntityPatch(failure, entityResolution)
-    setPendingMusicEntityClarification(patch, trimmed)
-    return reply(musicEntityClarificationContent({
-      ...patch,
-      verificationStatus: entityResolution?.verificationStatus,
-    }))
-  }
-  if (shouldAskMusicEntityClarification(entityResolution, candidates, authRequired)) {
-    const patch = failureEntityPatch(failure, entityResolution)
-    setPendingMusicEntityClarification(patch, trimmed)
-    return reply(musicEntityClarificationContent({
-      ...patch,
-      verificationStatus: entityResolution?.verificationStatus,
-    }))
-  }
-  if (directSong && candidates.length === 0 && !authRequired) {
-    setPendingDirectSongClarification(directSong, trimmed)
-    return reply(directSongClarificationContent(directSong))
-  }
-  if (directSong && candidates.length > 1 && !authRequired) {
-    setPendingDirectSongChoice(directSong, candidates, trimmed)
-    return reply(directSongChoiceContent(candidates))
-  }
-  const excludeCurrentTrack = shouldExcludeCurrentPlaybackTrack(initialChatIntent, pendingReply, currentPlaybackTrack)
-  const sessionExcludedCandidates = sessionFollowUp.kind === 'search'
-    ? excludeTracks(candidates, sessionFollowUp.excludeTracks)
-    : candidates
-  const sessionUsableCandidates = sessionFollowUp.kind === 'search' && candidates.length > 0 && sessionExcludedCandidates.length === 0
-    ? candidates
-    : sessionExcludedCandidates
-  const usableCandidates = excludeCurrentTrack
-    ? excludeCurrentPlaybackTrack(sessionUsableCandidates, currentPlaybackTrack)
-    : sessionUsableCandidates
-  const entityConstraint = mergeMusicEntityConstraints(constraintFromResolution(entityResolution), currentMusicCorrectionConstraintForQuery(recommendationQuery))
-  const guardedCandidates = filterTracksByMusicEntity(usableCandidates, entityConstraint, {
-    strictArtist: Boolean(entityConstraint?.artistQuery || entityConstraint?.verifiedArtistName),
-  })
-  if (entityConstraint && usableCandidates.length > 0 && guardedCandidates.length === 0 && !authRequired) {
-    const patch = {
-      artistQuery: entityResolution?.artistQuery,
-      seedTitle: entityResolution?.seedTitle,
-      ambiguity: entityResolution?.ambiguity ?? 'too_vague',
-      failureReason: 'candidate_mismatch' as const,
+    )
+    if (initialChatIntent.kind === 'out_of_scope') {
+      return reply(outOfScopeContent(initialChatIntent))
     }
-    setPendingMusicEntityClarification(patch, trimmed)
-    return reply(musicEntityClarificationContent({
-      ...patch,
-      verificationStatus: entityResolution?.verificationStatus,
-    }))
-  }
-  if (hasMusicActionIntent(recommendationIntent) && guardedCandidates.length === 0) {
-    return reply(noMusicCandidateContent(recommendationIntent, authRequired, failure), [], {
-      hints: authRequired ? { neteaseAuthRequired: true } : undefined,
+
+    runtimeReport?.({ phase: 'taste', current: 2, total: 5, message: '更新口味信号' })
+    inferTasteSignal(trimmed).catch((error) => {
+      console.warn('[chat] taste signal inference failed', error)
     })
-  }
+    const pendingReply: PendingQuestionReplyCapture = pendingDirectSongReply?.query
+      ? { action: 'none' }
+      : await capturePendingQuestionAnswer(trimmed, signal)
 
-  const tracks: Track[] = []
-  const started = Date.now()
-  let content = ''
-  let followUpQuestion: TasteQuestion | null = null
+    const sessionFollowUp: SessionMusicFollowUp = pendingReply.action === 'none' && !pendingDirectSongReply?.query && !pendingMusicEntityReply?.query
+      ? resolveSessionMusicFollowUp(trimmed)
+      : { kind: 'none' }
+    if (sessionFollowUp.kind === 'play_track') {
+      const tracks = attachSceneToTracks([sessionFollowUp.track])
+      rememberChatMusicSession({
+        sourceText: trimmed,
+        intentKind: 'session_play',
+        tracks,
+        artistQuery: sessionFollowUp.track.artist,
+        seedTitle: sessionFollowUp.track.title,
+      })
+      return reply(sessionFollowUp.content, tracks, { persistTracks: true })
+    }
 
-  try {
-    runtimeReport?.({ phase: 'stream', current: 4, total: 5, message: '生成聊天回复' })
-    generateDynamicTasteQuestions(trimmed, guardedCandidates)
-    followUpQuestion = pendingReply.action !== 'none' ? null : pickTasteFollowUpQuestion(trimmed, guardedCandidates)
-    content = sanitizeAssistantOutput(await streamChatReply({
-      userText: trimmed,
+    if (pendingReply.action === 'none' && initialChatIntent.kind === 'feedback_current_track' && currentPlaybackTrack) {
+      const feedbackResult = await handleCurrentTrackFeedback(initialChatIntent, currentPlaybackTrack, trimmed, signal)
+      if (feedbackResult.handled) {
+        return reply(feedbackResult.content, feedbackResult.tracks)
+      }
+    }
+
+    const active: ActiveChat = {
+      signal,
+      get canceled() {
+        return signal.aborted
+      },
+    }
+    const emitChunk = (chunk: string) => {
+      if (sender && !sender.isDestroyed()) sender.send('chat:stream:chunk', chunk)
+      runtimeEmit?.('runtime:chat-stream-chunk', { chunk })
+    }
+    if (pendingReply.action === 'answer_only') {
+      const started = Date.now()
+      let content = await streamPendingAnswerReply(trimmed, pendingReply, active, settings, emitChunk)
+      content = sanitizeAssistantOutput(content)
+      return reply(content.trim(), [], { durationMs: Date.now() - started })
+    }
+
+    const candidateStage = await prepareCandidateStage({
+      trimmed,
+      effectiveText,
+      initialChatIntent,
+      pendingReply,
+      pendingDirectSongReply,
+      pendingMusicEntityReply,
+      sessionFollowUp,
+      currentPlaybackTrack,
+      active,
+      signal,
+      reply,
+      attachSceneToTracks,
+      runtimeReport,
+    })
+    if (candidateStage.reply) return candidateStage.reply
+    if (!candidateStage.ready) return reply('我知道你是想听歌，但这次没拿到可播放的结果。')
+    return runRecommendationResponseStage({
+      trimmed,
       settings,
       active,
-      candidates: guardedCandidates,
-      authRequired,
-      followUpQuestion,
-      emitChunk,
-    }))
-
-    tracks.push(...await selectTracksForChatResponse({
-      content,
-      candidates: guardedCandidates,
-      targetCount,
-      explicit: countExplicit,
-      authRequired,
-      entityConstraint,
       signal,
-    }))
-    if (excludeCurrentTrack) {
-      const selected = excludeCurrentPlaybackTrack(tracks, currentPlaybackTrack)
-      tracks.splice(0, tracks.length, ...selected)
-    }
-    if (hasMusicActionIntent(recommendationIntent) && tracks.length === 0 && guardedCandidates.length > 0) {
-      tracks.push(...guardedCandidates.slice(0, targetCount))
-    }
-    if (hasMusicActionIntent(recommendationIntent) && tracks.length > 0) {
-      content = boundMusicActionContent(content, tracks)
-    }
-
-    if (!content.trim()) {
-      content = tracks.length > 0 ? '我先给你挑这首。' : '(没说话——我先想想,你接着说)'
-    }
-    if (requested.overLimit && tracks.length > 0 && !content.includes(OVER_LIMIT_RECOMMENDATION_LINE)) {
-      content = `${OVER_LIMIT_RECOMMENDATION_LINE}${content ? ` ${content}` : ''}`
-    }
-  } catch (error) {
-    if (signal.aborted) throw error
-    followUpQuestion = null
-    recordChatStreamError(error)
-    if (guardedCandidates.length > 0) {
-      tracks.push(...guardedCandidates.slice(0, targetCount))
-      content = fallbackRecommendationContent(tracks, OVER_LIMIT_RECOMMENDATION_LINE, requested.overLimit)
-    } else {
-      content = friendlyError(error)
-    }
-    emitChunk(content)
-  }
-
-  const finalTracks = attachSceneToTracks(tracks)
-  if (finalTracks.length > 0) {
-    clearPendingDirectSongState()
-    rememberChatMusicSession({
-      sourceText: trimmed,
-      intentKind: recommendationIntent.kind,
-      tracks: finalTracks,
-      artistQuery: recommendationIntent.artistQuery,
-      seedTitle: recommendationIntent.seedTitle,
-      affirmationAction: inferSessionAffirmationAction(content),
+      pendingReply,
+      candidate: candidateStage.ready,
+      currentPlaybackTrack,
+      emitChunk,
+      reply,
+      attachSceneToTracks,
+      runtimeReport,
     })
-  } else if (hasMusicActionIntent(recommendationIntent)) {
-    clearChatMusicSession()
-  } else {
-    armChatMusicSessionAffirmation(inferSessionAffirmationAction(content))
+  } catch (error) {
+    if (signal.aborted) throw new DOMException('任务已取消', 'AbortError')
+    const message = error instanceof Error ? error.message : '处理消息时出了问题'
+    return reply(`抱歉，刚才处理出了点状况：${message}`)
   }
-  runtimeReport?.({ phase: 'persist', current: 5, total: 5, message: '保存聊天结果' })
-  const result = reply(content.trim(), finalTracks, {
-    durationMs: Date.now() - started,
-    hints: authRequired ? { neteaseAuthRequired: true } : undefined,
-    persistTracks: true,
-  })
-  recordFollowUpQuestionAsked(followUpQuestion, result.message.id)
-  return result
 }

@@ -150,6 +150,7 @@ export function TrackCard({
   onPlay,
   onToggleFavorite,
   onFeedback,
+  onError,
   isCurrent = false,
   playbackStatus = 'idle',
   favorited = false,
@@ -157,9 +158,10 @@ export function TrackCard({
 }: {
   track: Track
   compact?: boolean
-  onPlay?: (track: Track) => void
-  onToggleFavorite?: (track: Track) => void
-  onFeedback?: (track: Track, action: 'more_like_this' | 'not_right') => void
+  onPlay?: (track: Track) => void | Promise<void>
+  onToggleFavorite?: (track: Track) => void | Promise<void>
+  onFeedback?: (track: Track, action: 'more_like_this' | 'not_right') => void | Promise<void>
+  onError?: (error: unknown, track: Track) => void
   isCurrent?: boolean
   playbackStatus?: PlaybackStatus
   favorited?: boolean
@@ -172,9 +174,16 @@ export function TrackCard({
   const actionTitle = !canPlay ? '暂无播放链接' : isPlaying ? '暂停' : isPaused ? '继续播放' : '播放'
   const stateClass = !canPlay ? 'unplayable' : isPlaying ? 'playing' : isPaused ? 'paused' : isLoading ? 'loading' : 'ready'
 
+  function runTrackAction(action: (() => void | Promise<void>) | undefined) {
+    Promise.resolve(action?.()).catch((error) => {
+      console.warn('[track-card] action failed', error)
+      onError?.(error, track)
+    })
+  }
+
   function handleAction() {
     if (!canPlay) return
-    onPlay?.(track)
+    runTrackAction(() => onPlay?.(track))
   }
 
   return (
@@ -211,7 +220,7 @@ export function TrackCard({
                   type="button"
                   title="多来这种"
                   aria-label="多来这种"
-                  onClick={() => onFeedback(track, 'more_like_this')}
+                  onClick={() => runTrackAction(() => onFeedback(track, 'more_like_this'))}
                 >
                   <ThumbsUp size={12} />
                 </button>
@@ -220,7 +229,7 @@ export function TrackCard({
                   type="button"
                   title="这首不对"
                   aria-label="这首不对"
-                  onClick={() => onFeedback(track, 'not_right')}
+                  onClick={() => runTrackAction(() => onFeedback(track, 'not_right'))}
                 >
                   <ThumbsDown size={12} />
                 </button>
@@ -232,7 +241,7 @@ export function TrackCard({
                 type="button"
                 title={favorited ? '取消收藏' : '收藏'}
                 aria-label={favorited ? '取消收藏' : '收藏'}
-                onClick={() => onToggleFavorite(track)}
+                onClick={() => runTrackAction(() => onToggleFavorite(track))}
               >
                 <Heart size={13} fill={favorited ? 'currentColor' : 'none'} />
               </button>

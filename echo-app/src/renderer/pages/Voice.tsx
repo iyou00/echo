@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { EchoApi, PlaybackState, Track } from '../../types/ipc'
-import type { AppPageProps } from '../../App'
+import type { AppPageProps } from '../appState'
 import { getVoiceLongAbsence, markVoiceSeen, pickVoiceIdleGreeting } from '../../data/voice-idle-greetings'
 import { pageLabels } from '../labels'
+import { sameTrack, trackIdentity } from '../../shared/trackIdentity'
 
 interface VoicePageProps extends AppPageProps {
   echo: EchoApi
@@ -61,18 +62,7 @@ function splitGreeting(text: string): { primary: string; secondary?: string } {
 }
 
 function isSameTrack(left: Track | null | undefined, right: Track | null | undefined) {
-  if (!left || !right) return false
-  const leftId = left.neteaseId ?? left.id
-  const rightId = right.neteaseId ?? right.id
-  if (leftId && rightId) return String(leftId) === String(rightId)
-  return left.title === right.title && left.artist === right.artist
-}
-
-function trackIdentity(track: Track | null | undefined) {
-  if (!track) return ''
-  const id = track.neteaseId ?? track.id
-  if (id) return `id:${id}`
-  return `meta:${track.title}::${track.artist}`
+  return sameTrack(left, right)
 }
 
 async function fadeVolume(
@@ -108,7 +98,6 @@ export function VoicePage({
   const audioContextRef = useRef<AudioContext | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null)
-  const ttsGainRef = useRef<GainNode | null>(null)
   const rafRef = useRef<number | null>(null)
   const musicTimerRef = useRef<number | null>(null)
   const restoreVolumeRef = useRef(100)
@@ -123,6 +112,7 @@ export function VoicePage({
   const speakingLockRef = useRef(false)
   const autoFailureCountRef = useRef(0)
   const lastAutoStartTokenRef = useRef(0)
+  const prevAudioUrlRef = useRef('')
   const [status, setStatus] = useState<VoiceStatus>('idle')
   const [text, setText] = useState('让我说一段?')
   const [idleGreeting, setIdleGreeting] = useState(() => pickVoiceIdleGreeting({ playbackState }))
@@ -132,6 +122,20 @@ export function VoicePage({
   const [notice, setNotice] = useState('')
   const parts = useMemo(() => splitByProgress(text, status === 'done' || status === 'text-only-done' ? 1 : progress), [text, progress, status])
   const statusLabel = status === 'generating' ? 'T H I N K I N G' : status === 'speaking' ? 'S P E A K I N G' : status === 'done' || status === 'text-only-done' ? 'D O N E' : 'S T A N D B Y'
+
+  function clearCurrentAudioUrl(updateState = true) {
+    if (prevAudioUrlRef.current.startsWith('blob:')) URL.revokeObjectURL(prevAudioUrlRef.current)
+    prevAudioUrlRef.current = ''
+    if (updateState) setAudioUrl('')
+  }
+
+  function setCurrentAudioUrl(url: string) {
+    if (prevAudioUrlRef.current.startsWith('blob:') && prevAudioUrlRef.current !== url) {
+      URL.revokeObjectURL(prevAudioUrlRef.current)
+    }
+    prevAudioUrlRef.current = url
+    setAudioUrl(url)
+  }
 
   useEffect(() => {
     playbackStateRef.current = playbackState
@@ -191,20 +195,21 @@ export function VoicePage({
     audioRef.current?.pause()
     musicStartedRef.current = false
     trackRef.current = null
-    setAudioUrl('')
+    clearCurrentAudioUrl(false)
     setProgress(0)
     setNotice('')
     setStatus('idle')
-    echo.playback.setVolume(restoreVolumeRef.current).then(setPlaybackState).catch(() => undefined)
+    echo.playback.setVolume(restoreVolumeRef.current).then(setPlaybackState).catch((error) => console.warn('[Voice] restore volume failed (playback change)', error))
   }, [echo, isActive, playbackState, setPlaybackState, setVoiceContinuous, voiceContinuous])
 
   useEffect(() => () => {
     fadeRunRef.current += 1
     if (musicTimerRef.current) window.clearTimeout(musicTimerRef.current)
     if (rafRef.current) window.cancelAnimationFrame(rafRef.current)
+    clearCurrentAudioUrl()
     audioRef.current?.pause()
     audioContextRef.current?.close().catch(() => undefined)
-    echo.playback.setVolume(restoreVolumeRef.current).then(setPlaybackState).catch(() => undefined)
+    echo.playback.setVolume(restoreVolumeRef.current).then(setPlaybackState).catch((error) => console.warn('[Voice] restore volume failed (unmount)', error))
   }, [echo, setPlaybackState])
 
   function stopTtsWave(reset = false) {
@@ -233,7 +238,6 @@ export function VoicePage({
         gainNode.connect(analyser)
         analyser.connect(context.destination)
         sourceRef.current = source
-        ttsGainRef.current = gainNode
         analyserRef.current = analyser
       }
       const analyser = analyserRef.current
@@ -282,6 +286,7 @@ export function VoicePage({
     setProgress(1)
     setStatus('done')
     const currentVolume = await echo.playback.getVolume().catch(() => 30)
+    if (fadeRunRef.current !== runId) return
     fadeVolumeRef.current = true
     try {
       await fadeVolume(echo, currentVolume, restoreVolumeRef.current, 1500, setPlaybackState, () => fadeRunRef.current !== runId)
@@ -304,7 +309,7 @@ export function VoicePage({
       setStatus('generating')
       setNotice('')
       setProgress(0)
-      setAudioUrl('')
+      clearCurrentAudioUrl()
       restoreVolumeRef.current = await echo.playback.getVolume()
 
       const segment = await echo.listening.generateSegment({ continuation: automatic || continuation })
@@ -322,7 +327,7 @@ export function VoicePage({
         setStatus('text-only-done')
         return
       }
-      setAudioUrl(segment.audioUrl)
+      setCurrentAudioUrl(segment.audioUrl)
       setStatus('speaking')
       window.setTimeout(() => audioRef.current?.play().catch(() => {
         setNotice('语音播放失败,文字已经保留。')
@@ -379,7 +384,7 @@ export function VoicePage({
     if (musicTimerRef.current) window.clearTimeout(musicTimerRef.current)
     stopTtsWave(true)
     audioRef.current?.pause()
-    echo.playback.setVolume(restoreVolumeRef.current).then(setPlaybackState).catch(() => undefined)
+    echo.playback.setVolume(restoreVolumeRef.current).then(setPlaybackState).catch((error) => console.warn('[Voice] restore volume failed (backToChat)', error))
     navigate('chat')
   }
 

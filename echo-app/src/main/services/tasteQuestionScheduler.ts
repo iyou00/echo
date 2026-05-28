@@ -22,7 +22,6 @@ import {
   parsePendingReplyAction,
   questionTrackLabel,
   ruleClassifyPendingReply,
-  type PendingQuestionReplyAction,
   type PendingQuestionReplyCapture,
 } from '../skills/intent/pendingReply'
 
@@ -139,7 +138,7 @@ async function llmClassifyPendingReply(text: string, question: TasteQuestion, si
 问题上下文:${JSON.stringify(question.context ?? {})}
 用户这句:${text}`,
       },
-    ], { temperature: 0, signal }),
+    ], { temperature: 0, signal, maxTokens: 100 }),
     FOLLOW_UP_CLASSIFIER_TIMEOUT_MS,
   )
   assertTasteQuestionActive(signal)

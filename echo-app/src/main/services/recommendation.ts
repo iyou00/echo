@@ -1,6 +1,6 @@
-import type { Track } from '../../types/ipc'
+import type { TasteProfile, Track } from '../../types/ipc'
 import { getRecommendationCache, setRecommendationCache } from '../db/recommendationCache'
-import { loadListenedTracksSince, loadRecentRecommendedTracks } from '../db/tracks'
+import { loadListenedTrackWindows, loadRecentRecommendedTracks } from '../db/tracks'
 import { getTasteProfile } from '../db/taste'
 import { filterPlayableTracks } from '../netease/music'
 import { readNeteaseCookie } from '../netease/auth'
@@ -28,7 +28,7 @@ import {
 } from './recommendation/intent'
 import {
   buildDirectionMemory,
-  genericDiscoveryScore,
+  genericDiscoveryScoreWithContext,
   matchesIntentFloor,
   scoreCandidate,
   scoreCandidateForTest,
@@ -41,6 +41,7 @@ import { NeteaseAuthRequiredError } from './recommendation/errors'
 import { buildRecommendationMemoryConstraints } from './recommendation/memoryConstraints'
 import { currentMusicCorrectionConstraintForQuery } from '../skills/music/correctionMemory'
 import { filterTracksByMusicEntity, mergeMusicEntityConstraints, type MusicEntityConstraint } from '../skills/music/verifier'
+import { createRecommendationDeterminismContext, stableShuffle, type RecommendationDeterminismContext } from './recommendation/deterministic'
 
 export {
   MAX_RECOMMENDATION_COUNT,
@@ -55,6 +56,7 @@ export type { IntentOverride, RecommendationIntent } from './recommendation/inte
 
 export interface RecommendationOptions {
   ignoreScene?: boolean
+  disableEntityInference?: boolean
   candidatePoolSize?: number
   /** @deprecated use candidatePoolSize */
   candidateCount?: number
@@ -94,8 +96,9 @@ function queryFingerprint(text: string): string {
     .slice(0, 48)
 }
 
-function buildCacheKey(intent: RecommendationIntent): string {
+function buildCacheKey(intent: RecommendationIntent, determinism?: Partial<RecommendationDeterminismContext>): string {
   return normalizeText(JSON.stringify({
+    daySeed: determinism?.daySeed,
     moods: intent.moods,
     scenes: intent.scenes,
     language: intent.language,
@@ -138,18 +141,19 @@ function withGenericReason(track: Track, index: number): Track {
   return { ...track, reason: track.reason ?? notes[index] ?? '这首从你的风格偏好里捞出来,现在听刚好。' }
 }
 
-async function recommendGenericDiscovery(intent: RecommendationIntent, options: RecommendationOptions, poolSize?: number): Promise<Track[]> {
+async function recommendGenericDiscovery(intent: RecommendationIntent, options: RecommendationOptions, poolSize: number | undefined, determinism: RecommendationDeterminismContext, profile: TasteProfile | null): Promise<Track[]> {
   reportRecommendationProgress(options, { phase: 'generic-discovery', current: 2, total: 5, message: '按画像召回泛推荐候选' })
   const recallIntent = intentForCandidatePool(intent, poolSize)
   const desiredCount = poolSize ?? intent.targetCount
-  const candidates = await fetchGenericDiscoveryCandidates(recallIntent, options.signal)
+  const candidates = await fetchGenericDiscoveryCandidates(recallIntent, options.signal, determinism, { profile })
   assertRecommendationActive(options.signal)
   const memory = buildDirectionMemory()
-  const constraints = buildRecommendationMemoryConstraints()
-  const lastDayKeys = trackIdentitySet(loadListenedTracksSince(24, 400))
-  const lastSevenDayKeys = trackIdentitySet(loadListenedTracksSince(24 * 7, 800))
+  const constraints = buildRecommendationMemoryConstraints(profile)
+  const listenedWindows = loadListenedTrackWindows(24 * 7, 800, 24, 400)
+  const lastDayKeys = trackIdentitySet(listenedWindows.recent)
+  const lastSevenDayKeys = trackIdentitySet(listenedWindows.history)
   const enriched = uniqueTracks(candidates.map((track) => ({ ...track, semantic: semanticForCandidate(track) })))
-    .map((track) => ({ track, score: genericDiscoveryScore(track, lastSevenDayKeys, memory, intent, constraints) }))
+    .map((track) => ({ track, score: genericDiscoveryScoreWithContext(track, lastSevenDayKeys, memory, determinism, intent, constraints) }))
     .sort((a, b) => b.score - a.score)
     .map((item) => item.track)
 
@@ -160,7 +164,7 @@ async function recommendGenericDiscovery(intent: RecommendationIntent, options: 
 
   for (const stage of stages) {
     if (stage.length === 0) continue
-    const playable = await filterPlayableTracks(shuffleTracks(stage), Math.max(20, desiredCount * 8), options.signal)
+    const playable = await filterPlayableTracks(stage, Math.max(20, desiredCount * 8), options.signal)
     assertRecommendationActive(options.signal)
     const picked = diversifyByArtist(uniqueTracks(playable), poolSize ? 2 : 1).slice(0, desiredCount).map(withGenericReason)
     if (picked.length) {
@@ -170,7 +174,7 @@ async function recommendGenericDiscovery(intent: RecommendationIntent, options: 
           moods: intent.moods,
           scenes: intent.scenes,
           source: track.recommendSource ?? 'search',
-          score: genericDiscoveryScore(track, lastSevenDayKeys, memory, intent, constraints),
+          score: genericDiscoveryScoreWithContext(track, lastSevenDayKeys, memory, determinism, intent, constraints),
         },
       }))
     }
@@ -208,13 +212,8 @@ function directSongCandidates(tracks: Track[], intent: RecommendationIntent): Tr
   return artistMatched.length ? artistMatched : intent.artistQuery ? [] : titleMatched
 }
 
-function shuffleTracks(tracks: Track[]): Track[] {
-  const items = [...tracks]
-  for (let index = items.length - 1; index > 0; index -= 1) {
-    const swap = Math.floor(Math.random() * (index + 1))
-    ;[items[index], items[swap]] = [items[swap], items[index]]
-  }
-  return items
+function shuffleTracks(tracks: Track[], seed: string): Track[] {
+  return stableShuffle(tracks, seed, (track) => `${track.title}:${track.artist}:${track.neteaseId ?? track.id ?? ''}`)
 }
 
 function constraintFromIntent(intent: RecommendationIntent): MusicEntityConstraint | undefined {
@@ -261,14 +260,17 @@ export const recommendationTestHelpers = {
 export async function recommendFromNetease(text: string, override?: IntentOverride, options: RecommendationOptions = {}): Promise<Track[]> {
   assertRecommendationActive(options.signal)
   if (!readNeteaseCookie()) throw new NeteaseAuthRequiredError()
-  const baseIntent = mergeIntent(parseIntent(text), options.ignoreScene ? undefined : sceneIntentOverride())
-  const intent = mergeIntent(baseIntent, validateIntentOverride(text, override ?? null) ?? undefined)
+  const inferEntities = !options.disableEntityInference
+  const baseIntent = mergeIntent(parseIntent(text, { inferEntities }), options.ignoreScene ? undefined : sceneIntentOverride())
+  const intent = mergeIntent(baseIntent, validateIntentOverride(text, override ?? null, { inferEntities }) ?? undefined)
+  const determinism = createRecommendationDeterminismContext()
   const poolSize = candidatePoolSize(options)
   const recallIntent = intentForCandidatePool(intent, poolSize)
   const desiredCount = poolSize ?? intent.targetCount
+  const profile = getTasteProfile()
   reportRecommendationProgress(options, { phase: 'intent', current: 1, total: 5, message: '解析推荐意图' })
   if (isGenericDiscoveryRequest(text, intent)) {
-    return recommendGenericDiscovery(intent, options, poolSize)
+    return recommendGenericDiscovery(intent, options, poolSize, determinism, profile)
   }
   const directSongRequest = isDirectSongRequest(text, intent)
   const allowCooldownFallback = Boolean(intent.seedTitle || intent.artistQuery || intent.sceneKey)
@@ -276,12 +278,12 @@ export async function recommendFromNetease(text: string, override?: IntentOverri
     if (!intent.seedTitle) return false
     return normalizeText(track.title).includes(normalizeText(intent.seedTitle))
   }
-  const cacheKey = buildCacheKey(intent)
-  const profile = getTasteProfile()
+  const cacheKey = buildCacheKey(intent, determinism)
   const memory = buildDirectionMemory()
   const constraints = buildRecommendationMemoryConstraints(profile)
-  const hardCooldownKeys = trackIdentitySet(loadListenedTracksSince(24, 500))
-  const recentKeys = trackIdentitySet([...loadRecentRecommendedTracks(120), ...loadListenedTracksSince(24 * 7, 900)])
+  const listenedWindows = loadListenedTrackWindows(24 * 7, 900, 24, 500)
+  const hardCooldownKeys = trackIdentitySet(listenedWindows.recent)
+  const recentKeys = trackIdentitySet([...loadRecentRecommendedTracks(120), ...listenedWindows.history])
   const cached = getRecommendationCache(cacheKey)
   reportRecommendationProgress(options, { phase: 'cache', current: 2, total: 5, message: '检查推荐缓存和冷却' })
   if (cached?.tracks.length && !poolSize) {
@@ -296,7 +298,7 @@ export async function recommendFromNetease(text: string, override?: IntentOverri
   }
 
   reportRecommendationProgress(options, { phase: 'recall', current: 3, total: 5, message: '召回网易云候选歌曲' })
-  const candidates = constrainByIntent(await fetchCandidates(recallIntent, options.signal), intent)
+  const candidates = constrainByIntent(await fetchCandidates(recallIntent, options.signal, determinism, { profile }), intent)
   assertRecommendationActive(options.signal)
   if (directSongRequest) {
     const directPool = directSongCandidates(candidates, intent)
@@ -322,7 +324,10 @@ export async function recommendFromNetease(text: string, override?: IntentOverri
     const lastResortArtistCandidates = allowCooldownFallback
       ? candidates.filter((track) => intent.artistQuery ? normalizeText(track.artist).includes(normalizeText(intent.artistQuery)) : true)
       : []
-    const playableArtistTracks = await filterPlayableTracks(shuffleTracks(artistCandidates.length ? artistCandidates : fallbackArtistCandidates.length ? fallbackArtistCandidates : lastResortArtistCandidates), desiredCount, options.signal)
+    const playableArtistTracks = await filterPlayableTracks(shuffleTracks(
+      artistCandidates.length ? artistCandidates : fallbackArtistCandidates.length ? fallbackArtistCandidates : lastResortArtistCandidates,
+      `${determinism.daySeed}:artist:${intent.query}:${intent.artistQuery ?? ''}:${desiredCount}`,
+    ), desiredCount, options.signal)
     assertRecommendationActive(options.signal)
     if (playableArtistTracks.length) {
       const picked = playableArtistTracks.slice(0, desiredCount).map((track) => ({

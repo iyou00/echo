@@ -1,4 +1,5 @@
 import type { ProfileDisplayModel, ProfileEvidenceLevel, ProfileEvidenceSource, TasteProfile, Track, TrackSemantic } from '../../types/ipc'
+import { trackIdentity as trackKey } from '../../shared/trackIdentity'
 import { getDb } from '../db'
 import { getFeedbackSignalCount, listTrackFeedback, type TrackFeedback } from '../db/feedback'
 import { getAllImportedTracks } from '../db/playlists'
@@ -84,10 +85,6 @@ function eraForYear(year?: number): string | null {
   return null
 }
 
-function trackKey(track: Track): string {
-  return semanticTrackKey(track)
-}
-
 function addWeighted(counts: Map<string, number>, key: string, value: number): void {
   if (!key) return
   counts.set(key, (counts.get(key) ?? 0) + value)
@@ -132,6 +129,29 @@ const LEGACY_PROFILE_NOTE_PATTERNS = [
   /它是导入歌单里的稳定坐标/,
 ]
 
+const PROFILE_WEIGHT = {
+  importedTrack: 0.35,
+  semanticBase: 2,
+  semanticArtistBase: 0.8,
+  playedFeedback: 0.9,
+  loopFeedback: 2,
+  favoriteFeedback: 2.4,
+  skipFeedback: -1.2,
+  positiveGenreFeedback: 0.8,
+  completedEventGenre: 0.85,
+  skippedEventGenre: -0.25,
+  neutralEventGenre: 0.25,
+  completedEventArtist: 0.55,
+  skippedEventArtist: -0.35,
+  neutralEventArtist: 0.15,
+  eventMood: 0.7,
+  eventGenreSemantic: 0.55,
+  signatureFeedback: 2,
+  signatureEvent: 0.45,
+  signatureFavorite: 4,
+  signatureLoop: 1.8,
+} as const
+
 function hasLegacyProfileNote(note?: string): boolean {
   return Boolean(note && LEGACY_PROFILE_NOTE_PATTERNS.some((pattern) => pattern.test(note)))
 }
@@ -175,116 +195,179 @@ function artistEvidence(stats: { imported: number; played: number; skipped: numb
   return { text: '还在观察', evidenceLevel: 'weak', source: 'fallback' }
 }
 
-function buildFallbackPortrait(topArtists: string[], topGenres: string[], signatureTracks: Track[]): string {
-  const artists = topArtists.slice(0, 3).join('、') || '这些歌'
-  const genres = topGenres.slice(0, 2).join('和') || '旋律性强的流行歌'
-  const firstTrack = signatureTracks[0]
-  const anchor = firstTrack ? `像《${firstTrack.title}》这种歌` : '那些旋律先到、情绪后到的歌'
-  return `我先从歌单里认出几个坐标: ${artists}。你的安全区大概在${genres}附近,要有旋律,也要有一句能留下来的表达。${anchor}对你来说像入口,它能把白天的噪音压低一点。等你多和我聊几次,我会把这些粗线条慢慢改细。`
+interface ArtistStats {
+  imported: number
+  played: number
+  skipped: number
+  looped: number
+  favorited: number
+  scenes: string[]
+  score: number
 }
 
-function buildProfileFromTracks(tracks: Track[]): TasteProfile {
-  const artistSeed = readArtistSeed()
-  const previous = getTasteProfile()
-  const semanticTracks = listSemantics()
-  const feedbackRows = listTrackFeedback()
-  const profileEvents = loadProfileTrackEvents()
-  const feedbackByKey = new Map(feedbackRows.map((item) => [item.trackKey, item]))
-  const semanticByKey = new Map(semanticTracks.map((track) => [trackKey(track), track.semantic]))
+interface ProfileBuildContext {
+  tracks: Track[]
+  artistSeed: Record<string, ArtistSeed>
+  semanticTracks: Array<{ title: string; artist: string; semantic: TrackSemantic }>
+  feedbackRows: TrackFeedback[]
+  profileEvents: ProfileTrackEvent[]
+  feedbackByKey: Map<string, TrackFeedback>
+  semanticByKey: Map<string, TrackSemantic>
+  eventsByKey: Map<string, ProfileTrackEvent[]>
+  genreCounts: Map<string, number>
+  moodCounts: Map<string, number>
+  eraCounts: Map<string, number>
+  genreArtists: Map<string, Map<string, number>>
+  artistStats: Map<string, ArtistStats>
+}
+
+function emptyArtistStats(): ArtistStats {
+  return { imported: 0, played: 0, skipped: 0, looped: 0, favorited: 0, scenes: [], score: 0 }
+}
+
+function statsFor(context: ProfileBuildContext, artist: string): ArtistStats {
+  const stats = context.artistStats.get(artist) ?? emptyArtistStats()
+  context.artistStats.set(artist, stats)
+  return stats
+}
+
+function addGenreArtistWeight(context: ProfileBuildContext, genre: string, artist: string, weight: number): void {
+  const genreArtistMap = context.genreArtists.get(genre) ?? new Map<string, number>()
+  genreArtistMap.set(artist, (genreArtistMap.get(artist) ?? 0) + weight)
+  context.genreArtists.set(genre, genreArtistMap)
+}
+
+function semanticForProfile(context: ProfileBuildContext, track: Track): TrackSemantic {
+  return context.semanticByKey.get(trackKey(track)) ?? track.semantic ?? inferTrackSemanticFallback(track)
+}
+
+function groupEventsByTrack(events: ProfileTrackEvent[]): Map<string, ProfileTrackEvent[]> {
   const eventsByKey = new Map<string, ProfileTrackEvent[]>()
-  for (const event of profileEvents) {
+  for (const event of events) {
     const key = trackKey(event.track)
     eventsByKey.set(key, [...(eventsByKey.get(key) ?? []), event])
   }
-  const genreCounts = new Map<string, number>()
-  const moodCounts = new Map<string, number>()
-  const eraCounts = new Map<string, number>()
-  const genreArtists = new Map<string, Map<string, number>>()
-  const artistStats = new Map<string, { imported: number; played: number; skipped: number; looped: number; favorited: number; scenes: string[]; score: number }>()
+  return eventsByKey
+}
 
-  function semanticFor(track: Track) {
-    return semanticByKey.get(trackKey(track)) ?? track.semantic ?? inferTrackSemanticFallback(track)
+function createProfileBuildContext(tracks: Track[]): ProfileBuildContext {
+  const semanticTracks = listSemantics()
+  const feedbackRows = listTrackFeedback()
+  const profileEvents = loadProfileTrackEvents()
+  return {
+    tracks,
+    artistSeed: readArtistSeed(),
+    semanticTracks,
+    feedbackRows,
+    profileEvents,
+    feedbackByKey: new Map(feedbackRows.map((item) => [item.trackKey, item])),
+    semanticByKey: new Map(semanticTracks.map((track) => [trackKey(track), track.semantic])),
+    eventsByKey: groupEventsByTrack(profileEvents),
+    genreCounts: new Map<string, number>(),
+    moodCounts: new Map<string, number>(),
+    eraCounts: new Map<string, number>(),
+    genreArtists: new Map<string, Map<string, number>>(),
+    artistStats: new Map<string, ArtistStats>(),
   }
+}
 
-  for (const track of tracks) {
-    const seed = artistSeed[track.artist]
-    const stats = artistStats.get(track.artist) ?? { imported: 0, played: 0, skipped: 0, looped: 0, favorited: 0, scenes: [], score: 0 }
+function applyImportedTrackSignals(context: ProfileBuildContext): void {
+  for (const track of context.tracks) {
+    const seed = context.artistSeed[track.artist]
+    const stats = statsFor(context, track.artist)
     stats.imported += 1
-    stats.score += 0.35
-    artistStats.set(track.artist, stats)
+    stats.score += PROFILE_WEIGHT.importedTrack
     for (const genre of seed?.genre ?? ['流行']) {
       const normalized = normalizedGenre(genre)
-      addWeighted(genreCounts, normalized, 0.35)
-      const genreArtistMap = genreArtists.get(normalized) ?? new Map<string, number>()
-      genreArtistMap.set(track.artist, (genreArtistMap.get(track.artist) ?? 0) + 0.35)
-      genreArtists.set(normalized, genreArtistMap)
+      addWeighted(context.genreCounts, normalized, PROFILE_WEIGHT.importedTrack)
+      addGenreArtistWeight(context, normalized, track.artist, PROFILE_WEIGHT.importedTrack)
     }
-    for (const mood of seed?.mood ?? ['calm']) moodCounts.set(mood, (moodCounts.get(mood) ?? 0) + 1)
+    for (const mood of seed?.mood ?? ['calm']) context.moodCounts.set(mood, (context.moodCounts.get(mood) ?? 0) + 1)
     const era = eraForYear(track.year)
-    if (era) eraCounts.set(era, (eraCounts.get(era) ?? 0) + 1)
+    if (era) context.eraCounts.set(era, (context.eraCounts.get(era) ?? 0) + 1)
   }
+}
 
-  for (const track of semanticTracks) {
-    const feedback = feedbackByKey.get(trackKey(track))
+function applySemanticTrackSignals(context: ProfileBuildContext): void {
+  for (const track of context.semanticTracks) {
+    const feedback = context.feedbackByKey.get(trackKey(track))
     const behaviorWeight = Math.max(0, Math.min(3, feedback?.score ?? 0))
     for (const rawGenre of track.semantic.genres) {
       const genre = normalizedGenre(rawGenre, track.semantic.language)
-      addWeighted(genreCounts, genre, 2 + behaviorWeight)
-      const artists = genreArtists.get(genre) ?? new Map<string, number>()
-      artists.set(track.artist, (artists.get(track.artist) ?? 0) + 1 + behaviorWeight)
-      genreArtists.set(genre, artists)
+      addWeighted(context.genreCounts, genre, PROFILE_WEIGHT.semanticBase + behaviorWeight)
+      addGenreArtistWeight(context, genre, track.artist, 1 + behaviorWeight)
     }
-    for (const mood of track.semantic.moods) moodCounts.set(mood, (moodCounts.get(mood) ?? 0) + 2 + behaviorWeight)
-    const stats = artistStats.get(track.artist) ?? { imported: 0, played: 0, skipped: 0, looped: 0, favorited: 0, scenes: [], score: 0 }
-    stats.score += 0.8 + behaviorWeight
-    artistStats.set(track.artist, stats)
+    for (const mood of track.semantic.moods) context.moodCounts.set(mood, (context.moodCounts.get(mood) ?? 0) + PROFILE_WEIGHT.semanticBase + behaviorWeight)
+    statsFor(context, track.artist).score += PROFILE_WEIGHT.semanticArtistBase + behaviorWeight
   }
+}
 
-  for (const feedback of feedbackRows) {
+function applyFeedbackSignals(context: ProfileBuildContext): void {
+  for (const feedback of context.feedbackRows) {
     const artist = feedback.track.artist
-    const semantic = semanticFor(feedback.track)
+    const semantic = semanticForProfile(context, feedback.track)
     const positiveWeight = Math.max(0, Math.min(4, feedback.score))
-    const stats = artistStats.get(artist) ?? { imported: 0, played: 0, skipped: 0, looped: 0, favorited: 0, scenes: [], score: 0 }
+    const stats = statsFor(context, artist)
     stats.played += feedback.playCount
     stats.skipped += feedback.skipCount
     stats.looped += feedback.loopCount
     stats.favorited += feedback.favoriteCount
-    stats.score += feedback.playCount * 0.9 + feedback.loopCount * 2 + feedback.favoriteCount * 2.4 - feedback.skipCount * 1.2
-    artistStats.set(artist, stats)
+    stats.score += feedback.playCount * PROFILE_WEIGHT.playedFeedback
+      + feedback.loopCount * PROFILE_WEIGHT.loopFeedback
+      + feedback.favoriteCount * PROFILE_WEIGHT.favoriteFeedback
+      + feedback.skipCount * PROFILE_WEIGHT.skipFeedback
     if (positiveWeight > 0) {
-      for (const rawGenre of semantic.genres) addWeighted(genreCounts, normalizedGenre(rawGenre, semantic.language), positiveWeight * 0.8)
-      for (const mood of semantic.moods) addWeighted(moodCounts, mood, positiveWeight)
+      for (const rawGenre of semantic.genres) addWeighted(context.genreCounts, normalizedGenre(rawGenre, semantic.language), positiveWeight * PROFILE_WEIGHT.positiveGenreFeedback)
+      for (const mood of semantic.moods) addWeighted(context.moodCounts, mood, positiveWeight)
     }
   }
+}
 
-  for (const event of profileEvents) {
+function applyProfileEventSignals(context: ProfileBuildContext): void {
+  for (const event of context.profileEvents) {
     const artist = event.track.artist
-    const semantic = semanticFor(event.track)
-    const eventWeight = event.queueStatus === 'completed' ? 0.85 : event.queueStatus === 'skipped' ? -0.25 : 0.25
-    const stats = artistStats.get(artist) ?? { imported: 0, played: 0, skipped: 0, looped: 0, favorited: 0, scenes: [], score: 0 }
-    stats.score += event.queueStatus === 'completed' ? 0.55 : event.queueStatus === 'skipped' ? -0.35 : 0.15
+    const semantic = semanticForProfile(context, event.track)
+    const eventWeight = event.queueStatus === 'completed'
+      ? PROFILE_WEIGHT.completedEventGenre
+      : event.queueStatus === 'skipped'
+        ? PROFILE_WEIGHT.skippedEventGenre
+        : PROFILE_WEIGHT.neutralEventGenre
+    const stats = statsFor(context, artist)
+    stats.score += event.queueStatus === 'completed'
+      ? PROFILE_WEIGHT.completedEventArtist
+      : event.queueStatus === 'skipped'
+        ? PROFILE_WEIGHT.skippedEventArtist
+        : PROFILE_WEIGHT.neutralEventArtist
     stats.scenes.push(...(event.track.profileEvidence?.scenes ?? []))
-    artistStats.set(artist, stats)
-    for (const mood of event.track.profileEvidence?.moods ?? []) moodCounts.set(mood, (moodCounts.get(mood) ?? 0) + 0.7)
+    for (const mood of event.track.profileEvidence?.moods ?? []) context.moodCounts.set(mood, (context.moodCounts.get(mood) ?? 0) + PROFILE_WEIGHT.eventMood)
     if (eventWeight > 0) {
-      for (const rawGenre of semantic.genres) addWeighted(genreCounts, normalizedGenre(rawGenre, semantic.language), eventWeight * 0.55)
-      for (const mood of semantic.moods) addWeighted(moodCounts, mood, eventWeight)
+      for (const rawGenre of semantic.genres) addWeighted(context.genreCounts, normalizedGenre(rawGenre, semantic.language), eventWeight * PROFILE_WEIGHT.eventGenreSemantic)
+      for (const mood of semantic.moods) addWeighted(context.moodCounts, mood, eventWeight)
     }
   }
+}
 
-  const totalGenre = Math.max(1, Array.from(genreCounts.values()).reduce((sum, value) => sum + value, 0))
-  const totalMood = Math.max(1, Array.from(moodCounts.values()).reduce((sum, value) => sum + value, 0))
-  const totalEra = Math.max(1, Array.from(eraCounts.values()).reduce((sum, value) => sum + value, 0))
-  const maxArtistScore = Math.max(1, ...Array.from(artistStats.values()).map((item) => item.score))
-  const topArtists = Array.from(artistStats.entries()).sort((a, b) => b[1].score - a[1].score).slice(0, 8).map(([name, stats]) => {
-    const evidence = artistEvidence(stats, artistSeed[name])
+function applyProfileSignals(context: ProfileBuildContext): void {
+  applyImportedTrackSignals(context)
+  applySemanticTrackSignals(context)
+  applyFeedbackSignals(context)
+  applyProfileEventSignals(context)
+}
+
+function buildTopArtists(context: ProfileBuildContext): TasteProfile['artists'] {
+  const maxArtistScore = Math.max(1, ...Array.from(context.artistStats.values()).map((item) => item.score))
+  return Array.from(context.artistStats.entries()).sort((a, b) => b[1].score - a[1].score).slice(0, 8).map(([name, stats]) => {
+    const evidence = artistEvidence(stats, context.artistSeed[name])
     return {
       name,
       affinity: clamp(Math.max(0.08, stats.score / maxArtistScore)),
       notes: evidence.text,
     }
   })
-  const topGenres = topEntries(genreCounts, 8).map(([name, count]) => {
+}
+
+function buildTopGenres(context: ProfileBuildContext, previous: TasteProfile | null, totalGenre: number): TasteProfile['genres'] {
+  return topEntries(context.genreCounts, 8).map(([name, count]) => {
     const trend = (() => {
       const last = previous?.genres.find((genre) => genre.name === name)?.weight ?? 0
       const next = count / totalGenre
@@ -298,29 +381,35 @@ function buildProfileFromTracks(tracks: Track[]): TasteProfile {
       trend,
     }
   })
-  const moods = topEntries(moodCounts, 8).map(([tag, count]) => ({
+}
+
+function buildMoodItems(context: ProfileBuildContext, totalMood: number, topArtists: TasteProfile['artists']): TasteProfile['moods'] {
+  return topEntries(context.moodCounts, 8).map(([tag, count]) => ({
     tag,
     frequency: clamp(count / totalMood),
     signature_artists: topArtists.slice(0, 3).map((artist) => artist.name),
   }))
+}
+
+function buildSignatureTracks(context: ProfileBuildContext): Track[] {
   const candidateMap = new Map<string, Track>()
-  for (const track of [...tracks, ...semanticTracks, ...feedbackRows.map((item) => item.track), ...profileEvents.map((event) => event.track)]) {
+  for (const track of [...context.tracks, ...context.semanticTracks, ...context.feedbackRows.map((item) => item.track), ...context.profileEvents.map((event) => event.track)]) {
     if (track.title && track.artist && !track.title.includes('待补充')) candidateMap.set(trackKey(track), track)
   }
-  const signatureTracks = Array.from(candidateMap.values())
+  return Array.from(candidateMap.values())
     .map((track) => {
       const key = trackKey(track)
-      const feedback = feedbackByKey.get(key)
-      const events = eventsByKey.get(key) ?? []
-      const semantic = semanticByKey.get(key)
+      const feedback = context.feedbackByKey.get(key)
+      const events = context.eventsByKey.get(key) ?? []
+      const semantic = context.semanticByKey.get(key)
       const evidence = signatureEvidence(feedback, events, semantic?.moods[0])
       const score =
-        (feedback?.score ?? 0) * 2 +
-        events.length * 0.45 +
-        (feedback?.favoriteCount ? 4 : 0) +
-        (feedback?.loopCount ?? 0) * 1.8 +
+        (feedback?.score ?? 0) * PROFILE_WEIGHT.signatureFeedback +
+        events.length * PROFILE_WEIGHT.signatureEvent +
+        (feedback?.favoriteCount ? PROFILE_WEIGHT.signatureFavorite : 0) +
+        (feedback?.loopCount ?? 0) * PROFILE_WEIGHT.signatureLoop +
         (semantic?.confidence ?? 0) +
-        (tracks.some((item) => trackKey(item) === key) ? 0.35 : 0)
+        (context.tracks.some((item) => trackKey(item) === key) ? PROFILE_WEIGHT.importedTrack : 0)
       return {
         track: {
           ...track,
@@ -332,13 +421,13 @@ function buildProfileFromTracks(tracks: Track[]): TasteProfile {
     .sort((a, b) => b.score - a.score)
     .slice(0, 7)
     .map((item) => item.track)
+}
 
-  const topArtistNames = topArtists.map((artist) => artist.name)
-  const topGenreNames = topGenres.map((genre) => genre.name)
-  const display: ProfileDisplayModel = {
+function buildProfileDisplay(context: ProfileBuildContext, signatureTracks: Track[], topArtists: TasteProfile['artists'], topGenres: TasteProfile['genres'], moods: TasteProfile['moods']): ProfileDisplayModel {
+  return {
     signatureItems: signatureTracks.map((track) => {
       const key = trackKey(track)
-      const evidence = signatureEvidence(feedbackByKey.get(key), eventsByKey.get(key) ?? [], semanticByKey.get(key)?.moods[0])
+      const evidence = signatureEvidence(context.feedbackByKey.get(key), context.eventsByKey.get(key) ?? [], context.semanticByKey.get(key)?.moods[0])
       return {
         track: { ...track, reason: evidence.text },
         note: evidence.text,
@@ -348,7 +437,7 @@ function buildProfileFromTracks(tracks: Track[]): TasteProfile {
       }
     }),
     genreItems: topGenres.map((genre) => {
-      const representativeArtists = topEntries(genreArtists.get(genre.name) ?? new Map<string, number>(), 3).map(([artist]) => artist)
+      const representativeArtists = topEntries(context.genreArtists.get(genre.name) ?? new Map<string, number>(), 3).map(([artist]) => artist)
       const evidence = genreNote(genre.name, genre.weight, genre.trend, representativeArtists)
       return {
         name: genre.name,
@@ -361,8 +450,8 @@ function buildProfileFromTracks(tracks: Track[]): TasteProfile {
       }
     }),
     artistItems: topArtists.map((artist) => {
-      const stats = artistStats.get(artist.name) ?? { imported: 0, played: 0, skipped: 0, looped: 0, favorited: 0, scenes: [], score: 0 }
-      const evidence = artistEvidence(stats, artistSeed[artist.name])
+      const stats = context.artistStats.get(artist.name) ?? emptyArtistStats()
+      const evidence = artistEvidence(stats, context.artistSeed[artist.name])
       return {
         name: artist.name,
         affinity: artist.affinity,
@@ -378,12 +467,67 @@ function buildProfileFromTracks(tracks: Track[]): TasteProfile {
       source: 'semantic',
     })),
   }
+}
+
+function buildFallbackPortrait(topArtists: string[], topGenres: string[], signatureTracks: Track[]): string {
+  const artists = topArtists.slice(0, 3).join('、') || '这些歌'
+  const genres = topGenres.slice(0, 2).join('和') || '旋律性强的流行歌'
+  const firstTrack = signatureTracks[0]
+  const anchor = firstTrack ? `像《${firstTrack.title}》这种歌` : '那些旋律先到、情绪后到的歌'
+  return `我先从歌单里认出几个坐标: ${artists}。你的安全区大概在${genres}附近,要有旋律,也要有一句能留下来的表达。${anchor}对你来说像入口,它能把白天的噪音压低一点。等你多和我聊几次,我会把这些粗线条慢慢改细。`
+}
+
+function clampDiscoveryAppetite(value: number): number {
+  return Math.max(0.25, Math.min(0.8, Number(value.toFixed(2))))
+}
+
+function buildDiscoveryAppetite(): number {
+  const feedback = listTrackFeedback(200)
+  const totals = feedback.reduce(
+    (acc, item) => ({
+      plays: acc.plays + item.playCount,
+      skips: acc.skips + item.skipCount,
+      loops: acc.loops + item.loopCount,
+      favorites: acc.favorites + item.favoriteCount,
+      completion: acc.completion + (item.lastCompletion ?? 0),
+      completionCount: acc.completionCount + (typeof item.lastCompletion === 'number' ? 1 : 0),
+    }),
+    { plays: 0, skips: 0, loops: 0, favorites: 0, completion: 0, completionCount: 0 },
+  )
+  const signalCount = totals.plays + totals.skips + totals.loops + totals.favorites
+  if (signalCount < 8) return 0.5
+
+  const skipRate = totals.skips / Math.max(1, totals.plays + totals.skips)
+  const strongAffinityRate = (totals.loops + totals.favorites) / Math.max(1, signalCount)
+  const completionAvg = totals.completionCount > 0 ? totals.completion / totals.completionCount : 0.65
+  const settledListeningPenalty = completionAvg >= 0.82 ? 0.04 : 0
+  return clampDiscoveryAppetite(0.5 + skipRate * 0.32 - strongAffinityRate * 0.18 - settledListeningPenalty)
+}
+
+function shiftDiscoveryAppetite(profile: TasteProfile, delta: number): void {
+  profile.discovery_appetite = clampDiscoveryAppetite((profile.discovery_appetite ?? 0.5) + delta)
+}
+
+function buildProfileFromTracks(tracks: Track[]): TasteProfile {
+  const previous = getTasteProfile()
+  const context = createProfileBuildContext(tracks)
+  applyProfileSignals(context)
+  const totalGenre = Math.max(1, Array.from(context.genreCounts.values()).reduce((sum, value) => sum + value, 0))
+  const totalMood = Math.max(1, Array.from(context.moodCounts.values()).reduce((sum, value) => sum + value, 0))
+  const totalEra = Math.max(1, Array.from(context.eraCounts.values()).reduce((sum, value) => sum + value, 0))
+  const topArtists = buildTopArtists(context)
+  const topGenres = buildTopGenres(context, previous, totalGenre)
+  const moods = buildMoodItems(context, totalMood, topArtists)
+  const signatureTracks = buildSignatureTracks(context)
+  const topArtistNames = topArtists.map((artist) => artist.name)
+  const topGenreNames = topGenres.map((genre) => genre.name)
+  const display = buildProfileDisplay(context, signatureTracks, topArtists, topGenres, moods)
   const profile: TasteProfile = {
     genres: topGenres,
     artists: topArtists,
     moods,
-    era_preference: Object.fromEntries(Array.from(eraCounts.entries()).map(([era, count]) => [era, clamp(count / totalEra)])),
-    discovery_appetite: 0.5,
+    era_preference: Object.fromEntries(Array.from(context.eraCounts.entries()).map(([era, count]) => [era, clamp(count / totalEra)])),
+    discovery_appetite: buildDiscoveryAppetite(),
     anti_patterns: [] as string[],
     signature_tracks: signatureTracks,
     display,
@@ -845,7 +989,7 @@ export async function regeneratePortrait(options: RegeneratePortraitOptions = {}
       { role: 'system', content: `${buildSoulPolicyPrompt('portrait')}\n\n${prompt}` },
       { role: 'user', content: userPrompt },
     ]
-    const response = await completeChat(settings, messages, { temperature: 0.9, signal: options.signal })
+    const response = await completeChat(settings, messages, { temperature: 0.9, signal: options.signal, maxTokens: 800 })
     assertPortraitActive(options.signal)
     let parsed = parseJsonObject<PortraitResponse>(response)
     const issues = parsed?.portrait ? portraitV2Issues(parsed.portrait, profile) : ['没有返回 portrait']
@@ -860,7 +1004,7 @@ export async function regeneratePortrait(options: RegeneratePortraitOptions = {}
           role: 'user',
           content: `上一版没有通过画像 checklist: ${issues.join('；')}${artistHint}\n请重写一次,继续严格返回 JSON。`,
         },
-      ], { temperature: 0.9, signal: options.signal })
+      ], { temperature: 0.9, signal: options.signal, maxTokens: 800 })
       assertPortraitActive(options.signal)
       const retryParsed = parseJsonObject<PortraitResponse>(retryResponse)
       if (retryParsed?.portrait) {
@@ -936,6 +1080,7 @@ export async function applySignal(kind: string, payload: Record<string, unknown>
     const existing = profile.artists.find((artist) => artist.name === target)
     if (existing) existing.affinity = clamp(existing.affinity - strength)
     if (!profile.anti_patterns.includes(target)) profile.anti_patterns.push(target)
+    shiftDiscoveryAppetite(profile, 0.04)
   }
 
   if (kind === 'like_genre') {
@@ -955,6 +1100,7 @@ export async function applySignal(kind: string, payload: Record<string, unknown>
       existing.trend = 'down'
     }
     if (!profile.anti_patterns.includes(target)) profile.anti_patterns.push(target)
+    shiftDiscoveryAppetite(profile, 0.04)
   }
 
   if (kind === 'reinforce_vibe' && target) {
@@ -993,6 +1139,7 @@ export async function applySignal(kind: string, payload: Record<string, unknown>
         if (existing) existing.frequency = clamp(existing.frequency - Math.max(0.005, strength / 2))
       }
     }
+    shiftDiscoveryAppetite(profile, 0.03)
   }
 
   if (kind === 'looped') {
@@ -1007,6 +1154,7 @@ export async function applySignal(kind: string, payload: Record<string, unknown>
       }
     }
     if (semantic) applySemanticBoost(profile, semantic, Math.max(0.03, strength), 3)
+    shiftDiscoveryAppetite(profile, -0.02)
   }
 
   if (kind === 'favorited') {
@@ -1036,11 +1184,12 @@ export async function applySignal(kind: string, payload: Record<string, unknown>
       }
     }
     if (semantic) applySemanticBoost(profile, semantic, Math.max(0.05, strength), 4)
+    shiftDiscoveryAppetite(profile, -0.03)
   }
 
   if (kind === 'event_started' || kind === 'correct_assumption') {
     getDb()
-      .prepare('INSERT INTO events (user_id, kind, content, confidence, weight, started_at) VALUES (1, ?, ?, ?, ?, CURRENT_TIMESTAMP)')
+      .prepare('INSERT INTO events (user_id, kind, content, confidence, weight, started_at) VALUES (current_user_id(), ?, ?, ?, ?, CURRENT_TIMESTAMP)')
       .run(kind === 'event_started' ? 'context' : 'correction', target || String(payload.note ?? '用户修正了 Echo 的判断'), 0.7, 0.8)
     if (kind === 'correct_assumption') clearRecommendationCache()
   }
@@ -1050,7 +1199,7 @@ export async function applySignal(kind: string, payload: Record<string, unknown>
       .prepare(
         `UPDATE events
          SET expected_end_at = CURRENT_TIMESTAMP, weight = 0.1
-         WHERE user_id = 1 AND content LIKE ? AND expected_end_at IS NULL`,
+         WHERE user_id = current_user_id() AND content LIKE ? AND expected_end_at IS NULL`,
       )
       .run(`%${target}%`)
   }

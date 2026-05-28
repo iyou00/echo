@@ -1,4 +1,4 @@
-import fs from 'node:fs'
+import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { getDb } from '../db'
 import { getSettings } from '../db/settings'
@@ -35,7 +35,7 @@ function getTodayConversations(): ConversationRow[] {
     .prepare(`
       SELECT role, content, created_at
       FROM conversations
-      WHERE user_id = 1
+      WHERE user_id = current_user_id()
         AND date(created_at, 'localtime') = date('now', 'localtime')
       ORDER BY created_at ASC, id ASC
     `)
@@ -47,7 +47,7 @@ function getTodayTracks(): TrackRow[] {
     .prepare(`
       SELECT title, artist, listened_at, meta_json
       FROM tracks_listened
-      WHERE user_id = 1
+      WHERE user_id = current_user_id()
         AND date(listened_at, 'localtime') = date('now', 'localtime')
       ORDER BY listened_at ASC, id ASC
     `)
@@ -85,6 +85,20 @@ Echo 今日推荐:${trackLine}
 
 const SEAL_LLM_TIMEOUT_MS = 5000
 
+async function writeFileAtomic(target: string, content: string): Promise<void> {
+  const dir = path.dirname(target)
+  const temp = path.join(dir, `.${path.basename(target)}.${process.pid}.${Date.now()}.tmp`)
+  await fsp.writeFile(temp, content, 'utf8')
+  try {
+    await fsp.rename(temp, target)
+  } catch (error) {
+    await fsp.unlink(temp).catch((cleanupError) => {
+      console.warn('[daySeal] failed to remove temp file', cleanupError)
+    })
+    throw error
+  }
+}
+
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve(null), ms)
@@ -115,7 +129,7 @@ ${conversations.map((item) => `${item.created_at} ${item.role}: ${item.content}`
 今日推荐:
 ${tracks.map((track) => `${track.listened_at} ${track.title} - ${track.artist}`).join('\n')}`,
       },
-    ]),
+    ], { maxTokens: 200 }),
     SEAL_LLM_TIMEOUT_MS,
   )
   if (typeof content === 'string' && content.trim()) return content.trim()
@@ -136,19 +150,19 @@ export async function archiveDaySeal(): Promise<void> {
 ${content}
 `
 
-  if (fs.existsSync(target)) {
-    const previous = fs.readFileSync(target, 'utf8')
+  const previous = await fsp.readFile(target, 'utf8').catch(() => null)
+  if (previous !== null) {
     if (previous.includes(content.slice(0, 80))) return
-    fs.writeFileSync(target, `${previous.trim()}
+    await writeFileAtomic(target, `${previous.trim()}
 
 ---
 
 ${content}
-`, 'utf8')
+`)
     invalidateSealCache()
     return
   }
-  fs.writeFileSync(target, section, 'utf8')
+  await writeFileAtomic(target, section)
   invalidateSealCache()
 }
 
@@ -160,49 +174,50 @@ interface SealCacheEntry {
 }
 
 let sealCache: SealCacheEntry | null = null
+let sealRefresh: Promise<string> | null = null
 
-/**
- * 取最近一份 day seal 摘要内容。
- * 频繁路径(每次 chat / 每次 listening / 每次 carePing 都会被读)，因此引入 mtime 缓存：
- * - 每次拿到目录 listing 就取最新文件名 + mtime；
- * - 文件名/mtime 与缓存一致就直接返回（避免一次 readFileSync）；
- * - 文件改名 / 内容变化 / 缓存第一次构建时才真正读盘。
- */
-export function getMostRecentSeal(): string {
+async function refreshMostRecentSealCache(): Promise<string> {
   const dir = getSealsDir()
-  let files: string[]
   try {
-    files = fs.readdirSync(dir).filter((file) => /^\d{4}-\d{2}-\d{2}\.md$/.test(file)).sort().reverse()
-  } catch {
-    return ''
-  }
-  const filename = files[0]
-  if (!filename) {
-    sealCache = null
-    return ''
-  }
-
-  const fullPath = path.join(dir, filename)
-  let mtimeMs = 0
-  try {
-    mtimeMs = fs.statSync(fullPath).mtimeMs
-  } catch {
-    sealCache = null
-    return ''
-  }
-
-  if (sealCache && sealCache.fullPath === fullPath && sealCache.mtimeMs === mtimeMs) {
-    return sealCache.content
-  }
-
-  try {
-    const content = fs.readFileSync(fullPath, 'utf8').slice(0, 2500)
-    sealCache = { filename, fullPath, mtimeMs, content }
+    const files = (await fsp.readdir(dir))
+      .filter((file) => /^\d{4}-\d{2}-\d{2}\.md$/.test(file))
+      .sort()
+      .reverse()
+    const filename = files[0]
+    if (!filename) {
+      sealCache = null
+      return ''
+    }
+    const fullPath = path.join(dir, filename)
+    const stat = await fsp.stat(fullPath)
+    if (sealCache && sealCache.fullPath === fullPath && sealCache.mtimeMs === stat.mtimeMs) {
+      return sealCache.content
+    }
+    const content = (await fsp.readFile(fullPath, 'utf8')).slice(0, 2500)
+    sealCache = { filename, fullPath, mtimeMs: stat.mtimeMs, content }
     return content
   } catch {
     sealCache = null
     return ''
   }
+}
+
+export function warmMostRecentSealCache(): Promise<string> {
+  sealRefresh ??= refreshMostRecentSealCache().finally(() => {
+    sealRefresh = null
+  })
+  return sealRefresh
+}
+
+/**
+ * 取最近一份 day seal 摘要内容。
+ * 频繁路径(每次 chat / 每次 listening / 每次 carePing 都会被读)，这里优先返回内存快照。
+ * 缓存未命中时触发异步预热，本次调用返回空字符串，避免在聊天热路径同步扫目录和读文件。
+ */
+export function getMostRecentSeal(): string {
+  if (sealCache) return sealCache.content
+  void warmMostRecentSealCache()
+  return ''
 }
 
 /**
