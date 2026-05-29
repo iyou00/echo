@@ -629,23 +629,6 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
               <Section label="M O O D">
                 <div className="moods-container">
                   <div className="mood-cloud" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 10px', alignItems: 'baseline' }}>
-                    <span 
-                      className={`mood-cloud-tag ${activeMoodFilter === 'all' ? 'active' : ''}`}
-                      onClick={() => setActiveMoodFilter('all')}
-                      style={{
-                        '--mood-size': '12px',
-                        '--mood-opacity': '0.7',
-                        '--mood-x': '0px',
-                        '--mood-y': '0px',
-                        fontFamily: 'var(--font-mono)',
-                        padding: '4px 10px',
-                        borderRadius: '14px',
-                        backgroundColor: 'var(--bg-secondary)',
-                        fontSize: '11px'
-                      } as CSSProperties}
-                    >
-                      A L L · 全部代表曲
-                    </span>
                     {moodItems.map((mood, index) => {
                       const isSelected = activeMoodFilter === mood.tag
                       const baseStyle = moodCloudStyle(mood, index)
