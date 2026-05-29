@@ -195,6 +195,40 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
     if (explicitArtistsSet.has(nameLower)) return false
     return true
   })
+
+  const rawDisplayedGenres = genreItemsFiltered.slice(0, 5)
+  const normalizedPercentages = (() => {
+    const weights = rawDisplayedGenres.map((g) => g.weight)
+    if (weights.length === 0) return []
+    const total = weights.reduce((a, b) => a + b, 0)
+    if (total === 0) {
+      const base = Math.floor(100 / weights.length)
+      const res = Array(weights.length).fill(base)
+      const rem = 100 - base * weights.length
+      for (let i = 0; i < rem; i++) res[i] += 1
+      return res
+    }
+    const rounded = weights.map((w) => Math.round((w / total) * 100))
+    const sum = rounded.reduce((a, b) => a + b, 0)
+    const diff = 100 - sum
+    if (diff !== 0) {
+      let maxIdx = 0
+      let maxVal = -1
+      for (let i = 0; i < weights.length; i++) {
+        if (weights[i] > maxVal) {
+          maxVal = weights[i]
+          maxIdx = i
+        }
+      }
+      rounded[maxIdx] += diff
+    }
+    return rounded
+  })()
+
+  const displayedGenres = rawDisplayedGenres.map((genre, idx) => ({
+    ...genre,
+    displayPercent: normalizedPercentages[idx] ?? 0
+  }))
   
   const moodItems = profile
     ? (display?.moodItems?.length ? display.moodItems : profile.moods.slice(0, 6).map((mood) => ({ tag: mood.tag, frequency: mood.frequency, evidenceLevel: 'weak' as const, source: 'fallback' as const })))
@@ -637,18 +671,18 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
             </Section>
 
             {/* 章 8 · 爱听流派 (GENRE) */}
-            {genreItemsFiltered.length > 0 && (
+            {displayedGenres.length > 0 && (
               <Section label="G E N R E">
-                {genreItemsFiltered.slice(0, 5).map((genre) => (
+                {displayedGenres.map((genre) => (
                   <div className={`genre-row evidence-${genre.evidenceLevel}`} key={genre.name}>
                     <div className="genre-head">
                       <span className="genre-name">{genre.name}</span>
                       <span className={genre.trend === 'up' ? 'genre-trend trend-up' : genre.trend === 'down' ? 'genre-trend trend-down' : 'genre-trend trend-steady'}>
-                        {genre.trend === 'up' ? '↑' : genre.trend === 'down' ? '↓' : '·'} {asPercent(genre.weight)}%
+                        {genre.trend === 'up' ? '↑' : genre.trend === 'down' ? '↓' : '·'} {genre.displayPercent}%
                       </span>
                     </div>
                     <div className="genre-bar-bg">
-                      <div className="genre-bar-fill" style={{ width: `${asPercent(genre.weight)}%` }} />
+                      <div className="genre-bar-fill" style={{ width: `${genre.displayPercent}%` }} />
                     </div>
                     {genre.note && <div className="genre-note">{genre.note}</div>}
                     {genre.representativeArtists.length > 0 && (
