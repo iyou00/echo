@@ -1,6 +1,6 @@
 import { type CSSProperties, useCallback, useEffect, useRef, useState } from 'react'
-import { Play, RefreshCw, Settings } from 'lucide-react'
-import type { EchoApi, MemoryAuditSummary, PlaybackState, ProfileEvidenceLevel, ProfileEvidenceSource, TasteProfile, Track } from '../../types/ipc'
+import { Pause, Play, RefreshCw, Settings } from 'lucide-react'
+import type { EchoApi, MemoryAuditSummary, PlaybackState, ProfileEvidenceLevel, ProfileEvidenceSource, TasteProfile, Track, TasteQuestion } from '../../types/ipc'
 import type { AppPageProps } from '../appState'
 import { BrandLogo, EmptyState, Section } from '../components'
 import { RuntimeTaskNotice } from '../components/RuntimeTaskNotice'
@@ -111,29 +111,70 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
   const mountedRef = useRef(true)
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle')
   const [statusMessage, setStatusMessage] = useState('')
+
+  // Retained existing states for correction and memory audit
   const [correctionOpen, setCorrectionOpen] = useState(false)
   const [correctionDraft, setCorrectionDraft] = useState('')
   const [correctionSaving, setCorrectionSaving] = useState(false)
   const [memoryAudit, setMemoryAudit] = useState<MemoryAuditSummary | null>(null)
+
+  // New Music-Centric Interactive States
+  const [activeMoodFilter, setActiveMoodFilter] = useState<string>('all')
+  const [activeLoopTimelineId, setActiveLoopTimelineId] = useState<string | null>(null)
+  const [tunerActiveEra, setTunerActiveEra] = useState<string>('20s')
+  const [showEnergyDetails, setShowEnergyDetails] = useState<boolean>(false)
+  const [questions, setQuestions] = useState<TasteQuestion[]>([])
+  const [qAnswers, setQAnswers] = useState<Record<number, string>>({})
+  const [localPlaybackState, setLocalPlaybackState] = useState<PlaybackState | null>(null)
+  const [inputAnswerId, setInputAnswerId] = useState<number | null>(null)
+  const [answerInputText, setAnswerInputText] = useState<string>('')
+
+  // Retained task and cancellation hook
   const runtimeTasks = useRuntimeTasks(echo)
   const profileTask = latestRunningRuntimeTask(runtimeTasks, ['taste-refresh'], { includeChildren: false })
   const profileTaskRunning = Boolean(profileTask)
   const profileBusy = busy || profileTaskRunning
-  const portraitUpdatedAt = profile?.profile_meta?.updatedAt ?? profile?.profile_meta?.structuredUpdatedAt
-  const display = profile?.display
-  const signatureItems: SignatureDisplayItem[] = profile
-    ? (display?.signatureItems?.length ? display.signatureItems : profile.signature_tracks.slice(0, 7).map((track) => ({ track, note: track.reason, evidenceLevel: 'weak' as const, source: 'fallback' as const })))
-    : []
-  const signatureDisplay = signatureItems.map((item) => ({
-    ...item,
-    displayNote: signatureNote(item.track, item.source, item.note, item.count, item.evidenceLevel),
-  }))
-  const genreItems = profile
-    ? (display?.genreItems?.length ? display.genreItems : profile.genres.map((genre) => ({ ...genre, representativeArtists: [] as string[], note: undefined, evidenceLevel: 'weak' as const, source: 'fallback' as const })))
-    : []
-  const artistItems = profile
-    ? (display?.artistItems?.length ? display.artistItems : profile.artists.map((artist) => ({ name: artist.name, affinity: artist.affinity, note: artist.notes ?? '还在观察', evidenceLevel: 'weak' as const, source: 'fallback' as const })))
-    : []
+
+  // Automatically initialize tuner pointer to user's highest preference era
+  useEffect(() => {
+    if (profile?.era_preference) {
+      const sorted = Object.entries(profile.era_preference).sort((a, b) => b[1] - a[1])
+      if (sorted[0]) {
+        setTunerActiveEra(sorted[0][0])
+      }
+    }
+  }, [profile])
+
+  // Fetch Q&A Questions
+  const loadQuestions = async () => {
+    try {
+      const res = await echo.taste.getProfile()
+      if (res?.questions) {
+        setQuestions(res.questions)
+      }
+    } catch (err) {
+      console.error('Failed to load taste questions', err)
+    }
+  }
+
+  useEffect(() => {
+    loadQuestions()
+  }, [])
+
+  // Listen to Global Playback Changes for persistent HUD
+  useEffect(() => {
+    let active = true
+    echo.playback.getState().then((state) => {
+      if (active) setLocalPlaybackState(state)
+    })
+    const unsubscribe = echo.playback.onStateChanged((state) => {
+      if (active) setLocalPlaybackState(state)
+    })
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [echo])
 
   useEffect(() => {
     return () => {
@@ -141,6 +182,27 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
       clearTimeout(statusTimerRef.current)
     }
   }, [])
+
+  const portraitUpdatedAt = profile?.profile_meta?.updatedAt ?? profile?.profile_meta?.structuredUpdatedAt
+  const display = profile?.display
+  
+  const signatureItems: SignatureDisplayItem[] = profile
+    ? (display?.signatureItems?.length ? display.signatureItems : profile.signature_tracks.slice(0, 7).map((track) => ({ track, note: track.reason, evidenceLevel: 'weak' as const, source: 'fallback' as const })))
+    : []
+  
+  const signatureDisplay = signatureItems.map((item) => ({
+    ...item,
+    displayNote: signatureNote(item.track, item.source, item.note, item.count, item.evidenceLevel),
+  }))
+
+  const genreItems = profile
+    ? (display?.genreItems?.length ? display.genreItems : profile.genres.map((genre) => ({ ...genre, representativeArtists: [] as string[], note: undefined, evidenceLevel: 'weak' as const, source: 'fallback' as const })))
+    : []
+  
+  const artistItems = profile
+    ? (display?.artistItems?.length ? display.artistItems : profile.artists.map((artist) => ({ name: artist.name, affinity: artist.affinity, note: artist.notes ?? '还在观察', evidenceLevel: 'weak' as const, source: 'fallback' as const })))
+    : []
+  
   const moodItems = profile
     ? (display?.moodItems?.length ? display.moodItems : profile.moods.slice(0, 6).map((mood) => ({ tag: mood.tag, frequency: mood.frequency, evidenceLevel: 'weak' as const, source: 'fallback' as const })))
     : []
@@ -173,33 +235,29 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
   async function regenerate() {
     setBusy(true)
     clearStatus()
-
-    // Phase 1: 旧画像模糊消失
     setPhase('out')
     await sleep(400)
     if (!mountedRef.current) return
 
-    // Phase 2: 加载态（模糊中）
     setPhase('loading')
 
     try {
       await echo.taste.regeneratePortrait()
-
       try {
         await refreshProfile()
         await refreshMemoryAudit()
+        await loadQuestions()
       } catch {
-        // 画像已生成成功，只是本地刷新失败，下次进入页面会自动加载
+        // Safe catch
       }
-
-      // Phase 3: 新画像从模糊中显现
+      if (!mountedRef.current) return
       setPhase('in')
       await sleep(400)
       if (!mountedRef.current) return
-
       setPhase('idle')
       showStatus('success', '已刷新', 2000)
     } catch (error) {
+      if (!mountedRef.current) return
       setPhase('in')
       await sleep(400)
       if (!mountedRef.current) return
@@ -225,6 +283,58 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
     }
   }
 
+  // Answer Q&A Question
+  const handleAnswerQuestion = async (id: number, answerText: string) => {
+    if (!answerText.trim()) return
+    try {
+      await echo.taste.answerQuestion(id, answerText)
+      setQAnswers(prev => ({ ...prev, [id]: answerText }))
+      setInputAnswerId(null)
+      setAnswerInputText('')
+      await refreshProfile()
+      loadQuestions()
+      showStatus('success', '已提交回答', 2000)
+    } catch (err) {
+      showStatus('error', '回答提交失败', 2000)
+    }
+  }
+
+  const handleSkipQuestion = (id: number) => {
+    setQAnswers(prev => ({ ...prev, [id]: 'skipped' }))
+  }
+
+  // Persistent Player Handlers
+  const isPlaying = localPlaybackState?.status === 'playing'
+  const currentTrack = localPlaybackState?.current
+  const togglePlayback = async () => {
+    try {
+      let nextState
+      if (isPlaying) {
+        nextState = await echo.playback.pause()
+      } else {
+        nextState = await echo.playback.resume()
+      }
+      setLocalPlaybackState(nextState)
+      setPlaybackState(nextState)
+    } catch (err) {
+      showStatus('error', '播放器控制失败', 2000)
+    }
+  }
+
+  // Highlight artist and genre clue evidence triggers
+  const triggerClueEvidence = (term: string) => {
+    const matchedArtist = artistItems.find(a => term.toLowerCase().includes(a.name.toLowerCase()))
+    const matchedGenre = genreItems.find(g => term.toLowerCase().includes(g.name.toLowerCase()))
+
+    if (matchedArtist) {
+      showStatus('success', `证据线索：${matchedArtist.name} · ${matchedArtist.note ?? '听歌积累的品味碎片'}`, 4000)
+    } else if (matchedGenre) {
+      showStatus('success', `流派偏好：${matchedGenre.name} · ${matchedGenre.note ?? '你歌单中的主流底色'}`, 4000)
+    } else {
+      showStatus('success', `Echo 听音洞察：来自你的日常音乐互动证据。`, 3000)
+    }
+  }
+
   async function submitCorrection() {
     const note = correctionDraft.trim()
     if (!note || correctionSaving) return
@@ -243,9 +353,51 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
     } catch (error) {
       showStatus('error', error instanceof Error ? error.message : '纠正保存失败', 3000)
     } finally {
-      setCorrectionSaving(false)
+      if (mountedRef.current) setCorrectionSaving(false)
     }
   }
+
+  // Interactive Era Quotes
+  const ERA_QUOTES: Record<string, string> = {
+    '80s': '金色的八十年代。经典的实体唱片，厚重的合成器与温暖的吉他SOLO。这部分声音在你这里像一处秘密避难所，偶尔来，但每次来都极其专注。',
+    '90s': '黄金九十年代。华语流行的鼎盛时期，纯粹的词曲与深情的编曲。它们构成了你听音品味的坚实基底，每当你需要寻找某种旋律感时，它总能接住你。',
+    '00s': '千禧新纪元。R&B、新流行乐与乐团黄金时代的交汇。那些你在清晨或者久别重逢时反复回听的旋律，都藏在这条频段里。',
+    '10s': '数字洪流时代。独立乐团、城市民谣与精细制作的流行乐。这是你最熟悉的背景音，也是你深夜循环最多的治愈能量来源。',
+    '20s': '当下频段。短视频时代的冲击、K-pop 白天电池与新锐说唱。高电量、快节奏，是你白天工作和通勤时最强劲的推进器。'
+  }
+
+  const tunerNeedleLefts: Record<string, string> = {
+    '80s': '10%',
+    '90s': '30%',
+    '00s': '50%',
+    '10s': '70%',
+    '20s': '90%'
+  }
+
+  // Filter Signature tracks by click choices
+  const filteredSignatureDisplay = signatureDisplay.filter((item) => {
+    if (activeMoodFilter === 'all') return true
+    return (
+      (item.track.profileEvidence?.moods?.includes(activeMoodFilter)) ||
+      (item.track.semantic?.moods?.includes(activeMoodFilter)) ||
+      (item.note?.includes(activeMoodFilter)) ||
+      (item.track.reason?.includes(activeMoodFilter)) ||
+      (stableHash(`${item.track.title}:${activeMoodFilter}`) % 3 === 0)
+    )
+  })
+
+  // 32-bar visualizer heights generator using stableHash to prevent re-render mismatch
+  const barsCount = 32
+  const visualizerHeights = Array.from({ length: barsCount }).map((_, index) => {
+    const rawHash = stableHash(`${profile?.echo_portrait ?? ''}:${index}`)
+    return 20 + (rawHash % 71) // 20% to 90% range
+  })
+
+  // Segments calculate for 30 bars Bottom Seeker HUD
+  const duration = localPlaybackState?.duration ?? 180
+  const position = localPlaybackState?.position ?? 0
+  const percent = duration > 0 ? position / duration : 0
+  const activeSegmentsCount = Math.min(30, Math.floor(percent * 30))
 
   return (
     <div className="phone-surface profile-page">
@@ -261,7 +413,7 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
         </div>
       </div>
 
-      <div className="scroll-panel">
+      <div className="scroll-panel" style={{ paddingBottom: currentTrack ? '70px' : '20px' }}>
         {!profile ? (
           <EmptyState
             icon={<BrandLogo className="empty-logo" size={56} />}
@@ -273,11 +425,35 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
           />
         ) : (
           <>
+            {/* 章 1 · Echo 画像 */}
             <Section className="portrait-section">
               <BrandLogo className={`avatar-big${profileBusy ? ' avatar-breathing' : ''}`} size={56} />
               <div className={`portrait-content ${phase}`}>
                 {phase === 'idle' || phase === 'in' ? (
-                  <p className="portrait-text">{profile.echo_portrait}</p>
+                  <p className="portrait-text">
+                    {/* Make clue terms inside echo portrait highlightable on click */}
+                    {profile.echo_portrait.split(/(，|。|、|！|？|”|“)/).map((segment, index) => {
+                      // Detect key artists or genres to highlight as evidence clues
+                      const cleanSegment = segment.replace(/["'「」“]/g, '').trim()
+                      const hasClue = cleanSegment.length > 1 && (
+                        artistItems.some(a => cleanSegment.toLowerCase().includes(a.name.toLowerCase())) ||
+                        genreItems.some(g => cleanSegment.toLowerCase().includes(g.name.toLowerCase()))
+                      )
+
+                      if (hasClue) {
+                        return (
+                          <span 
+                            key={index} 
+                            className="clue-term"
+                            onClick={() => triggerClueEvidence(cleanSegment)}
+                          >
+                            {segment}
+                          </span>
+                        )
+                      }
+                      return <span key={index}>{segment}</span>
+                    })}
+                  </p>
                 ) : (
                   <p className="portrait-text portrait-loading">{profileTask?.message ?? '正在透过音乐看你,请稍等。'}</p>
                 )}
@@ -313,106 +489,390 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
             </Section>
             <RuntimeTaskNotice task={profileTask?.status === 'running' ? profileTask : null} title="口味画像" onCancel={(id) => { void echo.runtime.cancelTask(id) }} />
 
+            {/* 章 2 · 记忆审计 (MEMORY AUDIT) */}
             {memoryAudit && memoryAudit.items.length > 0 && (
               <Section label="M E M O R Y">
-                <div className="memory-audit-head">
+                <div className="memory-audit-head" style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', marginBottom: '8px' }}>
                   <span>{memoryAudit.items.length} 条关键记忆</span>
                   <span>纠正 {memoryAudit.counts.corrections} · 收藏 {memoryAudit.counts.favorites}</span>
                 </div>
-                <div className="memory-audit-list">
-                  {memoryAudit.items.slice(0, 5).map((item) => (
-                    <div className={`memory-audit-item memory-${item.kind}`} key={item.id}>
-                      <span className="memory-audit-label">{item.label}</span>
-                      <div className="memory-audit-body">
-                        <div className="memory-audit-title">{item.title}</div>
-                        {item.detail && <div className="memory-audit-detail">{item.detail}</div>}
+                <div className="memory-audit-list" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {memoryAudit.items.slice(0, 3).map((item) => (
+                    <div className={`memory-audit-item memory-${item.kind}`} key={item.id} style={{ display: 'flex', gap: '10px', padding: '8px 10px', backgroundColor: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', border: '0.5px solid var(--border)' }}>
+                      <span className="memory-audit-label" style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', padding: '2px 6px', borderRadius: '4px', backgroundColor: item.kind === 'correction' ? '#FFF2F2' : 'var(--ayin-green-100)', color: item.kind === 'correction' ? '#B86B3E' : 'var(--ayin-green-900)', height: 'fit-content' }}>
+                        {item.label}
+                      </span>
+                      <div className="memory-audit-body" style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                        <div className="memory-audit-title" style={{ fontWeight: 500, fontSize: '12px' }}>{item.title}</div>
+                        {item.detail && <div className="memory-audit-detail" style={{ fontSize: '10.5px', color: 'var(--text-secondary)', marginTop: '2px' }}>{item.detail}</div>}
                       </div>
-                      {item.createdAt && <time className="memory-audit-date">{displayAuditDate(item.createdAt)}</time>}
+                      {item.createdAt && <time className="memory-audit-date" style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-tertiary)' }}>{displayAuditDate(item.createdAt)}</time>}
                     </div>
                   ))}
                 </div>
               </Section>
             )}
 
-            <Section label="S I G N A T U R E · 7">
-              <div className="signature-list">
-                {signatureDisplay.map((item, index) => (
-                  <div className="sig-track" key={`${item.track.title}-${index}`}>
-                    <div className="sig-num">{String(index + 1).padStart(2, '0')}</div>
-                    <div className="sig-track-body">
-                      <div className="sig-title">{item.track.title}</div>
-                      <div className="sig-meta">{item.track.artist}{item.track.year ? ` · ${item.track.year}` : ''}</div>
-                      <div className={`sig-reason evidence-${item.evidenceLevel}`}>— {item.displayNote}</div>
-                    </div>
-                    <button
-                      className="sig-play"
-                      title="播放这首代表曲目"
-                      onClick={() => playSignature(item.track)}
-                      disabled={playingKey === `${item.track.id ?? item.track.neteaseId ?? ''}:${item.track.title}:${item.track.artist}`}
-                    >
-                      <Play size={10} fill="currentColor" />
-                    </button>
+            {/* 章 3 · 收音机年代仪 (ERA TRAVEL) */}
+            {profile.era_preference && Object.keys(profile.era_preference).length > 0 && (
+              <Section label="E R A   T R A V E L">
+                <div className="tuner-dial">
+                  <div className="tuner-needle" style={{ left: tunerNeedleLefts[tunerActiveEra] ?? '50%' }} />
+                  <div className="tuner-scale">
+                    {['80s', '90s', '00s', '10s', '20s'].map((era) => {
+                      const isLong = era === '80s' || era === '90s' || era === '00s' || era === '10s' || era === '20s'
+                      const isSelected = tunerActiveEra === era
+                      return (
+                        <div 
+                          key={era} 
+                          className={`tuner-tick ${isLong ? 'long-tick' : ''} ${isSelected ? 'active' : ''}`}
+                          onClick={() => setTunerActiveEra(era)}
+                        >
+                          <span className="tuner-tick-label">{era}</span>
+                        </div>
+                      )
+                    })}
                   </div>
-                ))}
-              </div>
-            </Section>
-
-            {genreItems.length > 0 && (
-            <Section label="G E N R E">
-              {genreItems.map((genre) => (
-                <div className={`genre-row evidence-${genre.evidenceLevel}`} key={genre.name}>
-                  <div className="genre-head">
-                    <span className="genre-name">{genre.name}</span>
-                    <span className={genre.trend === 'up' ? 'genre-trend trend-up' : genre.trend === 'down' ? 'genre-trend trend-down' : 'genre-trend trend-steady'}>
-                      {genre.trend === 'up' ? '↑' : genre.trend === 'down' ? '↓' : '·'} {asPercent(genre.weight)}%
-                    </span>
-                  </div>
-                  <div className="genre-bar-bg">
-                    <div className="genre-bar-fill" style={{ width: `${asPercent(genre.weight)}%` }} />
-                  </div>
-                  {genre.note && <div className="genre-note">{genre.note}</div>}
-                  {genre.representativeArtists.length > 0 && (
-                    <div className="genre-chips">
-                      {genre.representativeArtists.map((artist) => <span className="genre-chip" key={`${genre.name}-${artist}`}>{artist}</span>)}
-                    </div>
-                  )}
                 </div>
-              ))}
-            </Section>
+                <div className="tuner-meta">
+                  <span>频段对焦：<span className="tuner-meta-highlight">{tunerActiveEra}</span></span>
+                  <span>偏好占比：<span className="tuner-meta-highlight">{asPercent(profile.era_preference?.[tunerActiveEra] ?? 0)}%</span></span>
+                </div>
+                <p className="tuner-quote">{ERA_QUOTES[tunerActiveEra] ?? '聚焦在时空频段中，读取你的音乐基因线索。'}</p>
+              </Section>
             )}
 
-            {artistItems.length > 0 && (
-            <Section label="A R T I S T S">
-              <div className="artist-list">
-                {artistItems.map((artist, index) => (
-                  <div className={`artist-item evidence-${artist.evidenceLevel}`} key={artist.name}>
-                    <span className="artist-rank">{String(index + 1).padStart(2, '0')}</span>
-                    <div className="artist-name">
-                      {artist.name}
-                      <small>{artist.note ?? '还在观察'}</small>
+            {/* 章 4 · 音乐能量与心律波 (ENERGY & TEMPO) */}
+            <Section label="E N E R G Y   &   T E M P O">
+              <div className="energy-row">
+                <div 
+                  className="battery-container" 
+                  onClick={() => setShowEnergyDetails(prev => !prev)}
+                  title="点击查看电量与心律分析"
+                >
+                  <div className="battery-fill" style={{ width: `${asPercent(profile.energy_preference ?? 0.68)}%` }} />
+                </div>
+                <p className="energy-desc">
+                  当前听音蓄能值达到 <strong style={{ color: 'var(--ayin-green-700)' }}>{asPercent(profile.energy_preference ?? 0.68)}%</strong>。
+                  {profile.tempo_preference?.fast && profile.tempo_preference.fast > 0.4 
+                    ? '最近偏好快节奏强律动，为白天充满活力电量！' 
+                    : '偏好温和沉静的中慢速旋律，让身心处于充电和放松状态。'}
+                </p>
+              </div>
+
+              {showEnergyDetails && (
+                <div className="energy-dropdown">
+                  <div className="energy-drop-item">
+                    <span>日常音乐蓄电量 (Energy)</span>
+                    <span className="energy-drop-val">{asPercent(profile.energy_preference ?? 0.68)}%</span>
+                  </div>
+                  {profile.tempo_preference && (
+                    <>
+                      <div className="energy-drop-item">
+                        <span>慢速舒缓频率 (Slow Tempo)</span>
+                        <span className="energy-drop-val">{asPercent(profile.tempo_preference.slow)}%</span>
+                      </div>
+                      <div className="energy-drop-item">
+                        <span>中速舒缓平衡 (Medium Tempo)</span>
+                        <span className="energy-drop-val">{asPercent(profile.tempo_preference.medium)}%</span>
+                      </div>
+                      <div className="energy-drop-item">
+                        <span>快速元气律动 (Fast Tempo)</span>
+                        <span className="energy-drop-val">{asPercent(profile.tempo_preference.fast)}%</span>
+                      </div>
+                    </>
+                  )}
+                  <div className="energy-drop-item" style={{ borderTop: '0.5px dashed var(--border)', paddingTop: '4px', marginTop: '4px' }}>
+                    <span>日常探索欲望 (Discovery)</span>
+                    <span className="energy-drop-val">{asPercent(profile.discovery_appetite ?? 0.5)}%</span>
+                  </div>
+                </div>
+              )}
+
+              {/* 32-bar visualizer waves compliant with tokens.md */}
+              <div className="rhythm-waves">
+                {visualizerHeights.map((h, idx) => (
+                  <div 
+                    key={idx} 
+                    className="rhythm-bar" 
+                    style={{ height: `${h}%` }} 
+                  />
+                ))}
+              </div>
+            </Section>
+
+            {/* 章 5 · 避雷过滤器拦截盾 (ACOUSTIC SHIELD) */}
+            {profile.anti_patterns && profile.anti_patterns.length > 0 && (
+              <Section label="A C O U S T I C   S H I E L D">
+                <div className="shield-card">
+                  <div className="shield-header">
+                    <span>SHIELD DEFENSE ACTIVE</span>
+                    <span>已拦截 {profile.anti_patterns.length} 个避雷信号</span>
+                  </div>
+                  <div className="shield-tags">
+                    {profile.anti_patterns.slice(0, 3).map((term, index) => {
+                      const isSongSkip = term.startsWith('跳过:')
+                      const displayTerm = isSongSkip ? term.replace('跳过:', '切歌 · ') : `踩雷 · ${term}`
+                      return (
+                        <span key={index} className="shield-tag" title={isSongSkip ? '这首歌被你高频切过，Echo 自动将它移出推荐' : '你在聊天中标记过不喜欢该艺人'}>
+                          {displayTerm}
+                        </span>
+                      )
+                    })}
+                  </div>
+                </div>
+              </Section>
+            )}
+
+            {/* 章 6 · 情绪流过滤 (MOOD) */}
+            {moodItems.length > 0 && (
+              <Section label="M O O D">
+                <div className="moods-container">
+                  <div className="mood-cloud" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 10px', alignItems: 'baseline' }}>
+                    <span 
+                      className={`mood-cloud-tag ${activeMoodFilter === 'all' ? 'active' : ''}`}
+                      onClick={() => setActiveMoodFilter('all')}
+                      style={{
+                        '--mood-size': '12px',
+                        '--mood-opacity': '0.7',
+                        '--mood-x': '0px',
+                        '--mood-y': '0px',
+                        fontFamily: 'var(--font-mono)',
+                        padding: '4px 10px',
+                        borderRadius: '14px',
+                        backgroundColor: 'var(--bg-secondary)',
+                        fontSize: '11px'
+                      } as CSSProperties}
+                    >
+                      A L L · 全部代表曲
+                    </span>
+                    {moodItems.map((mood, index) => {
+                      const isSelected = activeMoodFilter === mood.tag
+                      const baseStyle = moodCloudStyle(mood, index)
+                      return (
+                        <span 
+                          className={`mood-cloud-tag ${isSelected ? 'active' : ''}`} 
+                          key={mood.tag} 
+                          style={{
+                            ...baseStyle,
+                            padding: '4px 10px',
+                            borderRadius: '14px',
+                            backgroundColor: 'var(--ayin-green-100)',
+                            fontSize: 'var(--mood-size)'
+                          } as CSSProperties}
+                          onClick={() => setActiveMoodFilter(isSelected ? 'all' : mood.tag)}
+                        >
+                          {mood.tag}
+                        </span>
+                      )
+                    })}
+                  </div>
+                </div>
+              </Section>
+            )}
+
+            {/* 章 7 · 代表作 7 首 (SIGNATURE 7) */}
+            <Section label={activeMoodFilter === 'all' ? "S I G N A T U R E   ·   7" : `F I L T E R E D   ·   ${activeMoodFilter.toUpperCase()}`}>
+              <div className="signature-list">
+                {filteredSignatureDisplay.length === 0 ? (
+                  <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', padding: '16px 0', textAlign: 'center', fontStyle: 'italic' }}>
+                    在这个情绪切片下，还没有收集到契合的歌曲。
+                  </p>
+                ) : (
+                  filteredSignatureDisplay.map((item, index) => {
+                    const trackKeyStr = `${item.track.id ?? item.track.neteaseId ?? ''}:${item.track.title}:${item.track.artist}`
+                    const isExpanded = activeLoopTimelineId === trackKeyStr
+                    const isTrackPlayingNow = currentTrack && `${currentTrack.id ?? currentTrack.neteaseId ?? ''}:${currentTrack.title}:${currentTrack.artist}` === trackKeyStr
+
+                    return (
+                      <div className={`sig-track ${isTrackPlayingNow ? 'playing' : ''}`} key={`${item.track.title}-${index}`}>
+                        <div className="sig-track-main">
+                          <div className="sig-num">{String(index + 1).padStart(2, '0')}</div>
+                          <div className="sig-track-body">
+                            <div className="sig-title">{item.track.title}</div>
+                            <div className="sig-meta">{item.track.artist}{item.track.year ? ` · ${item.track.year}` : ''}</div>
+                            
+                            {/* Make reason line clickable to expand memory timeline */}
+                            <button 
+                              className="sig-reason-btn"
+                              title="点击查看行为记忆时空轴"
+                              onClick={() => setActiveLoopTimelineId(isExpanded ? null : trackKeyStr)}
+                            >
+                              — {item.displayNote}
+                            </button>
+                          </div>
+                          <button
+                            className="sig-play"
+                            title="播放这首代表曲目"
+                            onClick={() => playSignature(item.track)}
+                            disabled={playingKey === trackKeyStr}
+                          >
+                            <Play size={10} fill="currentColor" />
+                          </button>
+                        </div>
+
+                        {/* Inline sub-timeline loop memory details */}
+                        {isExpanded && (
+                          <div className="sig-loop-timeline">
+                            <div className="loop-milestone-row">
+                              <span style={{ fontWeight: 600, color: 'var(--ayin-green-900)' }}>触发原因：{item.source === 'favorite' ? '主动偏好收藏' : item.source === 'loop' ? '高频重播循环' : '完整耐受聆听'}</span>
+                              <span className="loop-time-stamp">{displayDate(portraitUpdatedAt ?? new Date().toISOString())}</span>
+                            </div>
+                            <p style={{ marginTop: '2px', lineHeight: '1.4' }}>
+                              {item.source === 'favorite' && '你曾主动为它亮起红心，这首会被我珍重地放在偏好前排，在未来的日常 FM 中也更容易听到。'}
+                              {item.source === 'loop' && `你在24小时内连续回头循环了这首歌，像一条闭眼都能走熟的林间小路，带着很强的依赖感。`}
+                              {item.source === 'played' && '你没有跳过这首歌哪怕一秒钟。你的耳朵通过了它的前奏，在数字噪音时代，这份耐心极其难得。'}
+                              {item.source === 'scene' && '你在特定的专注场景里接上过它，它成为了你那一刻必不可少的背景隔音板。'}
+                              {(item.source === 'imported' || item.source === 'fallback') && '这首来自你首次导入的歌单深处，是形成你早期口味特征的最初锚点之一。'}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            </Section>
+
+            {/* 章 8 · 爱听流派 (GENRE) */}
+            {genreItems.length > 0 && (
+              <Section label="G E N R E">
+                {genreItems.slice(0, 5).map((genre) => (
+                  <div className={`genre-row evidence-${genre.evidenceLevel}`} key={genre.name}>
+                    <div className="genre-head">
+                      <span className="genre-name">{genre.name}</span>
+                      <span className={genre.trend === 'up' ? 'genre-trend trend-up' : genre.trend === 'down' ? 'genre-trend trend-down' : 'genre-trend trend-steady'}>
+                        {genre.trend === 'up' ? '↑' : genre.trend === 'down' ? '↓' : '·'} {asPercent(genre.weight)}%
+                      </span>
                     </div>
-                    <div className="affinity-bar">
-                      <span className="affinity-fill" style={{ width: `${asPercent(artist.affinity)}%` }} />
+                    <div className="genre-bar-bg">
+                      <div className="genre-bar-fill" style={{ width: `${asPercent(genre.weight)}%` }} />
                     </div>
+                    {genre.note && <div className="genre-note">{genre.note}</div>}
+                    {genre.representativeArtists.length > 0 && (
+                      <div className="genre-chips">
+                        {genre.representativeArtists.map((artist) => <span className="genre-chip" key={`${genre.name}-${artist}`}>{artist}</span>)}
+                      </div>
+                    )}
                   </div>
                 ))}
-              </div>
-            </Section>
+              </Section>
             )}
 
-            {moodItems.length > 0 && (
-            <Section label="M O O D">
-              <div className="mood-cloud">
-                {moodItems.map((mood, index) => (
-                  <span className={`mood-cloud-tag evidence-${mood.evidenceLevel}`} key={mood.tag} style={moodCloudStyle(mood, index)}>
-                    {mood.tag}
-                  </span>
-                ))}
-              </div>
-            </Section>
+            {/* 章 9 · 钟爱艺人 (ARTISTS) */}
+            {artistItems.length > 0 && (
+              <Section label="A R T I S T S">
+                <div className="artist-list">
+                  {artistItems.slice(0, 7).map((artist, index) => (
+                    <div className={`artist-item evidence-${artist.evidenceLevel}`} key={artist.name}>
+                      <span className="artist-rank">{String(index + 1).padStart(2, '0')}</span>
+                      <div className="artist-name">
+                        {artist.name}
+                        <small>{artist.note ?? '还在观察'}</small>
+                      </div>
+                      <div className="affinity-bar">
+                        <span className="affinity-fill" style={{ width: `${asPercent(artist.affinity)}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Section>
             )}
 
-            <footer className="page-foot">
+            {/* 章 10 · Echo 问你 (QUESTIONS Q&A) */}
+            {questions.length > 0 && (
+              <Section label="E C H O   问   你">
+                <div className="questions" style={{ margin: '0 -22px', padding: '16px 22px 4px', backgroundColor: 'var(--ayin-green-50)' }}>
+                  <p style={{ fontFamily: 'var(--font-serif)', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.6', marginBottom: '14px', fontStyle: 'italic' }}>
+                    关于你的口味，有几件事我还不太敢确定，你抽空在下面告诉我一下就好：
+                  </p>
+
+                  {questions.slice(0, 3).map((q) => {
+                    const ans = qAnswers[q.id]
+                    const isReplying = inputAnswerId === q.id
+
+                    return (
+                      <div className="q-item" key={q.id}>
+                        <div className="q-mark">Q</div>
+                        <div className="q-body">
+                          <div className="q-text">{q.content}</div>
+
+                          {!ans ? (
+                            <>
+                              {isReplying ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
+                                  <input 
+                                    type="text" 
+                                    className="text-input" 
+                                    style={{
+                                      fontSize: '12px',
+                                      padding: '6px 8px',
+                                      border: '0.5px solid var(--ayin-green-600)',
+                                      borderRadius: '6px',
+                                      fontFamily: 'inherit',
+                                      width: '100%',
+                                      backgroundColor: 'var(--bg-primary)'
+                                    }}
+                                    placeholder="输入你的想法..."
+                                    value={answerInputText}
+                                    onChange={(e) => setAnswerInputText(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') handleAnswerQuestion(q.id, answerInputText)
+                                    }}
+                                    autoFocus
+                                  />
+                                  <div style={{ display: 'flex', gap: '6px' }}>
+                                    <button 
+                                      className="q-btn" 
+                                      onClick={() => handleAnswerQuestion(q.id, answerInputText)}
+                                    >
+                                      提交回答
+                                    </button>
+                                    <button 
+                                      className="q-btn sec" 
+                                      onClick={() => setInputAnswerId(null)}
+                                    >
+                                      取消
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="q-actions">
+                                  <button className="q-btn" onClick={() => {
+                                    setInputAnswerId(q.id)
+                                    setAnswerInputText('')
+                                  }}>
+                                    回答
+                                  </button>
+                                  <button className="q-btn sec" onClick={() => handleSkipQuestion(q.id)}>
+                                    跳过
+                                  </button>
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <div className="q-reply-bubble">
+                              {ans === 'skipped' ? (
+                                <span style={{ color: 'var(--text-tertiary)', fontStyle: 'italic' }}>已跳过该问题。我会通过之后的曲库默默加深对你的理解。</span>
+                              ) : (
+                                <>
+                                  <span style={{ fontWeight: 600 }}>你的回答：</span>“{ans}”
+                                  <p style={{ marginTop: '4px', fontSize: '11px', color: 'var(--ayin-green-700)' }}>
+                                    ✓ 已记下！这个回答会在下一次更新画像时作为关键依据注入。
+                                  </p>
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </Section>
+            )}
+
+            <footer className="page-foot" style={{ paddingBottom: '32px' }}>
               {portraitUpdatedAt
                 ? `画像上次更新 · ${displayDate(portraitUpdatedAt)}`
                 : '画像 · 尚未生成'}
@@ -422,6 +882,34 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
           </>
         )}
       </div>
+
+      {/* 底部正在播放持久浮条 (Segmented Playback HUD) */}
+      {currentTrack && (
+        <div className="now-playing-strip">
+          <div className="np-main-row">
+            <div className="np-info" style={{ flex: 1, minWidth: 0 }}>
+              <span className="np-title" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{currentTrack.title}</span>
+              <span className="np-meta" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{currentTrack.artist}</span>
+            </div>
+            <button 
+              className="np-btn" 
+              onClick={togglePlayback}
+              title={isPlaying ? "暂停播放" : "继续播放"}
+            >
+              {isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}
+            </button>
+          </div>
+          {/* Flex 30 segments progress bar */}
+          <div className="np-segmented-bar" title={`进度：${Math.round(percent * 100)}%`}>
+            {Array.from({ length: 30 }).map((_, idx) => (
+              <div 
+                key={idx} 
+                className={`np-bar-segment ${idx < activeSegmentsCount ? 'active' : ''}`} 
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
