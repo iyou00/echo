@@ -1,6 +1,6 @@
 import { type CSSProperties, useCallback, useEffect, useRef, useState } from 'react'
 import { Pause, Play, RefreshCw, Settings } from 'lucide-react'
-import type { EchoApi, MemoryAuditSummary, PlaybackState, ProfileEvidenceLevel, ProfileEvidenceSource, TasteProfile, Track, TasteQuestion } from '../../types/ipc'
+import type { EchoApi, MemoryAuditSummary, PlaybackState, ProfileEvidenceLevel, ProfileEvidenceSource, TasteProfile, Track } from '../../types/ipc'
 import type { AppPageProps } from '../appState'
 import { BrandLogo, EmptyState, Section } from '../components'
 import { RuntimeTaskNotice } from '../components/RuntimeTaskNotice'
@@ -123,11 +123,7 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
   const [activeLoopTimelineId, setActiveLoopTimelineId] = useState<string | null>(null)
   const [tunerActiveEra, setTunerActiveEra] = useState<string>('20s')
   const [showEnergyDetails, setShowEnergyDetails] = useState<boolean>(false)
-  const [questions, setQuestions] = useState<TasteQuestion[]>([])
-  const [qAnswers, setQAnswers] = useState<Record<number, string>>({})
   const [localPlaybackState, setLocalPlaybackState] = useState<PlaybackState | null>(null)
-  const [inputAnswerId, setInputAnswerId] = useState<number | null>(null)
-  const [answerInputText, setAnswerInputText] = useState<string>('')
 
   // Retained task and cancellation hook
   const runtimeTasks = useRuntimeTasks(echo)
@@ -145,21 +141,7 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
     }
   }, [profile])
 
-  // Fetch Q&A Questions
-  const loadQuestions = async () => {
-    try {
-      const res = await echo.taste.getProfile()
-      if (res?.questions) {
-        setQuestions(res.questions)
-      }
-    } catch (err) {
-      console.error('Failed to load taste questions', err)
-    }
-  }
 
-  useEffect(() => {
-    loadQuestions()
-  }, [])
 
   // Listen to Global Playback Changes for persistent HUD
   useEffect(() => {
@@ -258,7 +240,6 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
       try {
         await refreshProfile()
         await refreshMemoryAudit()
-        await loadQuestions()
       } catch {
         // Safe catch
       }
@@ -295,25 +276,7 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
     }
   }
 
-  // Answer Q&A Question
-  const handleAnswerQuestion = async (id: number, answerText: string) => {
-    if (!answerText.trim()) return
-    try {
-      await echo.taste.answerQuestion(id, answerText)
-      setQAnswers(prev => ({ ...prev, [id]: answerText }))
-      setInputAnswerId(null)
-      setAnswerInputText('')
-      await refreshProfile()
-      loadQuestions()
-      showStatus('success', '已提交回答', 2000)
-    } catch (err) {
-      showStatus('error', '回答提交失败', 2000)
-    }
-  }
 
-  const handleSkipQuestion = (id: number) => {
-    setQAnswers(prev => ({ ...prev, [id]: 'skipped' }))
-  }
 
   // Persistent Player Handlers
   const isPlaying = localPlaybackState?.status === 'playing'
@@ -636,35 +599,7 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
               </Section>
             )}
 
-            {/* 章 6 · 情绪流过滤 (MOOD) */}
-            {moodItems.length > 0 && (
-              <Section label="M O O D">
-                <div className="moods-container">
-                  <div className="mood-cloud" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 10px', alignItems: 'baseline' }}>
-                    {moodItems.map((mood, index) => {
-                      const isSelected = activeMoodFilter === mood.tag
-                      const baseStyle = moodCloudStyle(mood, index)
-                      return (
-                        <span 
-                          className={`mood-cloud-tag ${isSelected ? 'active' : ''}`} 
-                          key={mood.tag} 
-                          style={{
-                            ...baseStyle,
-                            padding: '4px 10px',
-                            borderRadius: '14px',
-                            backgroundColor: 'var(--ayin-green-100)',
-                            fontSize: 'var(--mood-size)'
-                          } as CSSProperties}
-                          onClick={() => setActiveMoodFilter(isSelected ? 'all' : mood.tag)}
-                        >
-                          {mood.tag}
-                        </span>
-                      )
-                    })}
-                  </div>
-                </div>
-              </Section>
-            )}
+
 
             {/* 章 7 · 代表作 7 首 (SIGNATURE 7) */}
             <Section label={activeMoodFilter === 'all' ? "S I G N A T U R E   ·   7" : `F I L T E R E D   ·   ${activeMoodFilter.toUpperCase()}`}>
@@ -774,95 +709,32 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
               </Section>
             )}
 
-            {/* 章 10 · Echo 问你 (QUESTIONS Q&A) */}
-            {questions.length > 0 && (
-              <Section label="E C H O   问   你">
-                <div className="questions" style={{ margin: '0 -22px', padding: '16px 22px 4px', backgroundColor: 'var(--ayin-green-50)' }}>
-                  <p style={{ fontFamily: 'var(--font-serif)', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.6', marginBottom: '14px', fontStyle: 'italic' }}>
-                    关于你的口味，有几件事我还不太敢确定，你抽空在下面告诉我一下就好：
-                  </p>
-
-                  {questions.slice(0, 3).map((q) => {
-                    const ans = qAnswers[q.id]
-                    const isReplying = inputAnswerId === q.id
-
-                    return (
-                      <div className="taste-q-item" key={q.id}>
-                        <div className="taste-q-mark">Q</div>
-                        <div className="taste-q-body">
-                          <div className="taste-q-text">{q.content}</div>
-
-                          {!ans ? (
-                            <>
-                              {isReplying ? (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
-                                  <input 
-                                    type="text" 
-                                    className="text-input" 
-                                    style={{
-                                      fontSize: '12px',
-                                      padding: '6px 8px',
-                                      border: '0.5px solid var(--ayin-green-600)',
-                                      borderRadius: '6px',
-                                      fontFamily: 'inherit',
-                                      width: '100%',
-                                      backgroundColor: 'var(--bg-primary)'
-                                    }}
-                                    placeholder="输入你的想法..."
-                                    value={answerInputText}
-                                    onChange={(e) => setAnswerInputText(e.target.value)}
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter') handleAnswerQuestion(q.id, answerInputText)
-                                    }}
-                                    autoFocus
-                                  />
-                                  <div style={{ display: 'flex', gap: '6px' }}>
-                                    <button 
-                                      className="taste-q-btn" 
-                                      onClick={() => handleAnswerQuestion(q.id, answerInputText)}
-                                    >
-                                      提交回答
-                                    </button>
-                                    <button 
-                                      className="taste-q-btn sec" 
-                                      onClick={() => setInputAnswerId(null)}
-                                    >
-                                      取消
-                                    </button>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="taste-q-actions">
-                                  <button className="taste-q-btn" onClick={() => {
-                                    setInputAnswerId(q.id)
-                                    setAnswerInputText('')
-                                  }}>
-                                    回答
-                                  </button>
-                                  <button className="taste-q-btn sec" onClick={() => handleSkipQuestion(q.id)}>
-                                    跳过
-                                  </button>
-                                </div>
-                              )}
-                            </>
-                          ) : (
-                            <div className="taste-q-reply-bubble">
-                              {ans === 'skipped' ? (
-                                <span style={{ color: 'var(--text-tertiary)', fontStyle: 'italic' }}>已跳过该问题。我会通过之后的曲库默默加深对你的理解。</span>
-                              ) : (
-                                <>
-                                  <span style={{ fontWeight: 600 }}>你的回答：</span>“{ans}”
-                                  <p style={{ marginTop: '4px', fontSize: '11px', color: 'var(--ayin-green-700)' }}>
-                                    ✓ 已记下！这个回答会在下一次更新画像时作为关键依据注入。
-                                  </p>
-                                </>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )
-                  })}
+            {/* 章 6 · 情绪流过滤 (MOOD) */}
+            {moodItems.length > 0 && (
+              <Section label="M O O D">
+                <div className="moods-container">
+                  <div className="mood-cloud" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 10px', alignItems: 'baseline' }}>
+                    {moodItems.map((mood, index) => {
+                      const isSelected = activeMoodFilter === mood.tag
+                      const baseStyle = moodCloudStyle(mood, index)
+                      return (
+                        <span 
+                          className={`mood-cloud-tag ${isSelected ? 'active' : ''}`} 
+                          key={mood.tag} 
+                          style={{
+                            ...baseStyle,
+                            padding: '4px 10px',
+                            borderRadius: '14px',
+                            backgroundColor: 'var(--ayin-green-100)',
+                            fontSize: 'var(--mood-size)'
+                          } as CSSProperties}
+                          onClick={() => setActiveMoodFilter(isSelected ? 'all' : mood.tag)}
+                        >
+                          {mood.tag}
+                        </span>
+                      )
+                    })}
+                  </div>
                 </div>
               </Section>
             )}
