@@ -120,7 +120,6 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
 
   // New Music-Centric Interactive States
   const [activeMoodFilter, setActiveMoodFilter] = useState<string>('all')
-  const [activeLoopTimelineId, setActiveLoopTimelineId] = useState<string | null>(null)
   const [tunerActiveEra, setTunerActiveEra] = useState<string>('20s')
   const [showEnergyDetails, setShowEnergyDetails] = useState<boolean>(false)
   const [localPlaybackState, setLocalPlaybackState] = useState<PlaybackState | null>(null)
@@ -611,7 +610,6 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
                 ) : (
                   filteredSignatureDisplay.map((item, index) => {
                     const trackKeyStr = `${item.track.id ?? item.track.neteaseId ?? ''}:${item.track.title}:${item.track.artist}`
-                    const isExpanded = activeLoopTimelineId === trackKeyStr
                     const isTrackPlayingNow = currentTrack && `${currentTrack.id ?? currentTrack.neteaseId ?? ''}:${currentTrack.title}:${currentTrack.artist}` === trackKeyStr
 
                     return (
@@ -621,15 +619,6 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
                           <div className="sig-track-body">
                             <div className="sig-title">{item.track.title}</div>
                             <div className="sig-meta">{item.track.artist}{item.track.year ? ` · ${item.track.year}` : ''}</div>
-                            
-                            {/* Make reason line clickable to expand memory timeline */}
-                            <button 
-                              className="sig-reason-btn"
-                              title="点击查看行为记忆时空轴"
-                              onClick={() => setActiveLoopTimelineId(isExpanded ? null : trackKeyStr)}
-                            >
-                              — {item.displayNote}
-                            </button>
                           </div>
                           <button
                             className="sig-play"
@@ -640,23 +629,6 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
                             <Play size={10} fill="currentColor" />
                           </button>
                         </div>
-
-                        {/* Inline sub-timeline loop memory details */}
-                        {isExpanded && (
-                          <div className="sig-loop-timeline">
-                            <div className="loop-milestone-row" style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
-                              <span style={{ fontWeight: 600, color: 'var(--ayin-green-900)' }}>触发原因：{item.source === 'favorite' ? '主动偏好收藏' : item.source === 'loop' ? '高频重播循环' : '完整耐受聆听'}</span>
-                              <span className="loop-time-stamp" style={{ marginLeft: '12px', flexShrink: 0 }}>{displayDate(portraitUpdatedAt ?? new Date().toISOString())}</span>
-                            </div>
-                            <p style={{ marginTop: '2px', lineHeight: '1.4' }}>
-                              {item.source === 'favorite' && '你曾主动为它亮起红心，这首会被我珍重地放在偏好前排，在未来的日常 FM 中也更容易听到。'}
-                              {item.source === 'loop' && `你在24小时内连续回头循环了这首歌，像一条闭眼都能走熟的林间小路，带着很强的依赖感。`}
-                              {item.source === 'played' && '你没有跳过这首歌哪怕一秒钟。你的耳朵通过了它的前奏，在数字噪音时代，这份耐心极其难得。'}
-                              {item.source === 'scene' && '你在特定的专注场景里接上过它，它成为了你那一刻必不可少的背景隔音板。'}
-                              {(item.source === 'imported' || item.source === 'fallback') && '这首来自你首次导入的歌单深处，是形成你早期口味特征的最初锚点之一。'}
-                            </p>
-                          </div>
-                        )}
                       </div>
                     )
                   })

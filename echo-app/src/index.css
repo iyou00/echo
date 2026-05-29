@@ -5655,14 +5655,11 @@ body {
 .clue-term {
   color: var(--ayin-green-900);
   font-weight: 600;
-  border-bottom: 0.5px dashed var(--ayin-green-600);
-  padding-bottom: 1px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
 .clue-term:hover {
   background-color: var(--ayin-green-100);
-  border-bottom-style: solid;
 }
 
 /* --- Tuner Scale (ERA TRAVEL) --- */
