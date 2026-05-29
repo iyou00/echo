@@ -5897,6 +5897,7 @@ body {
 .sig-track {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   padding: 12px 0;
   border-bottom: 0.5px dashed var(--border);
   transition: background-color 0.2s ease;
@@ -5957,8 +5958,68 @@ body {
   font-weight: 500;
 }
 
-/* --- Echo Q&A answers --- */
-.q-reply-bubble {
+/* --- Echo Q&A answers (taste-q- prefixed to prevent collision with queue q-item) --- */
+.taste-q-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 0.5px dashed rgba(99, 153, 34, 0.25);
+}
+.taste-q-item:last-child {
+  border-bottom: 0;
+}
+.taste-q-mark {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  color: var(--ayin-green-600);
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: -2px;
+  font-weight: 500;
+}
+.taste-q-body {
+  flex: 1;
+  min-width: 0;
+}
+.taste-q-text {
+  font-family: var(--font-serif);
+  font-size: 13.5px;
+  color: var(--ayin-green-900);
+  line-height: 1.6;
+  margin-bottom: 8px;
+  text-align: left;
+}
+.taste-q-actions {
+  display: flex;
+  gap: 6px;
+}
+.taste-q-btn {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 4px 10px;
+  background: transparent;
+  border: 0.5px solid var(--ayin-green-600);
+  color: var(--ayin-green-700);
+  border-radius: 12px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.taste-q-btn:hover {
+  background: var(--ayin-green-600);
+  color: var(--ayin-green-100);
+}
+.taste-q-btn.sec {
+  border-color: var(--border);
+  color: var(--text-secondary);
+}
+.taste-q-btn.sec:hover {
+  background: var(--bg-secondary);
+  border-color: var(--text-tertiary);
+  color: var(--text-primary);
+}
+.taste-q-reply-bubble {
   font-family: var(--font-serif);
   font-size: 12px;
   color: var(--ayin-green-900);

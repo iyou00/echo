@@ -367,20 +367,35 @@ function buildTopArtists(context: ProfileBuildContext): TasteProfile['artists'] 
 }
 
 function buildTopGenres(context: ProfileBuildContext, previous: TasteProfile | null, totalGenre: number): TasteProfile['genres'] {
-  return topEntries(context.genreCounts, 8).map(([name, count]) => {
-    const trend = (() => {
-      const last = previous?.genres.find((genre) => genre.name === name)?.weight ?? 0
-      const next = count / totalGenre
-      if (next - last > 0.03) return 'up' as const
-      if (last - next > 0.03) return 'down' as const
-      return 'steady' as const
-    })()
-    return {
-      name,
-      weight: clamp(count / totalGenre),
-      trend,
-    }
-  })
+  const allArtists = new Set(
+    Array.from(context.artistStats.keys()).map(name => name.trim().toLowerCase())
+  )
+  const explicitArtists = new Set([
+    '王菲', '林俊杰', '周杰伦', 'bruno mars', 'charlie puth', '蔡健雅', '海洋bo', 'justin bieber', 'taylor swift', 'adele', 'eason chan', '陈奕迅', '孙燕姿', '张杰', '邓紫棋'
+  ])
+
+  return topEntries(context.genreCounts, 16)
+    .filter(([name]) => {
+      const cleanName = name.trim().toLowerCase()
+      if (allArtists.has(cleanName)) return false
+      if (explicitArtists.has(cleanName)) return false
+      return true
+    })
+    .slice(0, 8)
+    .map(([name, count]) => {
+      const trend = (() => {
+        const last = previous?.genres.find((genre) => genre.name === name)?.weight ?? 0
+        const next = count / totalGenre
+        if (next - last > 0.03) return 'up' as const
+        if (last - next > 0.03) return 'down' as const
+        return 'steady' as const
+      })()
+      return {
+        name,
+        weight: clamp(count / totalGenre),
+        trend,
+      }
+    })
 }
 
 function buildMoodItems(context: ProfileBuildContext, totalMood: number, topArtists: TasteProfile['artists']): TasteProfile['moods'] {

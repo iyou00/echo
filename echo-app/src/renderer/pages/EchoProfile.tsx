@@ -202,6 +202,18 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
   const artistItems = profile
     ? (display?.artistItems?.length ? display.artistItems : profile.artists.map((artist) => ({ name: artist.name, affinity: artist.affinity, note: artist.notes ?? '还在观察', evidenceLevel: 'weak' as const, source: 'fallback' as const })))
     : []
+
+  const artistNamesSet = new Set(artistItems.map(a => a.name.trim().toLowerCase()))
+  const explicitArtistsSet = new Set([
+    '王菲', '林俊杰', '周杰伦', 'bruno mars', 'charlie puth', '蔡健雅', '海洋bo', 'justin bieber', 'taylor swift', 'adele', 'eason chan', '陈奕迅', '孙燕姿', '张杰', '邓紫棋'
+  ])
+
+  const genreItemsFiltered = genreItems.filter((genre) => {
+    const nameLower = genre.name.trim().toLowerCase()
+    if (artistNamesSet.has(nameLower)) return false
+    if (explicitArtistsSet.has(nameLower)) return false
+    return true
+  })
   
   const moodItems = profile
     ? (display?.moodItems?.length ? display.moodItems : profile.moods.slice(0, 6).map((mood) => ({ tag: mood.tag, frequency: mood.frequency, evidenceLevel: 'weak' as const, source: 'fallback' as const })))
@@ -697,9 +709,9 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
                         {/* Inline sub-timeline loop memory details */}
                         {isExpanded && (
                           <div className="sig-loop-timeline">
-                            <div className="loop-milestone-row">
+                            <div className="loop-milestone-row" style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
                               <span style={{ fontWeight: 600, color: 'var(--ayin-green-900)' }}>触发原因：{item.source === 'favorite' ? '主动偏好收藏' : item.source === 'loop' ? '高频重播循环' : '完整耐受聆听'}</span>
-                              <span className="loop-time-stamp">{displayDate(portraitUpdatedAt ?? new Date().toISOString())}</span>
+                              <span className="loop-time-stamp" style={{ marginLeft: '12px', flexShrink: 0 }}>{displayDate(portraitUpdatedAt ?? new Date().toISOString())}</span>
                             </div>
                             <p style={{ marginTop: '2px', lineHeight: '1.4' }}>
                               {item.source === 'favorite' && '你曾主动为它亮起红心，这首会被我珍重地放在偏好前排，在未来的日常 FM 中也更容易听到。'}
@@ -718,9 +730,9 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
             </Section>
 
             {/* 章 8 · 爱听流派 (GENRE) */}
-            {genreItems.length > 0 && (
+            {genreItemsFiltered.length > 0 && (
               <Section label="G E N R E">
-                {genreItems.slice(0, 5).map((genre) => (
+                {genreItemsFiltered.slice(0, 5).map((genre) => (
                   <div className={`genre-row evidence-${genre.evidenceLevel}`} key={genre.name}>
                     <div className="genre-head">
                       <span className="genre-name">{genre.name}</span>
@@ -775,10 +787,10 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
                     const isReplying = inputAnswerId === q.id
 
                     return (
-                      <div className="q-item" key={q.id}>
-                        <div className="q-mark">Q</div>
-                        <div className="q-body">
-                          <div className="q-text">{q.content}</div>
+                      <div className="taste-q-item" key={q.id}>
+                        <div className="taste-q-mark">Q</div>
+                        <div className="taste-q-body">
+                          <div className="taste-q-text">{q.content}</div>
 
                           {!ans ? (
                             <>
@@ -806,13 +818,13 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
                                   />
                                   <div style={{ display: 'flex', gap: '6px' }}>
                                     <button 
-                                      className="q-btn" 
+                                      className="taste-q-btn" 
                                       onClick={() => handleAnswerQuestion(q.id, answerInputText)}
                                     >
                                       提交回答
                                     </button>
                                     <button 
-                                      className="q-btn sec" 
+                                      className="taste-q-btn sec" 
                                       onClick={() => setInputAnswerId(null)}
                                     >
                                       取消
@@ -820,21 +832,21 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
                                   </div>
                                 </div>
                               ) : (
-                                <div className="q-actions">
-                                  <button className="q-btn" onClick={() => {
+                                <div className="taste-q-actions">
+                                  <button className="taste-q-btn" onClick={() => {
                                     setInputAnswerId(q.id)
                                     setAnswerInputText('')
                                   }}>
                                     回答
                                   </button>
-                                  <button className="q-btn sec" onClick={() => handleSkipQuestion(q.id)}>
+                                  <button className="taste-q-btn sec" onClick={() => handleSkipQuestion(q.id)}>
                                     跳过
                                   </button>
                                 </div>
                               )}
                             </>
                           ) : (
-                            <div className="q-reply-bubble">
+                            <div className="taste-q-reply-bubble">
                               {ans === 'skipped' ? (
                                 <span style={{ color: 'var(--text-tertiary)', fontStyle: 'italic' }}>已跳过该问题。我会通过之后的曲库默默加深对你的理解。</span>
                               ) : (
