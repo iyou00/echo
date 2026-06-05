@@ -1,9 +1,8 @@
-import { type CSSProperties, useCallback, useEffect, useRef, useState } from 'react'
+import { type CSSProperties, useEffect, useRef, useState } from 'react'
 import { Pause, Play, RefreshCw, Settings } from 'lucide-react'
-import type { EchoApi, MemoryAuditSummary, PlaybackState, ProfileEvidenceLevel, ProfileEvidenceSource, TasteProfile, Track } from '../../types/ipc'
+import type { EchoApi, PlaybackState, ProfileEvidenceLevel, ProfileEvidenceSource, TasteProfile, Track } from '../../types/ipc'
 import type { AppPageProps } from '../appState'
 import { BrandLogo, EmptyState, Section } from '../components'
-import { RuntimeTaskNotice } from '../components/RuntimeTaskNotice'
 import { latestRunningRuntimeTask, useRuntimeTasks } from '../hooks/useRuntimeTasks'
 import { stableHash } from '../../shared/deterministic'
 
@@ -20,14 +19,20 @@ function asPercent(value: number) {
   return Math.max(0, Math.min(100, Math.round(value <= 1 ? value * 100 : value)))
 }
 
+function percentDisplay(value: number, minBar = 3) {
+  if (!Number.isFinite(value) || value <= 0) return { value: 0, label: '0%', bar: 0 }
+  const clamped = Math.max(0, Math.min(100, value))
+  const rounded = Math.round(clamped)
+  return {
+    value: rounded,
+    label: rounded === 0 ? '<1%' : `${rounded}%`,
+    bar: Math.max(minBar, rounded),
+  }
+}
+
 function displayDate(value?: string) {
   if (!value) return ''
   return new Date(value).toLocaleDateString('zh-CN')
-}
-
-function displayAuditDate(value?: string) {
-  if (!value) return ''
-  return new Date(value).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
 }
 
 function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)) }
@@ -102,6 +107,34 @@ function moodCloudStyle(mood: MoodItem, index: number): CSSProperties {
   } as CSSProperties
 }
 
+function topMoodLine(moods: MoodItem[]) {
+  const top = moods[0]
+  if (!top) return ''
+  const percent = asPercent(top.frequency)
+  if (percent >= 45) return `最近氛围：${top.tag}`
+  return `氛围线索：${top.tag}`
+}
+
+function eraEvidenceLine(profile: TasteProfile, era: string): string {
+  const percent = asPercent(profile.era_preference?.[era] ?? 0)
+  if (percent <= 0) return '这个年代暂时没有足够线索。'
+  if (percent >= 35) return `这个频段占比 ${percent}%，已经是你歌单里的明显线索。`
+  if (percent >= 15) return `这个频段占比 ${percent}%，有一些稳定出现的声音。`
+  return `这个频段占比 ${percent}%，目前只是轻微信号。`
+}
+
+function tempoLabel(value: 'slow' | 'medium' | 'fast') {
+  if (value === 'slow') return '慢速'
+  if (value === 'fast') return '快速'
+  return '中速'
+}
+
+function energyLabel(percent: number) {
+  if (percent >= 66) return '偏高能'
+  if (percent <= 38) return '偏安静'
+  return '中等能量'
+}
+
 export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, refreshQueue, refreshProfile }: EchoProfileProps) {
   const [busy, setBusy] = useState(false)
   const [phase, setPhase] = useState<'idle' | 'out' | 'loading' | 'in'>('idle')
@@ -112,11 +145,9 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle')
   const [statusMessage, setStatusMessage] = useState('')
 
-  // Retained existing states for correction and memory audit
   const [correctionOpen, setCorrectionOpen] = useState(false)
   const [correctionDraft, setCorrectionDraft] = useState('')
   const [correctionSaving, setCorrectionSaving] = useState(false)
-  const [memoryAudit, setMemoryAudit] = useState<MemoryAuditSummary | null>(null)
 
   // New Music-Centric Interactive States
   const [activeMoodFilter, setActiveMoodFilter] = useState<string>('all')
@@ -130,14 +161,14 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
   const profileTaskRunning = Boolean(profileTask)
   const profileBusy = busy || profileTaskRunning
 
-  // Automatically initialize tuner pointer to user's highest preference era
+  // Automatically initialize tuner pointer to the strongest valid era signal.
   useEffect(() => {
-    if (profile?.era_preference) {
-      const sorted = Object.entries(profile.era_preference).sort((a, b) => b[1] - a[1])
-      if (sorted[0]) {
-        setTunerActiveEra(sorted[0][0])
-      }
-    }
+    const sorted = profile?.era_preference
+      ? Object.entries(profile.era_preference)
+          .filter(([, value]) => Number.isFinite(value) && value > 0)
+          .sort((a, b) => b[1] - a[1])
+      : []
+    setTunerActiveEra(sorted[0]?.[0] ?? '20s')
   }, [profile])
 
 
@@ -158,6 +189,7 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
   }, [echo])
 
   useEffect(() => {
+    mountedRef.current = true
     return () => {
       mountedRef.current = false
       clearTimeout(statusTimerRef.current)
@@ -185,66 +217,34 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
     : []
 
   const artistNamesSet = new Set(artistItems.map(a => a.name.trim().toLowerCase()))
-  const explicitArtistsSet = new Set([
-    '王菲', '林俊杰', '周杰伦', 'bruno mars', 'charlie puth', '蔡健雅', '海洋bo', 'justin bieber', 'taylor swift', 'adele', 'eason chan', '陈奕迅', '孙燕姿', '张杰', '邓紫棋'
-  ])
 
   const genreItemsFiltered = genreItems.filter((genre) => {
     const nameLower = genre.name.trim().toLowerCase()
     if (artistNamesSet.has(nameLower)) return false
-    if (explicitArtistsSet.has(nameLower)) return false
     return true
   })
 
   const rawDisplayedGenres = genreItemsFiltered.slice(0, 5)
-  const normalizedPercentages = (() => {
-    const weights = rawDisplayedGenres.map((g) => g.weight)
-    if (weights.length === 0) return []
-    const total = weights.reduce((a, b) => a + b, 0)
-    if (total === 0) {
-      const base = Math.floor(100 / weights.length)
-      const res = Array(weights.length).fill(base)
-      const rem = 100 - base * weights.length
-      for (let i = 0; i < rem; i++) res[i] += 1
-      return res
-    }
-    const rounded = weights.map((w) => Math.round((w / total) * 100))
-    const sum = rounded.reduce((a, b) => a + b, 0)
-    const diff = 100 - sum
-    if (diff !== 0) {
-      let maxIdx = 0
-      let maxVal = -1
-      for (let i = 0; i < weights.length; i++) {
-        if (weights[i] > maxVal) {
-          maxVal = weights[i]
-          maxIdx = i
-        }
-      }
-      rounded[maxIdx] += diff
-    }
-    return rounded
-  })()
+  const totalGenreWeight = genreItemsFiltered.reduce((sum, genre) => {
+    return sum + (Number.isFinite(genre.weight) && genre.weight > 0 ? genre.weight : 0)
+  }, 0)
 
-  const displayedGenres = rawDisplayedGenres.map((genre, idx) => ({
-    ...genre,
-    displayPercent: normalizedPercentages[idx] ?? 0
-  }))
+  const displayedGenres = rawDisplayedGenres.map((genre) => {
+    const percent = totalGenreWeight > 0 && Number.isFinite(genre.weight) && genre.weight > 0
+      ? (genre.weight / totalGenreWeight) * 100
+      : 0
+    const display = percentDisplay(percent)
+    return {
+      ...genre,
+      displayPercent: display.value,
+      displayPercentLabel: display.label,
+      barPercent: display.bar,
+    }
+  })
   
   const moodItems = profile
     ? (display?.moodItems?.length ? display.moodItems : profile.moods.slice(0, 6).map((mood) => ({ tag: mood.tag, frequency: mood.frequency, evidenceLevel: 'weak' as const, source: 'fallback' as const })))
     : []
-
-  const refreshMemoryAudit = useCallback(async () => {
-    try {
-      setMemoryAudit(await echo.taste.getMemoryAudit())
-    } catch {
-      setMemoryAudit(null)
-    }
-  }, [echo])
-
-  useEffect(() => {
-    void refreshMemoryAudit()
-  }, [refreshMemoryAudit, profile?.profile_meta?.updatedAt, profile?.profile_meta?.structuredUpdatedAt])
 
   function showStatus(type: 'success' | 'error', message: string, autoHideMs?: number) {
     clearTimeout(statusTimerRef.current)
@@ -259,20 +259,31 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
     setStatusMessage('')
   }
 
+  function portraitFriendlyError(error: unknown): string {
+    const message = error instanceof Error ? error.message : String(error)
+    if (/取消|cancell?ed|aborted/i.test(message)) return '好，我先停下。'
+    if (/没有返回 portrait|画像文案生成失败|需要直接对用户|缺少|内部证据|禁用表达|编造/i.test(message)) {
+      return '我刚才没写顺，先保留原来的理解。'
+    }
+    if (/LLM 配置|API.?key|鉴权|余额|配置还没|rate|429|401|403|请求太频繁/i.test(message)) {
+      return '我这会儿有点连不上脑子，先检查一下模型设置。'
+    }
+    if (/超时|网络|服务端|响应格式|fetch|ECONN|ENOTFOUND/i.test(message)) return '我刚才连得不太顺，稍后再试一次。'
+    return '为什么我看不懂你呢？居然失败了。'
+  }
+
   async function regenerate() {
     setBusy(true)
     clearStatus()
-    setPhase('out')
-    await sleep(400)
-    if (!mountedRef.current) return
-
-    setPhase('loading')
-
     try {
-      await echo.taste.regeneratePortrait()
+      setPhase('out')
+      await sleep(400)
+      if (!mountedRef.current) return
+
+      setPhase('loading')
+      await Promise.all([echo.taste.regeneratePortrait(), sleep(900)])
       try {
         await refreshProfile()
-        await refreshMemoryAudit()
       } catch {
         // Safe catch
       }
@@ -281,14 +292,13 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
       await sleep(400)
       if (!mountedRef.current) return
       setPhase('idle')
-      showStatus('success', '已刷新', 2000)
     } catch (error) {
       if (!mountedRef.current) return
       setPhase('in')
       await sleep(400)
       if (!mountedRef.current) return
       setPhase('idle')
-      showStatus('error', error instanceof Error ? error.message : '画像刷新失败')
+      showStatus('error', portraitFriendlyError(error))
     } finally {
       if (mountedRef.current) setBusy(false)
     }
@@ -354,7 +364,6 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
         setCorrectionOpen(false)
         showStatus('success', result.message, 2600)
         await refreshProfile()
-        await refreshMemoryAudit()
       } else {
         showStatus('error', result.message, 3000)
       }
@@ -365,15 +374,6 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
     }
   }
 
-  // Interactive Era Quotes
-  const ERA_QUOTES: Record<string, string> = {
-    '80s': '金色的八十年代。经典的实体唱片，厚重的合成器与温暖的吉他SOLO。这部分声音在你这里像一处秘密避难所，偶尔来，但每次来都极其专注。',
-    '90s': '黄金九十年代。华语流行的鼎盛时期，纯粹的词曲与深情的编曲。它们构成了你听音品味的坚实基底，每当你需要寻找某种旋律感时，它总能接住你。',
-    '00s': '千禧新纪元。R&B、新流行乐与乐团黄金时代的交汇。那些你在清晨或者久别重逢时反复回听的旋律，都藏在这条频段里。',
-    '10s': '数字洪流时代。独立乐团、城市民谣与精细制作的流行乐。这是你最熟悉的背景音，也是你深夜循环最多的治愈能量来源。',
-    '20s': '当下频段。短视频时代的冲击、K-pop 白天电池与新锐说唱。高电量、快节奏，是你白天工作和通勤时最强劲的推进器。'
-  }
-
   const tunerNeedleLefts: Record<string, string> = {
     '80s': '10%',
     '90s': '30%',
@@ -382,30 +382,65 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
     '20s': '90%'
   }
 
-  // Filter Signature tracks by click choices
+  // Filter signature tracks only by explicit evidence.
   const filteredSignatureDisplay = signatureDisplay.filter((item) => {
     if (activeMoodFilter === 'all') return true
     return (
       (item.track.profileEvidence?.moods?.includes(activeMoodFilter)) ||
       (item.track.semantic?.moods?.includes(activeMoodFilter)) ||
       (item.note?.includes(activeMoodFilter)) ||
-      (item.track.reason?.includes(activeMoodFilter)) ||
-      (stableHash(`${item.track.title}:${activeMoodFilter}`) % 3 === 0)
+      (item.track.reason?.includes(activeMoodFilter))
     )
   })
 
-  // 32-bar visualizer heights generator using stableHash to prevent re-render mismatch
-  const barsCount = 32
-  const visualizerHeights = Array.from({ length: barsCount }).map((_, index) => {
-    const rawHash = stableHash(`${profile?.echo_portrait ?? ''}:${index}`)
-    return 20 + (rawHash % 71) // 20% to 90% range
+  const energyKnown = profile?.energy_preference != null
+  const energyValue = profile?.energy_preference ?? 0
+  const energyPercent = asPercent(energyValue)
+  const eraEntries = profile?.era_preference
+    ? Object.entries(profile.era_preference)
+        .filter(([, value]) => Number.isFinite(value) && value > 0)
+        .sort((a, b) => b[1] - a[1])
+    : []
+  const topEra = eraEntries[0]
+  const tempoEntries = profile?.tempo_preference
+    ? (Object.entries(profile.tempo_preference) as Array<['slow' | 'medium' | 'fast', number]>)
+        .filter(([, value]) => Number.isFinite(value) && value > 0)
+        .sort((a, b) => b[1] - a[1])
+    : []
+  const topTempo = tempoEntries[0]
+  const sceneSource = profile?.scenes?.filter((scene) => scene.tag.trim() && scene.frequency > 0).slice(0, 5) ?? []
+  const sceneTotal = sceneSource.reduce((sum, scene) => sum + scene.frequency, 0)
+  const sceneItems = sceneSource.map((scene) => {
+    const display = percentDisplay(sceneTotal > 0 ? (scene.frequency / sceneTotal) * 100 : asPercent(scene.frequency), 6)
+    return {
+      ...scene,
+      labelPercent: display.label,
+      barPercent: display.bar,
+    }
   })
+  const risingGenres = genreItemsFiltered.filter((genre) => genre.trend === 'up').slice(0, 3)
+  const fallingGenres = genreItemsFiltered.filter((genre) => genre.trend === 'down').slice(0, 2)
+  const trendLines = [
+    risingGenres.length ? `最近更明显：${risingGenres.map((genre) => genre.name).join('、')}` : '',
+    fallingGenres.length ? `最近变少：${fallingGenres.map((genre) => genre.name).join('、')}` : '',
+    topMoodLine(moodItems),
+    energyKnown ? `整体能量：${energyLabel(energyPercent)}` : '',
+  ].filter(Boolean)
+  const statsCards = [
+    { label: '主要流派', value: displayedGenres[0]?.name ?? '线索不足', meta: displayedGenres[0] ? displayedGenres[0].displayPercentLabel : '继续听几首会更准' },
+    { label: '常听艺人', value: artistItems[0]?.name ?? '线索不足', meta: artistItems[0] ? `${asPercent(artistItems[0].affinity)}%` : '还在观察' },
+    { label: '氛围倾向', value: moodItems[0]?.tag ?? '线索不足', meta: moodItems[0] ? `${asPercent(moodItems[0].frequency)}%` : '还在观察' },
+    { label: '年代偏好', value: topEra?.[0] ?? '线索不足', meta: topEra ? `${asPercent(topEra[1])}%` : '还在观察' },
+    { label: '节奏速度', value: topTempo ? tempoLabel(topTempo[0]) : '线索不足', meta: topTempo ? `${asPercent(topTempo[1])}%` : '还在观察' },
+    { label: '能量水平', value: energyKnown ? energyLabel(energyPercent) : '线索不足', meta: energyKnown ? `${energyPercent}%` : '还在观察' },
+  ]
 
   // Segments calculate for 30 bars Bottom Seeker HUD
   const duration = localPlaybackState?.duration ?? 180
   const position = localPlaybackState?.position ?? 0
   const percent = duration > 0 ? position / duration : 0
   const activeSegmentsCount = Math.min(30, Math.floor(percent * 30))
+  const portraitPhase = profileBusy && phase === 'idle' ? 'loading' : phase
 
   return (
     <div className="phone-surface profile-page">
@@ -426,8 +461,8 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
           <EmptyState
             icon={<BrandLogo className="empty-logo" size={56} />}
             className="profile-empty"
-            title={profileBusy ? '我正在读你的歌单……第一遍读得慢一点,你别催。' : '我还没听过你的歌呢。你给我导一份歌单,我读一下,然后我们再正经聊。'}
-            body={profileBusy ? profileTask?.message ?? '大概再等 20 秒。' : undefined}
+            title={profileBusy ? '等我一下。' : '我还没听过你的歌呢。你给我导一份歌单,我读一下,然后我们再正经聊。'}
+            body={undefined}
             sign={profileBusy ? undefined : '— Echo · 等你'}
             action={!profileBusy && <button className="primary-button empty-cta" onClick={() => navigate('settings')}>导 入 歌 单</button>}
           />
@@ -436,8 +471,8 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
             {/* 章 1 · Echo 画像 */}
             <Section className="portrait-section">
               <BrandLogo className={`avatar-big${profileBusy ? ' avatar-breathing' : ''}`} size={56} />
-              <div className={`portrait-content ${phase}`}>
-                {phase === 'idle' || phase === 'in' ? (
+              <div className={`portrait-content ${portraitPhase}`}>
+                {portraitPhase === 'idle' || portraitPhase === 'in' ? (
                   <p className="portrait-text">
                     {/* Make clue terms inside echo portrait highlightable on click */}
                     {profile.echo_portrait.split(/(，|。|、|！|？|”|“)/).map((segment, index) => {
@@ -463,11 +498,17 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
                     })}
                   </p>
                 ) : (
-                  <p className="portrait-text portrait-loading">{profileTask?.message ?? '正在透过音乐看你,请稍等。'}</p>
+                  <div className="portrait-loading" role="status" aria-label="画像生成中">
+                    <div className="portrait-skeleton" aria-hidden="true">
+                      <span className="portrait-skeleton-line long" />
+                      <span className="portrait-skeleton-line mid" />
+                      <span className="portrait-skeleton-line short" />
+                    </div>
+                  </div>
                 )}
               </div>
               <div className="portrait-sign">
-                — Echo · {profileBusy ? '正在写' : (portraitUpdatedAt ? `写于 ${displayDate(portraitUpdatedAt)}` : '初次见面')}
+                — Echo · {portraitUpdatedAt ? `写于 ${displayDate(portraitUpdatedAt)}` : '初次见面'}
                 {status !== 'idle' && <span className={`portrait-status ${status}`}>{statusMessage}</span>}
               </div>
               <div className="portrait-correction">
@@ -495,147 +536,162 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
                 )}
               </div>
             </Section>
-            <RuntimeTaskNotice task={profileTask?.status === 'running' ? profileTask : null} title="口味画像" onCancel={(id) => { void echo.runtime.cancelTask(id) }} />
 
-            {/* 章 2 · 记忆审计 (MEMORY AUDIT) */}
-            {memoryAudit && memoryAudit.items.length > 0 && (
-              <Section label="M E M O R Y">
-                <div className="memory-audit-head" style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', marginBottom: '8px' }}>
-                  <span>{memoryAudit.items.length} 条关键记忆</span>
-                  <span>纠正 {memoryAudit.counts.corrections} · 收藏 {memoryAudit.counts.favorites}</span>
-                </div>
-                <div className="memory-audit-list" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {memoryAudit.items.slice(0, 3).map((item) => (
-                    <div className={`memory-audit-item memory-${item.kind}`} key={item.id} style={{ display: 'flex', gap: '10px', padding: '8px 10px', backgroundColor: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', border: '0.5px solid var(--border)' }}>
-                      <span className="memory-audit-label" style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', padding: '2px 6px', borderRadius: '4px', backgroundColor: item.kind === 'correction' ? '#FFF2F2' : 'var(--ayin-green-100)', color: item.kind === 'correction' ? '#B86B3E' : 'var(--ayin-green-900)', height: 'fit-content' }}>
-                        {item.label}
-                      </span>
-                      <div className="memory-audit-body" style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                        <div className="memory-audit-title" style={{ fontWeight: 500, fontSize: '12px' }}>{item.title}</div>
-                        {item.detail && <div className="memory-audit-detail" style={{ fontSize: '10.5px', color: 'var(--text-secondary)', marginTop: '2px' }}>{item.detail}</div>}
-                      </div>
-                      {item.createdAt && <time className="memory-audit-date" style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-tertiary)' }}>{displayAuditDate(item.createdAt)}</time>}
-                    </div>
-                  ))}
-                </div>
-              </Section>
-            )}
-
-            {/* 章 3 · 收音机年代仪 (ERA TRAVEL) */}
-            {profile.era_preference && Object.keys(profile.era_preference).length > 0 && (
-              <Section label="E R A   T R A V E L">
-                <div className="tuner-dial">
-                  <div className="tuner-needle" style={{ left: tunerNeedleLefts[tunerActiveEra] ?? '50%' }} />
-                  <div className="tuner-scale">
-                    {['80s', '90s', '00s', '10s', '20s'].map((era) => {
-                      const isLong = era === '80s' || era === '90s' || era === '00s' || era === '10s' || era === '20s'
-                      const isSelected = tunerActiveEra === era
-                      return (
-                        <div 
-                          key={era} 
-                          className={`tuner-tick ${isLong ? 'long-tick' : ''} ${isSelected ? 'active' : ''}`}
-                          onClick={() => setTunerActiveEra(era)}
-                        >
-                          <span className="tuner-tick-label">{era}</span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-                <div className="tuner-meta">
-                  <span>频段对焦：<span className="tuner-meta-highlight">{tunerActiveEra}</span></span>
-                  <span>偏好占比：<span className="tuner-meta-highlight">{asPercent(profile.era_preference?.[tunerActiveEra] ?? 0)}%</span></span>
-                </div>
-                <p className="tuner-quote">{ERA_QUOTES[tunerActiveEra] ?? '聚焦在时空频段中，读取你的音乐基因线索。'}</p>
-              </Section>
-            )}
-
-            {/* 章 4 · 音乐能量与心律波 (ENERGY & TEMPO) */}
-            <Section label="E N E R G Y   &   T E M P O">
-              <div className="energy-row">
-                <div 
-                  className="battery-container" 
-                  onClick={() => setShowEnergyDetails(prev => !prev)}
-                  title="点击查看电量与心律分析"
-                >
-                  <div className="battery-fill" style={{ width: `${asPercent(profile.energy_preference ?? 0.68)}%` }} />
-                </div>
-                <p className="energy-desc">
-                  当前听音蓄能值达到 <strong style={{ color: 'var(--ayin-green-700)' }}>{asPercent(profile.energy_preference ?? 0.68)}%</strong>。
-                  {profile.tempo_preference?.fast && profile.tempo_preference.fast > 0.4 
-                    ? '最近偏好快节奏强律动，为白天充满活力电量！' 
-                    : '偏好温和沉静的中慢速旋律，让身心处于充电和放松状态。'}
-                </p>
+            <Section label="最近变化">
+              <div className="profile-change-list">
+                {trendLines.length > 0 ? trendLines.map((line) => (
+                  <div className="profile-change-item" key={line}>{line}</div>
+                )) : (
+                  <div className="profile-change-item muted">最近还没有明显变化，画像会继续根据播放、收藏和切歌更新。</div>
+                )}
               </div>
-
-              {showEnergyDetails && (
-                <div className="energy-dropdown">
-                  <div className="energy-drop-item">
-                    <span>日常音乐蓄电量 (Energy)</span>
-                    <span className="energy-drop-val">{asPercent(profile.energy_preference ?? 0.68)}%</span>
+              {eraEntries.length > 0 && (
+                <div className="profile-analysis-group compact">
+                  <div className="profile-analysis-title">年代偏好</div>
+                  <div className="tuner-dial">
+                    <div className="tuner-needle" style={{ left: tunerNeedleLefts[tunerActiveEra] ?? '50%' }} />
+                    <div className="tuner-scale">
+                      {['80s', '90s', '00s', '10s', '20s'].map((era) => {
+                        const isSelected = tunerActiveEra === era
+                        return (
+                          <div
+                            key={era}
+                            className={`tuner-tick long-tick ${isSelected ? 'active' : ''}`}
+                            onClick={() => setTunerActiveEra(era)}
+                          >
+                            <span className="tuner-tick-label">{era}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
                   </div>
-                  {profile.tempo_preference && (
-                    <>
-                      <div className="energy-drop-item">
-                        <span>慢速舒缓频率 (Slow Tempo)</span>
-                        <span className="energy-drop-val">{asPercent(profile.tempo_preference.slow)}%</span>
-                      </div>
-                      <div className="energy-drop-item">
-                        <span>中速舒缓平衡 (Medium Tempo)</span>
-                        <span className="energy-drop-val">{asPercent(profile.tempo_preference.medium)}%</span>
-                      </div>
-                      <div className="energy-drop-item">
-                        <span>快速元气律动 (Fast Tempo)</span>
-                        <span className="energy-drop-val">{asPercent(profile.tempo_preference.fast)}%</span>
-                      </div>
-                    </>
-                  )}
-                  <div className="energy-drop-item" style={{ borderTop: '0.5px dashed var(--border)', paddingTop: '4px', marginTop: '4px' }}>
-                    <span>日常探索欲望 (Discovery)</span>
-                    <span className="energy-drop-val">{asPercent(profile.discovery_appetite ?? 0.5)}%</span>
+                  <div className="tuner-meta">
+                    <span>{tunerActiveEra}</span>
+                    <span className="tuner-meta-highlight">{asPercent(profile.era_preference?.[tunerActiveEra] ?? 0)}%</span>
                   </div>
+                  <p className="tuner-quote">{eraEvidenceLine(profile, tunerActiveEra)}</p>
                 </div>
               )}
-
-              {/* 32-bar visualizer waves compliant with tokens.md */}
-              <div className="rhythm-waves">
-                {visualizerHeights.map((h, idx) => (
-                  <div 
-                    key={idx} 
-                    className="rhythm-bar" 
-                    style={{ height: `${h}%` }} 
-                  />
-                ))}
+              <div className="profile-analysis-group compact">
+                <div className="profile-analysis-title">节奏与能量</div>
+                <div className="energy-row">
+                  <div
+                    className="battery-container"
+                    onClick={() => setShowEnergyDetails(prev => !prev)}
+                    title="查看节奏细节"
+                  >
+                    <div className="battery-fill" style={{ width: `${energyKnown ? energyPercent : 0}%` }} />
+                  </div>
+                  <p className="energy-desc">
+                    {energyKnown ? `${energyLabel(energyPercent)} · ${topTempo ? tempoLabel(topTempo[0]) : '节奏还在观察'}` : '能量线索还不够，我会按真实播放继续观察。'}
+                  </p>
+                </div>
+                {showEnergyDetails && (
+                  <div className="energy-dropdown">
+                    <div className="energy-drop-item">
+                      <span>能量水平</span>
+                      <span className="energy-drop-val">{energyKnown ? `${energyPercent}%` : '线索不足'}</span>
+                    </div>
+                    {tempoEntries.map(([tempo, value]) => (
+                      <div className="energy-drop-item" key={tempo}>
+                        <span>{tempoLabel(tempo)}</span>
+                        <span className="energy-drop-val">{asPercent(value)}%</span>
+                      </div>
+                    ))}
+                    <div className="energy-drop-item" style={{ borderTop: '0.5px dashed var(--border)', paddingTop: '4px', marginTop: '4px' }}>
+                      <span>探索倾向</span>
+                      <span className="energy-drop-val">{asPercent(profile.discovery_appetite ?? 0.5)}%</span>
+                    </div>
+                  </div>
+                )}
               </div>
             </Section>
 
-            {/* 章 5 · 避雷过滤器拦截盾 (ACOUSTIC SHIELD) */}
-            {profile.anti_patterns && profile.anti_patterns.length > 0 && (
-              <Section label="A C O U S T I C   S H I E L D">
-                <div className="shield-card">
-                  <div className="shield-header">
-                    <span>SHIELD DEFENSE ACTIVE</span>
-                    <span>已拦截 {profile.anti_patterns.length} 个避雷信号</span>
+            <Section label="音乐品味统计">
+              <div className="profile-stats-grid">
+                {statsCards.map((item) => (
+                  <div className="profile-stat-card" key={item.label}>
+                    <span>{item.label}</span>
+                    <strong>{item.value}</strong>
+                    <small>{item.meta}</small>
                   </div>
-                  <div className="shield-tags">
-                    {profile.anti_patterns.slice(0, 3).map((term, index) => {
-                      const isSongSkip = term.startsWith('跳过:')
-                      const displayTerm = isSongSkip ? term.replace('跳过:', '切歌 · ') : `踩雷 · ${term}`
-                      return (
-                        <span key={index} className="shield-tag" title={isSongSkip ? '这首歌被你高频切过，Echo 自动将它移出推荐' : '你在聊天中标记过不喜欢该艺人'}>
-                          {displayTerm}
+                ))}
+              </div>
+              {displayedGenres.length > 0 && (
+                <div className="profile-analysis-group">
+                  <div className="profile-analysis-title">流派分布</div>
+                  {displayedGenres.map((genre) => (
+                    <div className={`genre-row evidence-${genre.evidenceLevel}`} key={genre.name}>
+                      <div className="genre-head">
+                        <span className="genre-name">{genre.name}</span>
+                        <span className={genre.trend === 'up' ? 'genre-trend trend-up' : genre.trend === 'down' ? 'genre-trend trend-down' : 'genre-trend trend-steady'}>
+                          {genre.trend === 'up' ? '↑' : genre.trend === 'down' ? '↓' : '·'} {genre.displayPercentLabel}
                         </span>
-                      )
-                    })}
+                      </div>
+                      <div className="genre-bar-bg">
+                        <div className="genre-bar-fill" style={{ width: `${genre.barPercent}%` }} />
+                      </div>
+                      {genre.note && <div className="genre-note">{genre.note}</div>}
+                      {genre.representativeArtists.length > 0 && (
+                        <div className="genre-chips">
+                          {genre.representativeArtists.map((artist) => <span className="genre-chip" key={`${genre.name}-${artist}`}>{artist}</span>)}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {artistItems.length > 0 && (
+                <div className="profile-analysis-group">
+                  <div className="profile-analysis-title">常听艺人</div>
+                  <div className="artist-list">
+                    {artistItems.slice(0, 5).map((artist, index) => (
+                      <div className={`artist-item evidence-${artist.evidenceLevel}`} key={artist.name}>
+                        <span className="artist-rank">{String(index + 1).padStart(2, '0')}</span>
+                        <div className="artist-name">
+                          {artist.name}
+                          <small>{artist.note ?? '还在观察'}</small>
+                        </div>
+                        <div className="affinity-bar">
+                          <span className="affinity-fill" style={{ width: `${asPercent(artist.affinity)}%` }} />
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              </Section>
-            )}
+              )}
+              {moodItems.length > 0 && (
+                <div className="profile-analysis-group">
+                  <div className="profile-analysis-title">氛围倾向</div>
+                  <div className="moods-container">
+                    <div className="mood-cloud" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 10px', alignItems: 'baseline' }}>
+                      {moodItems.map((mood, index) => {
+                        const isSelected = activeMoodFilter === mood.tag
+                        const baseStyle = moodCloudStyle(mood, index)
+                        return (
+                          <span
+                            className={`mood-cloud-tag ${isSelected ? 'active' : ''}`}
+                            key={mood.tag}
+                            style={{
+                              ...baseStyle,
+                              padding: '4px 10px',
+                              borderRadius: '14px',
+                              backgroundColor: 'var(--ayin-green-100)',
+                              fontSize: 'var(--mood-size)'
+                            } as CSSProperties}
+                            onClick={() => setActiveMoodFilter(isSelected ? 'all' : mood.tag)}
+                          >
+                            {mood.tag}
+                          </span>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </Section>
 
-
-
-            {/* 章 7 · 代表作 7 首 (SIGNATURE 7) */}
-            <Section label={activeMoodFilter === 'all' ? "S I G N A T U R E   ·   7" : `F I L T E R E D   ·   ${activeMoodFilter.toUpperCase()}`}>
+            <Section label={activeMoodFilter === 'all' ? '代表歌曲' : `${activeMoodFilter} · 代表歌曲`}>
               <div className="signature-list">
                 {filteredSignatureDisplay.length === 0 ? (
                   <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', padding: '16px 0', textAlign: 'center', fontStyle: 'italic' }}>
@@ -670,87 +726,30 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
               </div>
             </Section>
 
-            {/* 章 8 · 爱听流派 (GENRE) */}
-            {displayedGenres.length > 0 && (
-              <Section label="G E N R E">
-                {displayedGenres.map((genre) => (
-                  <div className={`genre-row evidence-${genre.evidenceLevel}`} key={genre.name}>
-                    <div className="genre-head">
-                      <span className="genre-name">{genre.name}</span>
-                      <span className={genre.trend === 'up' ? 'genre-trend trend-up' : genre.trend === 'down' ? 'genre-trend trend-down' : 'genre-trend trend-steady'}>
-                        {genre.trend === 'up' ? '↑' : genre.trend === 'down' ? '↓' : '·'} {genre.displayPercent}%
-                      </span>
-                    </div>
-                    <div className="genre-bar-bg">
-                      <div className="genre-bar-fill" style={{ width: `${genre.displayPercent}%` }} />
-                    </div>
-                    {genre.note && <div className="genre-note">{genre.note}</div>}
-                    {genre.representativeArtists.length > 0 && (
-                      <div className="genre-chips">
-                        {genre.representativeArtists.map((artist) => <span className="genre-chip" key={`${genre.name}-${artist}`}>{artist}</span>)}
+            <Section label="常出现的听歌场景">
+              {sceneItems.length > 0 ? (
+                <div className="profile-scene-list">
+                  {sceneItems.map((scene) => (
+                    <div className="profile-scene-row" key={scene.tag}>
+                      <div className="profile-scene-head">
+                        <span>{scene.tag}</span>
+                        <small>{scene.labelPercent}</small>
                       </div>
-                    )}
-                  </div>
-                ))}
-              </Section>
-            )}
-
-            {/* 章 9 · 钟爱艺人 (ARTISTS) */}
-            {artistItems.length > 0 && (
-              <Section label="A R T I S T S">
-                <div className="artist-list">
-                  {artistItems.slice(0, 7).map((artist, index) => (
-                    <div className={`artist-item evidence-${artist.evidenceLevel}`} key={artist.name}>
-                      <span className="artist-rank">{String(index + 1).padStart(2, '0')}</span>
-                      <div className="artist-name">
-                        {artist.name}
-                        <small>{artist.note ?? '还在观察'}</small>
-                      </div>
-                      <div className="affinity-bar">
-                        <span className="affinity-fill" style={{ width: `${asPercent(artist.affinity)}%` }} />
+                      <div className="genre-bar-bg">
+                        <div className="genre-bar-fill" style={{ width: `${scene.barPercent}%` }} />
                       </div>
                     </div>
                   ))}
                 </div>
-              </Section>
-            )}
-
-            {/* 章 6 · 情绪流过滤 (MOOD) */}
-            {moodItems.length > 0 && (
-              <Section label="M O O D">
-                <div className="moods-container">
-                  <div className="mood-cloud" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 10px', alignItems: 'baseline' }}>
-                    {moodItems.map((mood, index) => {
-                      const isSelected = activeMoodFilter === mood.tag
-                      const baseStyle = moodCloudStyle(mood, index)
-                      return (
-                        <span 
-                          className={`mood-cloud-tag ${isSelected ? 'active' : ''}`} 
-                          key={mood.tag} 
-                          style={{
-                            ...baseStyle,
-                            padding: '4px 10px',
-                            borderRadius: '14px',
-                            backgroundColor: 'var(--ayin-green-100)',
-                            fontSize: 'var(--mood-size)'
-                          } as CSSProperties}
-                          onClick={() => setActiveMoodFilter(isSelected ? 'all' : mood.tag)}
-                        >
-                          {mood.tag}
-                        </span>
-                      )
-                    })}
-                  </div>
-                </div>
-              </Section>
-            )}
+              ) : (
+                <p className="profile-muted-copy">场景线索还少，我会继续观察你通常在什么时候听什么。</p>
+              )}
+            </Section>
 
             <footer className="page-foot" style={{ paddingBottom: '32px' }}>
               {portraitUpdatedAt
-                ? `画像上次更新 · ${displayDate(portraitUpdatedAt)}`
+                ? `画像更新于 ${displayDate(portraitUpdatedAt)}`
                 : '画像 · 尚未生成'}
-              {profile.profile_meta?.structuredUpdatedAt && profile.profile_meta.structuredUpdatedAt !== portraitUpdatedAt &&
-                ` · 结构刷新 ${displayDate(profile.profile_meta.structuredUpdatedAt)}`}
             </footer>
           </>
         )}

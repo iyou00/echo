@@ -1,6 +1,6 @@
 import type { TasteProfile } from '../../types/ipc'
-import { loadRecentEvents } from '../db/events'
 import { getFeedbackSignalCount, getLatestFeedbackUpdatedAt } from '../db/feedback'
+import { loadTrustedCorrections } from './memoryCorrections'
 
 function compactLine(text: string, limit = 140): string {
   const clean = text.replace(/\s+/g, ' ').trim()
@@ -15,7 +15,7 @@ function formatDate(value?: string): string {
 }
 
 export function buildCorrectionEvidenceBlock(limit = 6): string {
-  const corrections = loadRecentEvents('correction', limit)
+  const corrections = loadTrustedCorrections(limit)
   if (!corrections.length) return '(暂无明确纠正)'
   return corrections
     .map((event, index) => {

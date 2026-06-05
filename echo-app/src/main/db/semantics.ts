@@ -109,10 +109,14 @@ export function upsertTrackSemantic(track: Track, semantic: TrackSemantic): void
     )
 }
 
-export function splitMissingSemantics(tracks: Track[]): { missing: Track[]; skipped: number } {
+export function splitMissingSemantics(
+  tracks: Track[],
+  options: { includeLowConfidence?: boolean; confidenceBelow?: number } = {},
+): { missing: Track[]; skipped: number } {
   const seen = new Set<string>()
-  const rows = getDb().prepare('SELECT track_key FROM track_semantics WHERE user_id = current_user_id()').all() as Array<{ track_key: string }>
-  const existing = new Set(rows.map((row) => row.track_key))
+  const rows = getDb().prepare('SELECT track_key, confidence FROM track_semantics WHERE user_id = current_user_id()').all() as Array<{ track_key: string; confidence: number }>
+  const confidenceThreshold = options.confidenceBelow ?? 0.6
+  const existing = new Map(rows.map((row) => [row.track_key, Number(row.confidence)]))
   const missing: Track[] = []
   let skipped = 0
   for (const track of tracks) {
@@ -122,8 +126,12 @@ export function splitMissingSemantics(tracks: Track[]): { missing: Track[]; skip
       continue
     }
     seen.add(key)
-    if (existing.has(key)) skipped += 1
-    else missing.push(track)
+    const confidence = existing.get(key)
+    if (confidence === undefined || (options.includeLowConfidence && confidence < confidenceThreshold)) {
+      missing.push(track)
+    } else {
+      skipped += 1
+    }
   }
   return { missing, skipped }
 }

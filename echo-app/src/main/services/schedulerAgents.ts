@@ -42,13 +42,13 @@ export const carePingTestAgent: EchoAgent<CarePingTestAgentInput, CarePingTestAg
 export const tastePortraitRefreshAgent: EchoAgent<undefined, TasteProfile | null> = {
   kind: 'taste-refresh',
   async run(_input, context) {
-    context.report({ phase: 'structured-profile', current: 0, total: 2, message: '整理口味画像信号' })
-    const profile = await regeneratePortrait({ signal: context.signal })
+    context.report({ phase: 'structured-profile', current: 0, total: 3, message: '' })
+    const profile = await regeneratePortrait({ signal: context.signal, report: context.report })
     context.report({
-      phase: 'portrait',
-      current: 2,
-      total: 2,
-      message: profile ? '画像文案已刷新。' : '暂无可刷新的画像。',
+      phase: 'done',
+      current: 3,
+      total: 3,
+      message: profile ? '已刷新。' : '暂无可刷新画像。',
     })
     return profile
   },

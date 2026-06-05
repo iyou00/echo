@@ -18,4 +18,18 @@ describe('recommendation intent entity inference boundaries', () => {
     expect(parsed.artistQuery).toBe('王菲')
     expect(parsed.seedTitle).toBe('主角')
   })
+
+  it('extracts explicit song preference with noisy Chinese suffix', () => {
+    const parsed = parseIntent('王菲的主角这个首歌，我还蛮喜欢听的')
+    expect(parsed.artistQuery).toBe('王菲')
+    expect(parsed.seedTitle).toBe('主角')
+  })
+
+  it('maps 激情 to a high-energy fast recommendation intent', () => {
+    const parsed = parseIntent('这首歌不好听，换一首激情一点的')
+    expect(parsed.energy).toBe('high')
+    expect(parsed.tempo).toBe('fast')
+    expect(parsed.moods).toContain('热烈')
+    expect(parsed.rejectIf?.minEnergy).toBeGreaterThanOrEqual(0.55)
+  })
 })

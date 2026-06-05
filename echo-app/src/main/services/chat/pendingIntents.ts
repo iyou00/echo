@@ -29,8 +29,20 @@ interface PendingMusicEntityClarification {
   askedAt: number
 }
 
+interface PendingTrackPreferenceClarification {
+  seedTitle: string
+  sourceText: string
+  askedAt: number
+}
+
 export interface PendingDirectSongReply {
   query?: string
+  response?: string
+}
+
+export interface PendingTrackPreferenceReply {
+  artistQuery?: string
+  seedTitle: string
   response?: string
 }
 
@@ -42,6 +54,7 @@ export interface PendingDirectSongChoiceReply {
 let pendingDirectSongClarification: PendingDirectSongClarification | null = null
 let pendingDirectSongChoice: PendingDirectSongChoice | null = null
 let pendingMusicEntityClarification: PendingMusicEntityClarification | null = null
+let pendingTrackPreferenceClarification: PendingTrackPreferenceClarification | null = null
 
 export function directSongClarificationContent(directSong: DirectSongReference): string {
   const title = `《${directSong.seedTitle}》`
@@ -117,6 +130,7 @@ export function setPendingMusicEntityClarification(
 ): void {
   pendingDirectSongClarification = null
   pendingDirectSongChoice = null
+  pendingTrackPreferenceClarification = null
   pendingMusicEntityClarification = {
     artistQuery: entity.artistQuery,
     seedTitle: entity.seedTitle,
@@ -126,10 +140,22 @@ export function setPendingMusicEntityClarification(
   }
 }
 
+export function setPendingTrackPreferenceClarification(seedTitle: string, sourceText: string): void {
+  pendingDirectSongClarification = null
+  pendingDirectSongChoice = null
+  pendingMusicEntityClarification = null
+  pendingTrackPreferenceClarification = {
+    seedTitle,
+    sourceText,
+    askedAt: Date.now(),
+  }
+}
+
 export function clearPendingDirectSongState(): void {
   pendingDirectSongClarification = null
   pendingDirectSongChoice = null
   pendingMusicEntityClarification = null
+  pendingTrackPreferenceClarification = null
 }
 
 function clearPendingDirectSongClarification(): void {
@@ -334,6 +360,43 @@ export function resolvePendingMusicEntityReply(text: string): PendingDirectSongR
   }
 
   return null
+}
+
+export function resolvePendingTrackPreferenceReply(text: string): PendingTrackPreferenceReply | null {
+  const pending = pendingTrackPreferenceClarification
+  if (!pending) return null
+  if (pendingDirectSongIsExpired(pending)) {
+    pendingTrackPreferenceClarification = null
+    return null
+  }
+  if (isCancelReply(text)) {
+    pendingTrackPreferenceClarification = null
+    return { seedTitle: pending.seedTitle, response: '行，这个偏好我先不记。' }
+  }
+  if (!isExplicitPendingEntityReply(text) && (isNewMusicRequest(text) || isLikelyPendingInterruption(text))) {
+    pendingTrackPreferenceClarification = null
+    return null
+  }
+
+  const artistTitleReply = parseArtistTitleReply(text)
+  if (artistTitleReply?.artist) {
+    pendingTrackPreferenceClarification = null
+    return {
+      artistQuery: artistTitleReply.artist,
+      seedTitle: artistTitleReply.title ?? pending.seedTitle,
+    }
+  }
+
+  const artist = cleanArtistReply(text.trim())
+  if (isShortArtistReply(artist)) {
+    pendingTrackPreferenceClarification = null
+    return {
+      artistQuery: artist,
+      seedTitle: pending.seedTitle,
+    }
+  }
+
+  return { seedTitle: pending.seedTitle, response: `我想确认一下，《${pending.seedTitle}》是哪位歌手的？你直接回歌手名就行。` }
 }
 
 export function resolvePendingDirectSongChoiceReply(text: string): PendingDirectSongChoiceReply | null {

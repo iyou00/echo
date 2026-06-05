@@ -22,3 +22,7 @@
   RMDir /r "$INSTDIR\locales"
   RMDir /r "$INSTDIR\resources"
 !macroend
+
+!macro customInstall
+  RMDir /r "$INSTDIR\resources\prompts"
+!macroend

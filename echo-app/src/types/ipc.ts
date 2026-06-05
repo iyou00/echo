@@ -254,6 +254,7 @@ export interface TasteProfile {
   anti_patterns: string[]
   signature_tracks: Track[]
   echo_portrait: string
+  work_summary?: string
   energy_preference?: number
   tempo_preference?: { slow: number; medium: number; fast: number }
   scenes?: Array<{ tag: string; frequency: number }>

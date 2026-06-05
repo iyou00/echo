@@ -151,7 +151,10 @@ export async function buildSemanticsForTracks(
 ): Promise<{ tagged: number; skipped: number }> {
   assertSemanticsActive(options.signal)
   const valid = tracks.filter((track) => track.title && track.artist)
-  const { missing, skipped } = splitMissingSemantics(valid)
+  const settings = getSettings()
+  const hasLlmConfig = Boolean(settings.llm.baseUrl && settings.llm.apiKey && settings.llm.model)
+  if (!hasLlmConfig) return { tagged: 0, skipped: valid.length }
+  const { missing, skipped } = splitMissingSemantics(valid, { includeLowConfidence: true, confidenceBelow: 0.6 })
   const startedAt = new Date().toISOString()
   const total = missing.length
   let tagged = 0

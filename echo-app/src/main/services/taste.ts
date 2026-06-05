@@ -1,11 +1,12 @@
 import type { ProfileDisplayModel, ProfileEvidenceLevel, ProfileEvidenceSource, TasteProfile, Track, TrackSemantic } from '../../types/ipc'
 import { trackIdentity as trackKey } from '../../shared/trackIdentity'
 import { getDb } from '../db'
-import { getFeedbackSignalCount, listTrackFeedback, type TrackFeedback } from '../db/feedback'
+import { loadRecentConversations, loadTodayConversations } from '../db/conversations'
+import { getFeedbackSignalCount, listTrackFeedback, listTrackFeedbackUpdatedSince, type TrackFeedback } from '../db/feedback'
 import { getAllImportedTracks } from '../db/playlists'
 import { clearRecommendationCache } from '../db/recommendationCache'
 import { getTrackSemantic, listSemantics, semanticTrackKey } from '../db/semantics'
-import { loadProfileTrackEvents, type ProfileTrackEvent } from '../db/tracks'
+import { loadProfileTrackEvents, loadProfileTrackEventsBetween, type ProfileTrackEvent } from '../db/tracks'
 import {
   addTasteQuestion,
   answerTasteQuestion as saveTasteQuestionAnswer,
@@ -20,6 +21,7 @@ import { readRootFile } from '../utils/paths'
 import { buildSoulPolicyPrompt } from '../skills/soul/policy'
 import { inferTrackSemanticFallback } from './semantics'
 import { buildMemoryEvidencePrompt } from './memoryEvidence'
+import { parseIntent, type RecommendationIntent } from './recommendation/intent'
 
 interface ArtistSeed {
   genre?: string[]
@@ -45,6 +47,7 @@ interface RegeneratePortraitOptions {
   refreshStructured?: boolean
   fallbackOnError?: boolean
   signal?: AbortSignal
+  report?: (patch: { phase?: string; current?: number; total?: number; message?: string }) => void
 }
 
 function assertPortraitActive(signal?: AbortSignal): void {
@@ -492,6 +495,18 @@ function buildFallbackPortrait(topArtists: string[], topGenres: string[], signat
   return `我先从歌单里认出几个坐标: ${artists}。你的安全区大概在${genres}附近,要有旋律,也要有一句能留下来的表达。${anchor}对你来说像入口,它能把白天的噪音压低一点。等你多和我聊几次,我会把这些粗线条慢慢改细。`
 }
 
+function buildLocalPortraitFallback(profile: TasteProfile): PortraitResponse & { portrait: string } {
+  const artist = profile.artists[0]?.name || profile.signature_tracks[0]?.artist || '熟悉的声音'
+  const genre = profile.genres[0]?.name || '旋律舒服的歌'
+  const mood = profile.moods[0]?.tag || '陪伴'
+  const portrait = `我可能还没完全看清你，但已经能听出一点：你会靠近${artist}和${genre}这类声音，旋律要顺，情绪也要能留一会儿。最近你像是需要一点${mood}，也想把耳朵从杂乱里带出来。再多听几次，我会把这些判断慢慢校准。`
+  return {
+    portrait,
+    summary: `偏好线索：${artist}、${genre}、${mood}。画像由本地证据兜底生成，等待后续模型刷新。`,
+    suggested_questions: [],
+  }
+}
+
 function clampDiscoveryAppetite(value: number): number {
   return Math.max(0.25, Math.min(0.8, Number(value.toFixed(2))))
 }
@@ -547,6 +562,7 @@ function buildProfileFromTracks(tracks: Track[]): TasteProfile {
     signature_tracks: signatureTracks,
     display,
     echo_portrait: previous?.echo_portrait ?? buildFallbackPortrait(topArtistNames, topGenreNames, signatureTracks),
+    work_summary: previous?.work_summary,
     profile_meta: {
       ...(previous?.profile_meta ?? {}),
       structuredUpdatedAt: new Date().toISOString(),
@@ -620,15 +636,138 @@ function ensureProfileDisplay(profile: TasteProfile | null): TasteProfile | null
   return { ...profile, display: buildFallbackDisplay(profile) }
 }
 
-function parseJsonObject<T>(text: string): T | null {
+function extractJsonObjectCandidates(text: string): string[] {
+  const candidates = new Set<string>()
   const trimmed = text.trim()
-  const match = trimmed.match(/\{[\s\S]*\}/)
-  if (!match) return null
-  try {
-    return JSON.parse(match[0]) as T
-  } catch {
-    return null
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) candidates.add(trimmed)
+
+  const fencePattern = /```(?:json)?\s*([\s\S]*?)```/gi
+  let fenceMatch: RegExpExecArray | null
+  while ((fenceMatch = fencePattern.exec(text))) {
+    const block = fenceMatch[1]?.trim()
+    if (block?.startsWith('{') && block.endsWith('}')) candidates.add(block)
   }
+
+  let start = -1
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]
+    if (start < 0) {
+      if (char === '{') {
+        start = index
+        depth = 1
+        inString = false
+        escaped = false
+      }
+      continue
+    }
+
+    if (inString) {
+      if (escaped) {
+        escaped = false
+      } else if (char === '\\') {
+        escaped = true
+      } else if (char === '"') {
+        inString = false
+      }
+      continue
+    }
+
+    if (char === '"') {
+      inString = true
+    } else if (char === '{') {
+      depth += 1
+    } else if (char === '}') {
+      depth -= 1
+      if (depth === 0) {
+        candidates.add(text.slice(start, index + 1))
+        start = -1
+      }
+    }
+  }
+
+  return Array.from(candidates).sort((a, b) => a.length - b.length)
+}
+
+function parseJsonObjects<T>(text: string): T[] {
+  const parsed: T[] = []
+  for (const candidate of extractJsonObjectCandidates(text)) {
+    try {
+      parsed.push(JSON.parse(candidate) as T)
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  return parsed
+}
+
+function asPlainObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+}
+
+function firstStringField(record: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return undefined
+}
+
+function normalizeSuggestedQuestions(value: unknown): PortraitResponse['suggested_questions'] {
+  if (!Array.isArray(value)) return []
+  const questions: NonNullable<PortraitResponse['suggested_questions']> = []
+  for (const item of value.slice(0, 4)) {
+    if (typeof item === 'string') {
+      const content = item.trim()
+      if (content) questions.push({ kind: 'curiosity', content, context: {} })
+      continue
+    }
+    const record = asPlainObject(item)
+    if (!record) continue
+    const content = firstStringField(record, ['content', 'question', '问题'])
+    if (!content) continue
+    questions.push({
+      kind: firstStringField(record, ['kind', 'type', '类型']) ?? 'curiosity',
+      content,
+      context: asPlainObject(record.context) ?? {},
+    })
+  }
+  return questions
+}
+
+function stripLlmScaffolding(text: string): string {
+  return text
+    .replace(/```(?:json)?/gi, '')
+    .replace(/```/g, '')
+    .replace(/^\s*(portrait|画像|画像文案|echo_portrait)\s*[:：]\s*/i, '')
+    .trim()
+}
+
+function parsePortraitResponse(text: string): PortraitResponse | null {
+  const parsedCandidates = parseJsonObjects<Record<string, unknown>>(text)
+  for (const parsed of parsedCandidates) {
+    const portrait = firstStringField(parsed, ['portrait', 'echo_portrait', 'profile', '画像', '画像文案'])
+    if (portrait) {
+      return {
+        portrait,
+        summary: firstStringField(parsed, ['summary', 'work_summary', '备忘', '摘要']),
+        suggested_questions: normalizeSuggestedQuestions(parsed.suggested_questions ?? parsed.questions ?? parsed['问题']),
+      }
+    }
+  }
+
+  const plain = stripLlmScaffolding(text)
+  const compactLength = Array.from(plain.replace(/\s+/g, '')).length
+  if (/你/.test(plain) && compactLength >= 70 && compactLength <= 180) {
+    return {
+      portrait: plain,
+      summary: plain.slice(0, 150),
+      suggested_questions: [],
+    }
+  }
+  return null
 }
 
 function readPortraitPrompt(): string {
@@ -647,6 +786,145 @@ function compactLine(text: string, limit = 180): string {
   return normalized.length > limit ? `${normalized.slice(0, limit)}...` : normalized
 }
 
+function normalizeEvidenceText(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, '').replace(/[《》"'“”·.,，。!！?？()（）\-–—]/g, '')
+}
+
+function topCountLabels(items: string[], limit: number): string {
+  const entries = topEntries(countBy(items.filter(Boolean)), limit)
+  return entries.length ? entries.map(([name, count]) => `${name}(${count})`).join('、') : '暂无'
+}
+
+const MUSIC_INTENT_TEXT_PATTERN = /歌|音乐|听|推荐|来一首|换一首|播放|放一首|找一首|分享|歌单|曲子|旋律|节奏|摇滚|民谣|说唱|电子|爵士|r&b|rb|粤语|英文|英语|韩语|日语|华语|激情|激昂|热血|澎湃|清醒|提神|安静|舒缓|放松/i
+const USER_STATE_TEXT_PATTERN = /困|累|睡|失眠|疲惫|倦|冷|烦|烦躁|压力|焦虑|崩|麻|难受|低落|心情|开心|高兴|轻松|伤心|难过|孤独|emo|想哭/i
+
+const GENRE_INTENT_PATTERNS: Array<[RegExp, string]> = [
+  [/摇滚|rock/i, '偏摇滚'],
+  [/民谣|folk/i, '偏民谣'],
+  [/说唱|rap|hip\s*hop/i, '偏说唱'],
+  [/电子|edm|techno|house/i, '偏电子'],
+  [/爵士|jazz/i, '偏爵士'],
+  [/r&b|rb|节奏布鲁斯/i, '偏 R&B'],
+  [/古典|classical/i, '偏古典'],
+  [/粤语|广东/i, '偏粤语'],
+  [/英文|英语|欧美|english/i, '偏英文'],
+  [/韩语|韩国|韩文|kpop|k-pop/i, '偏韩语'],
+  [/日语|日本|日文|jpop|j-pop/i, '偏日语'],
+]
+
+function uniqueStrings(items: string[]): string[] {
+  return Array.from(new Set(items.filter(Boolean)))
+}
+
+function isPortraitIntentEvidenceText(text: string): boolean {
+  return MUSIC_INTENT_TEXT_PATTERN.test(text) || USER_STATE_TEXT_PATTERN.test(text)
+}
+
+function trendLevel(count: number): string {
+  if (count >= 3) return '主要'
+  if (count === 2) return '反复出现'
+  return '偶尔出现'
+}
+
+function collectMusicIntentLabels(intent: RecommendationIntent, text: string): string[] {
+  const labels: string[] = []
+  if (intent.energy === 'high' || intent.tempo === 'fast' || intent.moods.some((mood) => /清醒|热烈|轻快/.test(mood))) {
+    labels.push('想把状态提起来')
+  }
+  if (intent.energy === 'low' || intent.tempo === 'slow' || intent.moods.some((mood) => /放松|松弛|治愈/.test(mood))) {
+    labels.push('想放慢一点')
+  }
+  if (/烦|烦躁|压力|焦虑|崩|麻|难受/.test(text)) {
+    labels.push('在杂乱或压力里找出口')
+  }
+  if (/累|疲惫|倦|困|睡|失眠/.test(text)) {
+    labels.push('需要休息和放慢')
+  }
+  if (/开心|高兴|轻松|心情不错|状态不错/.test(text)) {
+    labels.push('状态更轻快')
+  }
+  if (/伤心|难过|孤独|emo|想哭|失眠|陪我|陪伴|有点冷/.test(text) || intent.moods.some((mood) => /孤独/.test(mood))) {
+    labels.push('在情绪低处找陪伴')
+  }
+  if (/不好听|不对|换一首|别放|不要这首|不喜欢/.test(text)) {
+    labels.push('会主动修正不合适的歌')
+  }
+  if (intent.familiarity === 'safe') labels.push('会回到熟悉声音')
+  if (intent.familiarity === 'explore') labels.push('愿意试新声音')
+  for (const scene of intent.scenes.slice(0, 2)) labels.push(`${scene}场景`)
+  if (intent.language) labels.push(`偏${intent.language}`)
+  for (const [pattern, label] of GENRE_INTENT_PATTERNS) {
+    if (pattern.test(text)) labels.push(label)
+  }
+  return uniqueStrings(labels).slice(0, 5)
+}
+
+function summarizeMusicIntentMessages(messages: ReturnType<typeof loadRecentConversations>): { total: number; labels: string[] } {
+  const counts = new Map<string, number>()
+  for (const message of messages) {
+    if (message.role !== 'user') continue
+    const text = message.content.trim()
+    if (!text || !isPortraitIntentEvidenceText(text)) continue
+    const labels = collectMusicIntentLabels(parseIntent(text, { inferEntities: false }), text)
+    if (labels.length === 0) continue
+    for (const label of labels) counts.set(label, (counts.get(label) ?? 0) + 1)
+  }
+  const labels = Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([label, count]) => `${trendLevel(count)}：${label}`)
+  const total = Array.from(counts.values()).reduce((sum, count) => sum + count, 0)
+  return { total, labels }
+}
+
+function buildRecentMusicIntentTrend(): string {
+  const today = summarizeMusicIntentMessages(loadTodayConversations(80))
+  const recent = summarizeMusicIntentMessages(loadRecentConversations(160))
+  if (today.total === 0 && recent.total === 0) {
+    return [
+      '近期找歌/聊天意图不足,画像以播放、收藏、切歌和长期偏好为主。',
+      '写 portrait 时可以坦诚还在观察,避免写成稳定结论。',
+    ].join('\n')
+  }
+  return [
+    `今日找歌方向: ${today.labels.join('、') || '暂无明显方向'}`,
+    `近期找歌方向: ${recent.labels.join('、') || '暂无明显方向'}`,
+    '这些趋势来自用户原话和推荐意图解析,已转成结构化证据。写 portrait 时用人的状态和变化来表达,避免直接写次数、占比、标签名。',
+  ].join('\n')
+}
+
+function trackLabel(track: Track): string {
+  return `《${track.title}》-${track.artist}`
+}
+
+function semanticForWindowTrack(track: Track, semanticByKey: Map<string, TrackSemantic>): TrackSemantic {
+  return semanticByKey.get(trackKey(track)) ?? track.semantic ?? inferTrackSemanticFallback(track)
+}
+
+function buildEventWindowSignals(events: ProfileTrackEvent[], semanticByKey: Map<string, TrackSemantic>): {
+  artists: string[]
+  genres: string[]
+  moods: string[]
+  tracks: Track[]
+  completed: number
+  skipped: number
+} {
+  const artists: string[] = []
+  const genres: string[] = []
+  const moods: string[] = []
+  let completed = 0
+  let skipped = 0
+  for (const event of events) {
+    artists.push(event.track.artist)
+    const semantic = semanticForWindowTrack(event.track, semanticByKey)
+    genres.push(...semantic.genres.map((genre) => normalizedGenre(genre, semantic.language)))
+    moods.push(...semantic.moods)
+    if (event.queueStatus === 'completed') completed += 1
+    if (event.queueStatus === 'skipped') skipped += 1
+  }
+  return { artists, genres, moods, tracks: events.map((event) => event.track), completed, skipped }
+}
+
 function buildRelationshipContext(profile: TasteProfile): string {
   const settings = getSettings()
   const firstUsedAt = settings.meta.firstUsedAt
@@ -655,10 +933,10 @@ function buildRelationshipContext(profile: TasteProfile): string {
   const days = Math.max(1, Math.ceil((Date.now() - date.getTime()) / 86400000))
   const yinyiCount = getYinyiRange(500).length
   const hasWrittenPortrait = (profile.profile_meta?.portraitSignalCount ?? 0) > 0 || profile.profile_meta?.updatedAt != null
-  if (days <= 3) return `你刚认识 Ta — 才第 ${days} 天。这是第一次写画像,坦诚"我只看到了粗线条"。`
-  if (days <= 14) return `你认识 Ta ${days} 天了,${hasWrittenPortrait ? '至少写过一版' : '还没写过'}画像。还处在"慢慢认识"的阶段。`
+  if (days <= 3) return `你刚认识用户 — 才第 ${days} 天。这是第一次写画像,坦诚"我只看到了粗线条"。`
+  if (days <= 14) return `你认识用户 ${days} 天了,${hasWrittenPortrait ? '至少写过一版' : '还没写过'}画像。还处在"慢慢认识"的阶段。`
   if (days <= 60) return `你们已经相处 ${days} 天,${yinyiCount > 0 ? `写过 ${yinyiCount} 篇风信` : '还在熟悉中'}。你应该开始看到一些稳定的模式了。`
-  return `你已经陪 Ta ${days} 天了,${yinyiCount > 0 ? `${yinyiCount} 篇风信` : ''}。你看着 Ta 的口味在变,应该有能力写出有分量的观察。`
+  return `你已经陪用户 ${days} 天了,${yinyiCount > 0 ? `${yinyiCount} 篇风信` : ''}。你看着用户的口味在变,应该有能力写出有分量的观察。`
 }
 
 function buildMusicRoleSummary(): string {
@@ -686,10 +964,10 @@ function buildMusicRoleSummary(): string {
   if (favoriteRate > 0.2) signals.push('收藏率高(' + Math.round(favoriteRate * 100) + '%),会主动标记喜欢的歌')
   if (signals.length === 0) signals.push('播放行为比较均匀,没有极端的倾向')
 
-  if (skipRate > 0.35 && loopRate > 0.15) return signals.join('; ') + '。音乐对 Ta 来说既是挑剔的陪伴,也是安全区。'
-  if (skipRate > 0.35) return signals.join('; ') + '。音乐对 Ta 来说是挑剔的陪伴——总在找刚好对的那首。'
-  if (loopRate > 0.15) return signals.join('; ') + '。音乐是 Ta 的安全区——会回到同一首歌,像回到一个熟悉的地方。'
-  if (nightRatio > 0.45) return signals.join('; ') + '。Ta 用音乐消化深夜的情绪。'
+  if (skipRate > 0.35 && loopRate > 0.15) return signals.join('; ') + '。音乐对用户来说既是挑剔的陪伴,也是安全区。'
+  if (skipRate > 0.35) return signals.join('; ') + '。音乐对用户来说是挑剔的陪伴——总在找刚好对的那首。'
+  if (loopRate > 0.15) return signals.join('; ') + '。音乐是用户的安全区——会回到同一首歌,像回到一个熟悉的地方。'
+  if (nightRatio > 0.45) return signals.join('; ') + '。用户用音乐消化深夜的情绪。'
   return signals.join('; ') + '。'
 }
 
@@ -705,14 +983,12 @@ function moodDirection(mood: string): 'low' | 'high' | 'calm' | 'neutral' {
   return 'neutral'
 }
 
-function buildMoodTrendSignal(profile: TasteProfile): string {
-  const semantics = listSemantics()
+function buildMoodTrendSignal(profile: TasteProfile, semanticByKey: Map<string, TrackSemantic>, semanticCount: number): string {
   const events = loadProfileTrackEvents(100)
-  if (events.length < 3 && semantics.length < 5) return '(情绪信号还太少)'
+  if (events.length < 3 && semanticCount < 5) return '(情绪信号还太少)'
 
   const recentCutoff = Date.now() - 7 * 86400000
   const recentEvents = events.filter((event) => new Date(event.listenedAt).getTime() > recentCutoff)
-  const semanticByKey = new Map(semantics.map((s) => [semanticTrackKey(s), s.semantic]))
 
   const recentMoods: string[] = []
   let recentEnergy = 0
@@ -731,7 +1007,7 @@ function buildMoodTrendSignal(profile: TasteProfile): string {
   }
 
   if (recentMoods.length < 3 && recentEnergyCount < 3) {
-    if (semantics.length >= 5) return `(有 ${semantics.length} 首歌的语义数据,但近一周播放记录不足,情绪趋势判断受限)`
+    if (semanticCount >= 5) return `(有 ${semanticCount} 首歌的语义数据,但近一周播放记录不足,情绪趋势判断受限)`
     return '(近一周情绪信号不足)'
   }
 
@@ -792,34 +1068,77 @@ function buildRecentYinyiSummaries(): string {
   return entries.map((entry) => `- ${entry.date}: ${compactLine(entry.content, 120)}`).join('\n')
 }
 
-function buildThisWeekSignals(profile: TasteProfile): string {
-  const artists = profile.artists.slice(0, 5).map((artist) => `${artist.name}(${artist.affinity})`).join('、') || '暂无'
-  const genres = profile.genres.slice(0, 4).map((genre) => `${genre.name}(${genre.weight}, ${genre.trend})`).join('、') || '暂无'
-  const tracks = profile.signature_tracks
+function buildThisWeekSignals(profile: TasteProfile, semanticByKey: Map<string, TrackSemantic>): string {
+  const recentEvents = loadProfileTrackEventsBetween(7, 0, 1200)
+  const recentFeedback = listTrackFeedbackUpdatedSince(7, 500)
+  const windowSignals = buildEventWindowSignals(recentEvents, semanticByKey)
+  const tracks = windowSignals.tracks.slice(0, 5).map((track) => `${trackLabel(track)}${track.year ? `(${track.year})` : ''}`).join('、') || '暂无'
+  const feedbackSignals = recentFeedback
     .slice(0, 5)
-    .map((track) => `《${track.title}》-${track.artist}${track.year ? `(${track.year})` : ''}`)
+    .map((item) => `${trackLabel(item.track)}(play:${item.playCount}, skip:${item.skipCount}, loop:${item.loopCount}, fav:${item.favoriteCount})`)
     .join('、') || '暂无'
+
+  if (recentEvents.length === 0 && recentFeedback.length === 0) {
+    return [
+      '近 7 天新增播放/反馈信号不足。',
+      `累计 top artists: ${profile.artists.slice(0, 5).map((artist) => `${artist.name}(${artist.affinity})`).join('、') || '暂无'}`,
+      `累计 top genres: ${profile.genres.slice(0, 4).map((genre) => `${genre.name}(${genre.weight}, ${genre.trend})`).join('、') || '暂无'}`,
+      '写 portrait 时把这些当作背景,避免写成最近变化。',
+    ].join('\n')
+  }
+
   return [
-    `当前可用信号来自导入歌单、对话反馈、播放/跳过/循环行为和听音记录。`,
-    `top artists: ${artists}`,
-    `top genres: ${genres}`,
-    `signature tracks: ${tracks}`,
+    `近 7 天播放事件: ${recentEvents.length}; 近 7 天更新反馈: ${recentFeedback.length}`,
+    `recent artists: ${topCountLabels(windowSignals.artists, 5)}`,
+    `recent genres: ${topCountLabels(windowSignals.genres, 4)}`,
+    `recent moods: ${topCountLabels(windowSignals.moods, 5)}`,
+    `recent status: completed ${windowSignals.completed}, skipped ${windowSignals.skipped}`,
+    `recent tracks: ${tracks}`,
+    `recent feedback: ${feedbackSignals}`,
     `anti patterns: ${profile.anti_patterns.slice(0, 6).join('、') || '暂无'}`,
   ].join('\n')
 }
 
-function buildThisMonthSignals(profile: TasteProfile): string {
-  const rising = profile.genres.filter((genre) => genre.trend === 'up').map((genre) => genre.name)
-  const falling = profile.genres.filter((genre) => genre.trend === 'down').map((genre) => genre.name)
+function buildThisMonthSignals(profile: TasteProfile, semanticByKey: Map<string, TrackSemantic>): string {
+  const current = buildEventWindowSignals(loadProfileTrackEventsBetween(30, 0, 5000), semanticByKey)
+  const previous = buildEventWindowSignals(loadProfileTrackEventsBetween(60, 30, 5000), semanticByKey)
+
+  const genreDelta = (() => {
+    const currentCounts = countBy(current.genres)
+    const previousCounts = countBy(previous.genres)
+    const currentTotal = Math.max(1, current.genres.length)
+    const previousTotal = Math.max(1, previous.genres.length)
+    return Array.from(new Set([...currentCounts.keys(), ...previousCounts.keys()]))
+      .map((name) => ({
+        name,
+        delta: (currentCounts.get(name) ?? 0) / currentTotal - (previousCounts.get(name) ?? 0) / previousTotal,
+      }))
+      .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+  })()
+  const rising = genreDelta.filter((item) => item.delta > 0.08).slice(0, 4).map((item) => `${item.name}(+${Math.round(item.delta * 100)}%)`)
+  const falling = genreDelta.filter((item) => item.delta < -0.08).slice(0, 4).map((item) => `${item.name}(${Math.round(item.delta * 100)}%)`)
+
+  if (current.tracks.length < 5 && previous.tracks.length < 5) {
+    return [
+      '近 60 天播放事件不足,月度对照暂时不稳。',
+      `当前探索倾向: ${profile.discovery_appetite}`,
+      '写 portrait 时可以提“还在观察”,避免写成稳定变化。',
+    ].join('\n')
+  }
+
   return [
-    `当前版本优先用已沉淀 TasteProfile 和上一次画像做月度对照。`,
-    `rising genres: ${rising.join('、') || '暂无明显上升'}`,
-    `falling genres: ${falling.join('、') || '暂无明显下降'}`,
-    `discovery appetite: ${profile.discovery_appetite}`,
+    `近 30 天播放事件: ${current.tracks.length}; 前 30 天播放事件: ${previous.tracks.length}`,
+    `current month artists: ${topCountLabels(current.artists, 5)}`,
+    `current month genres: ${topCountLabels(current.genres, 5)}`,
+    `rising genres vs previous window: ${rising.join('、') || '暂无明显上升'}`,
+    `falling genres vs previous window: ${falling.join('、') || '暂无明显下降'}`,
+    `当前探索倾向: ${profile.discovery_appetite}`,
   ].join('\n')
 }
 
 function buildPortraitUserPrompt(profile: TasteProfile): string {
+  const semantics = listSemantics()
+  const semanticByKey = new Map(semantics.map((item) => [semanticTrackKey(item), item.semantic]))
   return `<relationship>
 ${buildRelationshipContext(profile)}
 </relationship>
@@ -829,8 +1148,12 @@ ${buildMusicRoleSummary()}
 </music_role>
 
 <mood_trend>
-${buildMoodTrendSignal(profile)}
+${buildMoodTrendSignal(profile, semanticByKey, semantics.length)}
 </mood_trend>
+
+<recent_music_intent_trend>
+${buildRecentMusicIntentTrend()}
+</recent_music_intent_trend>
 
 <current_profile>
 ${JSON.stringify(profile, null, 2)}
@@ -843,11 +1166,11 @@ ${profile.echo_portrait}
 </last_portrait>
 
 <this_week_signals>
-${buildThisWeekSignals(profile)}
+${buildThisWeekSignals(profile, semanticByKey)}
 </this_week_signals>
 
 <this_month_signals>
-${buildThisMonthSignals(profile)}
+${buildThisMonthSignals(profile, semanticByKey)}
 </this_month_signals>
 
 <echo_should_ask>
@@ -862,54 +1185,128 @@ ${buildKpopUndetermined(profile)}
 ${buildRecentYinyiSummaries()}
 </recent_yinyi_summaries>
 
-请严格返回 JSON,字段只包含 portrait、summary、suggested_questions。portrait 100-120 字。像朋友在 Ta 生日时写的一段话,不像专辑乐评。`
+请严格返回 JSON,字段只包含 portrait、summary、suggested_questions。portrait 100-120 字。直接对用户说“你”,像熟悉的人写的一段观察。内部证据可以藏在表达背后,不要写成报告。`
 }
 
-function portraitV2Issues(portrait: string, profile?: TasteProfile): string[] {
+interface PortraitTrackMention {
+  title: string
+  artist?: string
+}
+
+interface PortraitEvidence {
+  trackPairs: Array<{ title: string; artist: string }>
+  titles: Set<string>
+  artists: Set<string>
+}
+
+function buildPortraitEvidence(profile?: TasteProfile): PortraitEvidence {
+  const tracks = [
+    ...(profile?.signature_tracks ?? []),
+    ...(profile?.display?.signatureItems ?? []).map((item) => item.track),
+    ...loadProfileTrackEventsBetween(60, 0, 2000).map((event) => event.track),
+    ...listTrackFeedback(300)
+      .filter((item) => item.favoriteCount > 0 || item.loopCount > 0 || item.playCount >= 2)
+      .map((item) => item.track),
+  ]
+  return {
+    trackPairs: tracks
+      .map((track) => ({
+        title: normalizeEvidenceText(track.title),
+        artist: normalizeEvidenceText(track.artist),
+      }))
+      .filter((track) => track.title && track.artist),
+    titles: new Set(tracks.map((track) => normalizeEvidenceText(track.title)).filter(Boolean)),
+    artists: new Set([
+      ...(profile?.artists ?? []).map((artist) => normalizeEvidenceText(artist.name)),
+      ...tracks.map((track) => normalizeEvidenceText(track.artist)),
+    ].filter(Boolean)),
+  }
+}
+
+function mentionFromPortraitSongBlock(portrait: string, block: string): PortraitTrackMention {
+  const inner = block.slice(1, -1).trim()
+  const dashMatch = inner.match(/^(.+?)\s+[-–—]\s+(.+)$/)
+  if (dashMatch) return { artist: dashMatch[1].trim(), title: dashMatch[2].trim() }
+  const blockIndex = portrait.indexOf(block)
+  const before = blockIndex > 0 ? portrait.slice(Math.max(0, blockIndex - 20), blockIndex) : ''
+  const artistBeforeMatch = before.match(/([一-鿿\w]{2,15})[的]$/)
+  return { title: inner, artist: artistBeforeMatch?.[1]?.trim() }
+}
+
+function isKnownTrackMention(mention: PortraitTrackMention, evidence: PortraitEvidence): boolean {
+  const title = normalizeEvidenceText(mention.title)
+  const artist = normalizeEvidenceText(mention.artist ?? '')
+  if (!title) return true
+  const pairMatches = evidence.trackPairs.some((item) => {
+    const titleMatches = item.title === title || (title.length >= 3 && item.title.length >= 3 && (item.title.includes(title) || title.includes(item.title)))
+    const artistMatches = !artist || item.artist === artist || (artist.length >= 2 && item.artist.length >= 2 && (item.artist.includes(artist) || artist.includes(item.artist)))
+    return titleMatches && artistMatches
+  })
+  if (pairMatches) return true
+  if (artist) return false
+  return evidence.titles.has(title) || (title.length >= 3 && Array.from(evidence.titles).some((known) => known.length >= 3 && (known.includes(title) || title.includes(known))))
+}
+
+function portraitV2Issues(portrait: string, profile?: TasteProfile, evidence = buildPortraitEvidence(profile)): string[] {
   const compact = portrait.replace(/\s+/g, '')
   const issues: string[] = []
   if (Array.from(compact).length < 90 || Array.from(compact).length > 140) issues.push('portrait 字数需要接近 100-120 字')
+  if (!/你/.test(portrait)) issues.push('portrait 需要直接对用户说“你”')
   if (!/(可能|也许|大概|猜|说不准|不确定|拿不准|没看清|不知道|不太[确准]|感觉[像是]?好像|或许)/.test(portrait)) {
     issues.push('缺少不确定或猜测的表达,画像不应该全知')
   }
-  if (!/(《[^》]+》|\d+\s*次|\d+%|\d+首|周[一二三四五六日天]|凌晨|晚上|下午|早上)/.test(portrait)) {
-    issues.push('缺少具体歌名、数据或时间锚点')
+  if (!/(最近|这阵子|这几天|今天|好像|像是|有点|开始|还会|愿意|需要|想听|想找|靠近|躲开|安静|舒缓|放松|亮一点|更有劲|更有精神|低落|难过|开心|轻快|清醒|疲惫|累|困|睡|冷|陪伴|换心情|换状态|动起来)/.test(portrait)) {
+    issues.push('缺少通过音乐看到人的状态观察')
   }
-  if (/(分寸感|续航感|底色|光谱|底韵)/.test(portrait)) issues.push('出现禁用抽象词')
-  if (profile?.artists?.length) {
-    const knownNames = new Set([
-      ...profile.artists.map((a) => a.name.toLowerCase()),
-      ...profile.signature_tracks.map((t) => t.artist?.toLowerCase() ?? ''),
-    ])
+  if (!/(还想|想看清|没看清|想知道|想再确认|继续认识|再多听|再观察)/.test(portrait)) {
+    issues.push('缺少 Echo 还想继续认识的点')
+  }
+  if (/(根据数据|画像显示|轨迹表明|从占比看|数据|占比|画像|算法|标签|模型|用户|profile|mood|energy|tempo|play:|skip:|fav:|\d+%)/i.test(portrait)) {
+    issues.push('把内部证据直接写给用户了')
+  }
+  if (/(分寸感|续航感|底色|光谱|底韵|往里收|接住你|稳稳的|太满|太猛|上头|燃爆)/.test(portrait)) issues.push('出现禁用表达')
+  if (evidence.titles.size > 0) {
+    const songBlocks = portrait.match(/《([^》]+)》/g) ?? []
+    const unknownTitles = new Set<string>()
+    for (const block of songBlocks) {
+      const mention = mentionFromPortraitSongBlock(portrait, block)
+      if (!isKnownTrackMention(mention, evidence)) unknownTitles.add(mention.artist ? `${mention.artist} - ${mention.title}` : mention.title)
+    }
+    for (const title of unknownTitles) issues.push(`画像中提到的歌名「${title}」不在代表曲证据中,可能是编造的`)
+  }
+  if (evidence.artists.size > 0) {
     const songBlocks = portrait.match(/《([^》]+)》/g) ?? []
     const reportedArtists = new Set<string>()
     for (const block of songBlocks) {
-      const inner = block.slice(1, -1)
-      // 格式1: 《artist - title》
-      const dashMatch = inner.match(/^(.+?)[\s]*[-\-–—][\s]*(.+)$/)
-      if (dashMatch) {
-        const artistPart = dashMatch[1].trim().toLowerCase()
-        if (artistPart && !knownNames.has(artistPart) && !reportedArtists.has(artistPart)) {
-          issues.push(`画像中提到的歌手「${dashMatch[1].trim()}」不在用户口味档案中,可能是编造的`)
-          reportedArtists.add(artistPart)
-        }
-        continue
-      }
-      // 格式2: 《title》— 从《》前面的文本提取可能的歌手名（如 "周杰伦的《晴天》"）
-      const blockIndex = portrait.indexOf(block)
-      if (blockIndex <= 0) continue
-      const before = portrait.slice(Math.max(0, blockIndex - 20), blockIndex)
-      const artistBeforeMatch = before.match(/([一-鿿\w]{2,15})[的]$/)
-      if (artistBeforeMatch) {
-        const artistName = artistBeforeMatch[1].toLowerCase()
-        if (!knownNames.has(artistName) && !reportedArtists.has(artistName)) {
-          issues.push(`画像中提到的歌手「${artistBeforeMatch[1]}」不在用户口味档案中,可能是编造的`)
-          reportedArtists.add(artistName)
-        }
+      const mention = mentionFromPortraitSongBlock(portrait, block)
+      const artist = normalizeEvidenceText(mention.artist ?? '')
+      if (artist && !evidence.artists.has(artist) && !reportedArtists.has(artist)) {
+        issues.push(`画像中提到的歌手「${mention.artist}」不在用户口味档案中,可能是编造的`)
+        reportedArtists.add(artist)
       }
     }
   }
   return issues
+}
+
+function isHardPortraitIssue(issue: string): boolean {
+  return /没有返回 portrait|需要直接对用户|把内部证据直接写给用户|出现禁用表达|可能是编造的/.test(issue)
+}
+
+function hasHardPortraitIssues(issues: string[]): boolean {
+  return issues.some(isHardPortraitIssue)
+}
+
+function portraitIssueScore(issues: string[]): number {
+  return issues.reduce((score, issue) => score + (isHardPortraitIssue(issue) ? 100 : 1), 0)
+}
+
+function shouldUseRetryPortrait(originalIssues: string[], retryIssues: string[]): boolean {
+  const originalHasHardIssue = hasHardPortraitIssues(originalIssues)
+  const retryHasHardIssue = hasHardPortraitIssues(retryIssues)
+  if (originalHasHardIssue && !retryHasHardIssue) return true
+  if (!originalHasHardIssue && retryHasHardIssue) return false
+  return portraitIssueScore(retryIssues) < portraitIssueScore(originalIssues)
 }
 
 export async function buildInitialProfile(tracks: Track[]): Promise<TasteProfile> {
@@ -954,8 +1351,20 @@ function mergeIncrementalSignals(rebuilt: TasteProfile, previous: TasteProfile |
     if (!rebuiltSigKeys.has(`${track.title}::${track.artist}`)) rebuilt.signature_tracks.push(track)
   }
   rebuilt.signature_tracks = rebuilt.signature_tracks.slice(0, 10)
-  if (previous.energy_preference != null) rebuilt.energy_preference = previous.energy_preference
-  if (previous.tempo_preference) rebuilt.tempo_preference = previous.tempo_preference
+  if (previous.energy_preference != null) {
+    rebuilt.energy_preference = rebuilt.energy_preference == null
+      ? previous.energy_preference
+      : clamp(rebuilt.energy_preference * 0.7 + previous.energy_preference * 0.3)
+  }
+  if (previous.tempo_preference) {
+    rebuilt.tempo_preference = rebuilt.tempo_preference
+      ? {
+          slow: clamp(rebuilt.tempo_preference.slow * 0.7 + previous.tempo_preference.slow * 0.3),
+          medium: clamp(rebuilt.tempo_preference.medium * 0.7 + previous.tempo_preference.medium * 0.3),
+          fast: clamp(rebuilt.tempo_preference.fast * 0.7 + previous.tempo_preference.fast * 0.3),
+        }
+      : previous.tempo_preference
+  }
   if (previous.scenes) rebuilt.scenes = previous.scenes
   return rebuilt
 }
@@ -992,23 +1401,27 @@ export function getProfileWithQuestions(): { profile: TasteProfile | null; quest
 export async function regeneratePortrait(options: RegeneratePortraitOptions = {}): Promise<TasteProfile | null> {
   assertPortraitActive(options.signal)
   const refreshStructured = options.refreshStructured ?? true
+  options.report?.({ phase: 'structured-profile', current: 0, total: 3, message: '' })
   const profile = ensureProfileDisplay((refreshStructured ? buildStructuredProfileDraft('portrait') : null) ?? getTasteProfile())
   if (!profile) return null
   assertPortraitActive(options.signal)
 
   const prompt = readPortraitPrompt()
   const userPrompt = buildPortraitUserPrompt(profile)
+  const portraitEvidence = buildPortraitEvidence(profile)
   const settings = getSettings()
   try {
+    options.report?.({ phase: 'portrait', current: 1, total: 3, message: '' })
     const messages: LlmMessage[] = [
       { role: 'system', content: `${buildSoulPolicyPrompt('portrait')}\n\n${prompt}` },
       { role: 'user', content: userPrompt },
     ]
     const response = await completeChat(settings, messages, { temperature: 0.9, signal: options.signal, maxTokens: 800 })
     assertPortraitActive(options.signal)
-    let parsed = parseJsonObject<PortraitResponse>(response)
-    const issues = parsed?.portrait ? portraitV2Issues(parsed.portrait, profile) : ['没有返回 portrait']
+    let parsed = parsePortraitResponse(response)
+    const issues = parsed?.portrait ? portraitV2Issues(parsed.portrait, profile, portraitEvidence) : ['没有返回 portrait']
     if (issues.length) {
+      options.report?.({ phase: 'portrait-retry', current: 2, total: 3, message: '' })
       const artistHint = issues.some((i) => i.includes('不在用户口味档案中'))
         ? `\n用户口味档案中的歌手: ${profile.artists.map((a) => a.name).join('、')}。画像中提到的歌手必须来自这个列表。`
         : ''
@@ -1017,21 +1430,28 @@ export async function regeneratePortrait(options: RegeneratePortraitOptions = {}
         { role: 'assistant', content: response },
         {
           role: 'user',
-          content: `上一版没有通过画像 checklist: ${issues.join('；')}${artistHint}\n请重写一次,继续严格返回 JSON。`,
+          content: `上一版没有通过画像 checklist: ${issues.join('；')}${artistHint}
+请重写一次。只输出一个 JSON 对象,不要 Markdown,不要解释。字段只包含 portrait、summary、suggested_questions。`,
         },
       ], { temperature: 0.9, signal: options.signal, maxTokens: 800 })
       assertPortraitActive(options.signal)
-      const retryParsed = parseJsonObject<PortraitResponse>(retryResponse)
+      const retryParsed = parsePortraitResponse(retryResponse)
       if (retryParsed?.portrait) {
-        const retryIssues = portraitV2Issues(retryParsed.portrait, profile)
-        if (retryIssues.length <= issues.length) parsed = retryParsed
+        const retryIssues = portraitV2Issues(retryParsed.portrait, profile, portraitEvidence)
+        if (shouldUseRetryPortrait(issues, retryIssues)) parsed = retryParsed
       }
     }
-    if (!parsed?.portrait) throw new PortraitRegenerationError('画像文案生成失败：模型没有返回 portrait。')
+    let finalParsed = parsed?.portrait ? parsed as PortraitResponse & { portrait: string } : buildLocalPortraitFallback(profile)
+    const finalIssues = portraitV2Issues(finalParsed.portrait, profile, portraitEvidence)
+    if (hasHardPortraitIssues(finalIssues)) {
+      finalParsed = buildLocalPortraitFallback(profile)
+    }
+    options.report?.({ phase: 'save', current: 2, total: 3, message: '' })
 
     const next: TasteProfile = {
       ...profile,
-      echo_portrait: parsed.portrait,
+      echo_portrait: finalParsed.portrait,
+      work_summary: finalParsed.summary ?? profile.work_summary ?? finalParsed.portrait,
       display: profile.display ?? buildFallbackDisplay(profile),
       profile_meta: {
         ...(profile.profile_meta ?? {}),
@@ -1040,8 +1460,8 @@ export async function regeneratePortrait(options: RegeneratePortraitOptions = {}
         portraitSignalCount: getFeedbackSignalCount(),
       },
     }
-    saveTasteProfile(next, parsed.summary ?? parsed.portrait)
-    for (const question of parsed.suggested_questions ?? []) {
+    saveTasteProfile(next, finalParsed.summary ?? finalParsed.portrait)
+    for (const question of finalParsed.suggested_questions ?? []) {
       if (question.content) addTasteQuestion(question.kind ?? 'observation', question.content, question.context ?? {})
     }
     return next
@@ -1121,6 +1541,13 @@ export async function applySignal(kind: string, payload: Record<string, unknown>
   if (kind === 'reinforce_vibe' && target) {
     profile.moods.unshift({ tag: target, frequency: clamp(0.5 + strength), signature_artists: profile.artists.slice(0, 3).map((artist) => artist.name) })
     profile.moods = profile.moods.slice(0, 10)
+  }
+
+  if (kind === 'unlike_vibe' && target) {
+    const existing = profile.moods.find((mood) => mood.tag === target)
+    if (existing) existing.frequency = clamp(existing.frequency - Math.max(0.04, strength))
+    if (!profile.anti_patterns.includes(target)) profile.anti_patterns.push(target)
+    shiftDiscoveryAppetite(profile, 0.04)
   }
 
   if (kind === 'played') {

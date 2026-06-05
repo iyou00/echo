@@ -59,9 +59,11 @@ const DIRECT_SONG_ACTION_PATTERN = /想听|想要听|要听|我要听|我想听|
 const MUSIC_ACTION_PATTERN = /推|推荐|来几首|来一首|来\s*\d+\s*首|来[一二两三四五六七八九十]\s*首|听什么|听啥|值得听|适合听|想听|想要听|要听|我要听|我想听|播放|能听|放点|放首|放一首|来点|找首|找一首|给我.*歌|帮我.*歌|接\s*\d*\s*首|歌单|music|song/i
 const SIMILAR_PATTERN = /像|类似|相似|那种|那类|这类|这种感觉|同款|差不多|接近/i
 const SCENE_PATTERN = /场景|专注|工作|午休|睡前|通勤|下班|雨天|独处|运动|提神|放松|发呆|随机|随便/i
-const MUSIC_QUALITY_PATTERN = /慢|快|安静|热闹|循环|舒缓|缓和|轻|燃|激昂|高昂|亢奋|振奋|热血|澎湃|带感|节奏|动感|鼓点|有劲|提神|治愈|怀旧|英文|欧美|英语|粤语|广东|韩语|kpop|日语|华语|民谣|摇滚|说唱|电子/i
+const MUSIC_QUALITY_PATTERN = /慢|快|安静|热闹|循环|舒缓|缓和|轻|燃|激情|激昂|高昂|亢奋|振奋|热血|澎湃|带感|节奏|动感|鼓点|有劲|提神|治愈|怀旧|英文|欧美|英语|粤语|广东|韩语|kpop|日语|华语|民谣|摇滚|说唱|电子/i
 const EMOTION_PATTERN = /累|困|疲|睡|烦|燥|低落|emo|想哭|难过|伤心|开心|兴奋|阳光|孤独|焦虑|压力|失眠|无聊|烦躁|压抑/i
 const FEEDBACK_REF_PATTERN = /这首|这歌|刚才|当前|现在这首|它|这个|上一首|错误的歌|错误的歌曲|放错|播错/i
+const STRONG_CURRENT_TRACK_REF_PATTERN = /这首歌|这首|这歌|刚才|当前|现在这首|上一首|错误的歌|错误的歌曲|放错|播错/i
+const WEAK_CURRENT_TRACK_REF_PATTERN = /它|这个/i
 const FAVORITE_PATTERN = /喜欢|爱听|不错|对味|收藏|留下|可以/i
 const SKIP_PATTERN = /跳过|换一首|换首|下一首|切歌/i
 const NOT_RIGHT_PATTERN = /不对|不太对|不好听|没感觉|别放|不喜欢|腻了|太吵|太慢|太快|错误|错歌|放错|播错/i
@@ -112,6 +114,55 @@ function classifyFeedbackAction(text: string): ChatIntent['feedbackAction'] | un
   if (MORE_LIKE_THIS_PATTERN.test(text)) return 'more_like_this'
   if (FAVORITE_PATTERN.test(text)) return 'favorite'
   return undefined
+}
+
+function normalizedContains(left: string | undefined, right: string | undefined): boolean {
+  const normalizedLeft = normalizeText(left ?? '')
+  const normalizedRight = normalizeText(right ?? '')
+  return Boolean(normalizedLeft && normalizedRight && (normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft)))
+}
+
+function explicitEntityMatchesCurrentTrack(intent: RecommendationIntent, currentTrack: Track | null | undefined): boolean {
+  if (!currentTrack) return false
+  const titleMatches = intent.seedTitle ? normalizedContains(currentTrack.title, intent.seedTitle) : true
+  const artistMatches = intent.artistQuery ? normalizedContains(currentTrack.artist, intent.artistQuery) : true
+  return titleMatches && artistMatches
+}
+
+function isPlausibleExternalArtistCandidate(value: string | undefined): value is string {
+  if (!value?.trim()) return false
+  return !/^(这首|这歌|这个|这|刚才|当前|现在|上一首|首歌)|不好听|不喜欢|不对|没感觉|换|跳过|切歌|激情|激昂|高昂|热血|舒缓|安静|放松/.test(value.trim())
+}
+
+function hasExplicitExternalEntityMention(text: string, recommendationIntent: RecommendationIntent): boolean {
+  if (isPlausibleExternalArtistCandidate(recommendationIntent.artistQuery)) return true
+  if (/《[^》]{1,40}》/.test(text)) return true
+  const pair = text.match(/([A-Za-z0-9 .&'’\-\u4e00-\u9fa5]{1,24})的[^《》，。！？?！,.]{1,40}?(?:这首|这歌|这个歌|这个首歌|这首歌|这首歌曲|这首作品|这个作品|这首音乐|这个音乐|这个曲子|这首曲子)/i)
+  if (!pair?.[1]) return false
+  const artistCandidate = pair[1].trim()
+  return isPlausibleExternalArtistCandidate(artistCandidate)
+}
+
+function shouldUseCurrentTrackFeedback(text: string, recommendationIntent: RecommendationIntent, currentTrack: Track | null | undefined): ChatIntent['feedbackAction'] | undefined {
+  if (!currentTrack) return undefined
+  if (!FEEDBACK_REF_PATTERN.test(text) && !MORE_LIKE_THIS_PATTERN.test(text)) return undefined
+  const action = classifyFeedbackAction(text)
+  if (!action) return undefined
+  const hasExternalEntity = hasExplicitExternalEntityMention(text, recommendationIntent)
+  if (!STRONG_CURRENT_TRACK_REF_PATTERN.test(text) && WEAK_CURRENT_TRACK_REF_PATTERN.test(text) && hasExternalEntity) {
+    return undefined
+  }
+  if (hasExternalEntity && !explicitEntityMatchesCurrentTrack(recommendationIntent, currentTrack)) {
+    return undefined
+  }
+  return action
+}
+
+function isObviousCurrentTrackFeedback(intent: ChatIntent): boolean {
+  if (intent.kind !== 'feedback_current_track') return false
+  if (intent.seedTitle || intent.artistQuery) return false
+  if (!STRONG_CURRENT_TRACK_REF_PATTERN.test(intent.text)) return false
+  return intent.feedbackAction === 'not_right' || intent.feedbackAction === 'skip' || intent.feedbackAction === 'more_like_this'
 }
 
 function directSongClarification(seedTitle: string, artistQuery?: string): ChatIntentClarification | undefined {
@@ -185,6 +236,7 @@ function normalizeRouterKind(value: unknown): ChatIntentKind | undefined {
     || kind === 'mood_request'
     || kind === 'scene_request'
     || kind === 'casual_chat'
+    || kind === 'feedback_current_track'
   ) {
     return kind
   }
@@ -192,7 +244,8 @@ function normalizeRouterKind(value: unknown): ChatIntentKind | undefined {
 }
 
 function shouldUseLlmRouter(intent: ChatIntent): boolean {
-  if (intent.kind === 'out_of_scope' || intent.kind === 'feedback_current_track') return false
+  if (intent.kind === 'out_of_scope') return false
+  if (intent.kind === 'feedback_current_track') return !isObviousCurrentTrackFeedback(intent)
   if (intent.kind === 'clarification_needed') return true
   if (intent.seedTitle && /歌|歌曲|音乐|作品/.test(intent.seedTitle)) return true
   if (intent.kind === 'direct_song' || intent.kind === 'artist_request' || intent.kind === 'similar_to_track' || intent.kind === 'scene_request') return false
@@ -201,10 +254,11 @@ function shouldUseLlmRouter(intent: ChatIntent): boolean {
   return true
 }
 
-async function inferChatRouteWithLlm(text: string, signal?: AbortSignal): Promise<{
+async function inferChatRouteWithLlm(text: string, signal?: AbortSignal, context: ChatIntentContext = {}): Promise<{
   kind: ChatIntentKind
   confidence: number
   wantsMusic: boolean
+  feedbackAction?: ChatIntent['feedbackAction']
   override?: IntentOverride
 } | null> {
   assertChatRouterActive(signal)
@@ -222,10 +276,11 @@ async function inferChatRouteWithLlm(text: string, signal?: AbortSignal): Promis
 - similar_to_track: 用户想要类似某首歌、某个歌手或当前播放的感觉。
 - mood_request: 用户想听歌,但只给了心情、场景、泛泛请求。
 - scene_request: 用户按工作、睡前、通勤、雨天等场景找歌。
+- feedback_current_track: 用户明确评价、纠正、收藏或要求更换当前正在播放的歌。
 - casual_chat: 普通聊天或纯情绪表达。
 
 输出格式:
-{"kind":"mood_request","wantsMusic":true,"confidence":0.92,"artistQuery":null,"seedTitle":null,"targetCount":1,"evidence":["原文短词"]}
+{"kind":"mood_request","wantsMusic":true,"confidence":0.92,"artistQuery":null,"seedTitle":null,"targetCount":1,"feedbackAction":null,"evidence":["原文短词"]}
 
 规则:
 1. 纯粹说心情,例如“我累了”“我有点烦”,kind 填 casual_chat,wantsMusic:false。
@@ -235,12 +290,20 @@ async function inferChatRouteWithLlm(text: string, signal?: AbortSignal): Promis
 5. “歌曲吧/歌吧/音乐吧/作品吧”是泛指词,不能当歌名。
 6. 不确定歌名就 seedTitle:null,不要猜。
 7. targetCount 默认 1,“几首”填 3,最多 5。
+8. 用户说“这首不好听”“刚才那首不对”“换一首激情一点的”,并且确实指当前播放,kind 填 feedback_current_track,feedbackAction 填 not_right 或 skip。
+9. 用户说“我喜欢王菲的《主角》”“王菲的主角这首歌我喜欢”,这是偏好表达,kind 填 casual_chat,wantsMusic:false,artistQuery/seedTitle 仍要抽取。
+10. 句子里同时有当前指代和明确歌手/歌名时,优先相信明确歌手/歌名；只有它和当前播放一致时才算 feedback_current_track。
 
 例子:
 - 你随便来一首陈奕迅的歌曲吧 → {"kind":"artist_request","wantsMusic":true,"confidence":0.96,"artistQuery":"陈奕迅","seedTitle":null,"targetCount":1,"evidence":["随便","陈奕迅","歌曲"]}
 - 有什么可以分享给我听的歌吗 → {"kind":"mood_request","wantsMusic":true,"confidence":0.9,"artistQuery":null,"seedTitle":null,"targetCount":1,"evidence":["分享","听","歌"]}
 - 我要听王菲的主角 → {"kind":"direct_song","wantsMusic":true,"confidence":0.98,"artistQuery":"王菲","seedTitle":"主角","targetCount":1,"evidence":["王菲","主角"]}
-- 我有点冷 → {"kind":"casual_chat","wantsMusic":false,"confidence":0.8,"artistQuery":null,"seedTitle":null,"targetCount":1,"evidence":[]}`,
+- 王菲的主角这首歌我喜欢 → {"kind":"casual_chat","wantsMusic":false,"confidence":0.94,"artistQuery":"王菲","seedTitle":"主角","targetCount":1,"feedbackAction":null,"evidence":["王菲","主角","喜欢"]}
+- 这首不好听，换一首激情一点的 → {"kind":"feedback_current_track","wantsMusic":true,"confidence":0.94,"artistQuery":null,"seedTitle":null,"targetCount":1,"feedbackAction":"skip","evidence":["这首","不好听","激情"]}
+- 我有点冷 → {"kind":"casual_chat","wantsMusic":false,"confidence":0.8,"artistQuery":null,"seedTitle":null,"targetCount":1,"evidence":[]}
+
+当前播放:
+${context.currentTrack ? `${context.currentTrack.artist} - ${context.currentTrack.title}` : '无'}`,
     },
     { role: 'user', content: text },
   ], {
@@ -263,6 +326,10 @@ async function inferChatRouteWithLlm(text: string, signal?: AbortSignal): Promis
   if (!kind) return null
   const confidence = Math.max(0, Math.min(1, numberValue(parsed.confidence) ?? 0.5))
   const wantsMusic = typeof parsed.wantsMusic === 'boolean' ? parsed.wantsMusic : kind !== 'casual_chat'
+  const parsedFeedbackAction = stringValue(parsed.feedbackAction)
+  const feedbackAction = parsedFeedbackAction === 'more_like_this' || parsedFeedbackAction === 'not_right' || parsedFeedbackAction === 'skip' || parsedFeedbackAction === 'favorite'
+    ? parsedFeedbackAction
+    : undefined
   const parsedArtistQuery = stringValue(parsed.artistQuery)?.slice(0, 40)
   const parsedSeedTitle = normalizeRouterTitle(parsed.seedTitle)
   const artistQuery = sourceSupportsArtist(text, parsedArtistQuery) ? parsedArtistQuery : undefined
@@ -279,20 +346,24 @@ async function inferChatRouteWithLlm(text: string, signal?: AbortSignal): Promis
   if (evidence?.length) override.evidence = evidence
   if (confidence) override.intentConfidence = confidence
   let normalizedKind = kind
-  if (seedTitle) normalizedKind = 'direct_song'
-  else if (artistQuery && kind !== 'similar_to_track') normalizedKind = 'artist_request'
-  else if (kind === 'direct_song' || kind === 'artist_request') normalizedKind = 'mood_request'
+  if (kind === 'direct_song' && !seedTitle) normalizedKind = artistQuery ? 'artist_request' : 'mood_request'
+  if (kind === 'artist_request' && !artistQuery) normalizedKind = seedTitle ? 'direct_song' : 'mood_request'
+  if (kind === 'casual_chat') normalizedKind = 'casual_chat'
+  if (kind === 'feedback_current_track' && context.currentTrack) {
+    normalizedKind = 'feedback_current_track'
+  }
   return {
     kind: normalizedKind,
     confidence,
     wantsMusic,
+    feedbackAction,
     override: Object.keys(override).length > 0 ? override : undefined,
   }
 }
 
 export async function refineChatIntentWithLlm(intent: ChatIntent, context: ChatIntentContext = {}, signal?: AbortSignal): Promise<ChatIntent> {
   if (!shouldUseLlmRouter(intent)) return intent
-  const route = await inferChatRouteWithLlm(intent.text, signal)
+  const route = await inferChatRouteWithLlm(intent.text, signal, context)
   if (!route || route.confidence < 0.72) return intent
   const recommendationIntent = route.override
     ? mergeIntent(intent.recommendationIntent, route.override)
@@ -313,7 +384,7 @@ export async function refineChatIntentWithLlm(intent: ChatIntent, context: ChatI
     targetCount: recommendationIntent.targetCount,
     moodTerms,
     needsClarification,
-    feedbackAction: context.currentTrack ? intent.feedbackAction : undefined,
+    feedbackAction: context.currentTrack ? route.feedbackAction ?? intent.feedbackAction : undefined,
   }
 }
 
@@ -332,9 +403,7 @@ export function classifyChatIntent(text: string, context: ChatIntentContext = {}
   const targetCount = recommendationIntent.targetCount
   const outOfScopeTopic = classifyOutOfScope(trimmed)
 
-  const feedbackAction = context.currentTrack && (FEEDBACK_REF_PATTERN.test(trimmed) || MORE_LIKE_THIS_PATTERN.test(trimmed))
-    ? classifyFeedbackAction(trimmed)
-    : undefined
+  const feedbackAction = shouldUseCurrentTrackFeedback(trimmed, recommendationIntent, context.currentTrack)
   if (feedbackAction) {
     return {
       kind: 'feedback_current_track',

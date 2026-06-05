@@ -1,4 +1,5 @@
 import type { TasteQuestion } from '../../../types/ipc'
+import { looksLikeFreshNonAnswerTopic } from './meta'
 
 export type PendingQuestionReplyAction = 'none' | 'answer_only' | 'extend_recommendation'
 export type PendingQuestionReplyPolarity = 'positive' | 'negative' | 'mixed' | 'neutral'
@@ -77,6 +78,7 @@ export function detectPendingReplyFocus(text: string): string {
 }
 
 export function ruleClassifyPendingReply(text: string, question?: TasteQuestion): PendingQuestionReplyAction | null {
+  if (looksLikeFreshNonAnswerTopic(text)) return 'none'
   const explicitFreshMusic = /(来一首|来几首|推荐|推|放首|放点|找首|找一首|给我).{0,18}(歌|音乐|曲|粤语|英文|欧美|华语|韩语|日语|激昂|热血|舒缓|慢歌|快歌|放松|欢快|魔力红|maroon)/i
   if (explicitFreshMusic.test(text) && !/(这种|那种|类似|这个方向|氛围|感觉|味道)/.test(text)) return 'none'
   if (looksLikeFollowUpExtension(text)) return 'extend_recommendation'

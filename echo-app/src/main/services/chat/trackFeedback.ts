@@ -2,6 +2,7 @@ import type { Track } from '../../../types/ipc'
 import { rememberMusicCorrection } from '../../skills/music/correctionMemory'
 import { searchMusic } from '../../skills/music/search'
 import type { MusicEntityConstraint } from '../../skills/music/verifier'
+import type { IntentOverride } from '../recommendation'
 import { recordFeedback } from '../feedback'
 import { toggleFavorite } from '../favorites'
 import { next as playNext } from '../playback'
@@ -18,6 +19,53 @@ export function trackLabel(track: Track): string {
 
 function wantsTrackChange(text: string, intent: ChatIntent): boolean {
   return intent.feedbackAction === 'skip' || /换一首|换首|下一首|跳过|切歌|别放|不听/.test(text)
+}
+
+const REPLACEMENT_DIRECTION_PATTERN = /激情|激昂|高昂|亢奋|振奋|热血|澎湃|炸|爆|带感|节奏|鼓点|动感|有劲|提神|清醒|燃|快一点|快点|快歌|舒缓|安静|放松|慢一点|慢点|粤语|英文|英语|欧美|韩语|日语|华语|民谣|摇滚|说唱|电子|r&b|rnb|爵士/i
+const FEEDBACK_WORD_PATTERN = /这首歌|这首|这歌|刚才|当前|现在这首|不好听|没感觉|不喜欢|不对|不太对|别放|不听|腻了|太吵|太慢|太快|错误|错歌|放错|播错/gi
+const CHANGE_WORD_PATTERN = /换一首|换首|下一首|跳过|切歌|换个|换一个/gi
+const ALLOWED_REPLACEMENT_LANGUAGES = new Set(['华语', '粤语', '英语', '韩语', '日语'])
+
+function hasReplacementDirection(text: string, intent: ChatIntent): boolean {
+  const recommendation = intent.recommendationIntent
+  if (recommendation.artistQuery || recommendation.seedTitle || recommendation.language || recommendation.energy || recommendation.tempo) return true
+  if (recommendation.scenes.length > 0) return true
+  if (recommendation.moods.some((mood) => mood !== '陪伴')) return true
+  return REPLACEMENT_DIRECTION_PATTERN.test(text)
+}
+
+function buildReplacementQuery(text: string): string {
+  const cleaned = text
+    .replace(FEEDBACK_WORD_PATTERN, '')
+    .replace(CHANGE_WORD_PATTERN, '')
+    .replace(/[，。！？?！,.]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!cleaned && /太慢|没劲|太软|太平/.test(text)) return '推荐一首节奏更快更有劲的歌'
+  if (!cleaned && /太吵|太炸|太快|太闹/.test(text)) return '推荐一首舒缓一点的歌'
+  return cleaned ? `推荐一首${cleaned}的歌` : ''
+}
+
+function replacementIntentOverride(intent: ChatIntent): IntentOverride {
+  const recommendation = intent.recommendationIntent
+  const language = recommendation.language && ALLOWED_REPLACEMENT_LANGUAGES.has(recommendation.language)
+    ? recommendation.language as IntentOverride['language']
+    : undefined
+  return {
+    wantsMusic: true,
+    language,
+    moods: recommendation.moods.filter((mood) => mood !== '陪伴'),
+    scenes: recommendation.scenes,
+    energy: recommendation.energy,
+    tempo: recommendation.tempo,
+    familiarity: recommendation.familiarity,
+    targetCount: 1,
+    seedTitle: recommendation.seedTitle,
+    artistQuery: recommendation.artistQuery,
+    intentConfidence: Math.max(0.86, intent.confidence),
+    evidence: recommendation.evidence,
+    rejectIf: recommendation.rejectIf,
+  }
 }
 
 function sameTrack(left: Track, right: Track): boolean {
@@ -74,6 +122,31 @@ async function searchCorrectedReplacement(
   return tracks.find((track) => !sameTrack(track, currentTrack)) ?? null
 }
 
+async function searchDirectedReplacement(
+  intent: ChatIntent,
+  currentTrack: Track,
+  text: string,
+  signal?: AbortSignal,
+): Promise<Track | null> {
+  if (!hasReplacementDirection(text, intent)) return null
+  const query = buildReplacementQuery(text)
+  if (!query) return null
+  const tracks = await searchMusic({
+    query,
+    mode: 'generic',
+    targetCount: 1,
+    candidatePoolSize: 32,
+    ignoreScene: true,
+    intentOverride: replacementIntentOverride(intent),
+    signal,
+  }).catch((error) => {
+    if (signal?.aborted) throw error
+    console.warn('[chat] directed replacement search failed', error)
+    return []
+  })
+  return tracks.find((track) => !sameTrack(track, currentTrack)) ?? null
+}
+
 export async function handleCurrentTrackFeedback(
   intent: ChatIntent,
   currentTrack: Track,
@@ -109,6 +182,14 @@ export async function handleCurrentTrackFeedback(
         handled: true,
         tracks: [correctedTrack],
         content: `这次按你纠正的来，换成${trackLabel(correctedTrack)}。`,
+      }
+    }
+    const directedTrack = correction ? null : await searchDirectedReplacement(intent, currentTrack, text, signal)
+    if (directedTrack) {
+      return {
+        handled: true,
+        tracks: [directedTrack],
+        content: `懂了，${trackLabel(currentTrack)}这个方向我先收一收。换一首更贴近你刚说的：${trackLabel(directedTrack)}。`,
       }
     }
     if (correction) {

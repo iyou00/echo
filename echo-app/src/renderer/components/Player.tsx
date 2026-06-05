@@ -63,7 +63,7 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
 
   async function completePlayback() {
     if (completingRef.current) return
-    const shouldContinueVoice = Boolean(autoPlayNext && voiceContinuous && current?.sourceContext === 'voice')
+    const shouldContinueVoice = Boolean(voiceContinuous)
     const shouldContinueScene = Boolean(!shouldContinueVoice && currentScene && current && (
       current.sceneSessionId === currentScene.id || (!current.sceneSessionId && current.sceneKey === currentScene.key)
     ))
@@ -275,6 +275,7 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
     if (retryCountRef.current > 3) {
       setLocalPlaying(false)
       setPlaybackError('播放链接失效且重试失败，请检查网络或重新登录。')
+      echo.playback.pause().then(setState).catch(() => undefined)
       return
     }
 

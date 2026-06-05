@@ -2,11 +2,12 @@ import type { VoiceLine } from '../../types/ipc'
 import { getSettings } from '../db/settings'
 import { loadRecentConversations } from '../db/conversations'
 import { loadRecentTracks } from '../db/tracks'
-import { completeChat } from '../llm/client'
+import { completeChat, LlmError } from '../llm/client'
 import { stripKnownSystemBlocks } from '../llm/outputSanitize'
 import { getTasteProfile } from '../db/taste'
 import { buildMemoryEvidencePrompt } from './memoryEvidence'
 import { buildSoulPolicyPrompt } from '../skills/soul/policy'
+import { recordHealth } from './health'
 
 export interface GenerateVoiceLineOptions {
   signal?: AbortSignal
@@ -51,8 +52,11 @@ ${tracks.map((track) => `${track.title} - ${track.artist}`).join('\n')}
     ], { signal: options.signal, maxTokens: 200 })
     assertVoiceActive(options.signal)
     return { content: stripKnownSystemBlocks(content).trim() || fallback, status: 'done' }
-  } catch {
+  } catch (error) {
     assertVoiceActive(options.signal)
+    if (error instanceof LlmError) {
+      recordHealth('llm', error.kind === 'auth' || error.kind === 'config' ? 'error' : 'degraded', '回声文案生成失败，已使用兜底文案。', error.message)
+    }
     return { content: fallback, status: 'done' }
   }
 }

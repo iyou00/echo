@@ -1,7 +1,7 @@
 {
   "name": "echo-app",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.2",
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -50,14 +50,17 @@
     "appId": "app.echo.desktop",
     "productName": "Echo",
     "artifactName": "Echo-Setup-${version}.${ext}",
+    "directories": {
+      "output": "release"
+    },
     "files": [
       "dist",
       "dist-electron"
     ],
     "extraResources": [
       {
-        "from": "../prompts",
-        "to": "prompts",
+        "from": "public/brand",
+        "to": "brand",
         "filter": [
           "**/*"
         ]
@@ -80,6 +83,12 @@
     },
     "nsis": {
       "oneClick": false,
+      "installerIcon": "public/brand/icon.ico",
+      "uninstallerIcon": "public/brand/icon.ico",
+      "installerHeaderIcon": "public/brand/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Echo",
       "allowToChangeInstallationDirectory": true,
       "allowElevation": true,
       "unicode": true,

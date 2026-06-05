@@ -673,14 +673,14 @@ const mockEcho: EchoApi = {
       return structuredClone(audit)
     },
     async regeneratePortrait() {
-      return runMockRuntimeTask({ kind: 'taste-refresh', phase: 'structured-profile', total: 2, message: '整理口味画像信号' }, async (task) => {
+      return runMockRuntimeTask({ kind: 'taste-refresh', phase: 'structured-profile', total: 2, message: '' }, async (task) => {
         await wait(220)
         assertMockRuntimeTaskActive(task)
-        updateMockRuntimeTask(task, { phase: 'portrait', current: 1, message: '重写画像文案' })
+        updateMockRuntimeTask(task, { phase: 'portrait', current: 1, message: '' })
         await wait(260)
         assertMockRuntimeTaskActive(task)
         profileState = structuredClone(mockProfile)
-        updateMockRuntimeTask(task, { phase: 'done', current: 2, message: '画像文案已刷新。' })
+        updateMockRuntimeTask(task, { phase: 'done', current: 2, message: '已刷新。' })
         return structuredClone(profileState)
       })
     },

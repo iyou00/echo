@@ -178,32 +178,42 @@ export async function* streamChat(settings: Settings, messages: LlmMessage[], op
 export async function completeChat(settings: Settings, messages: LlmMessage[], options?: LlmRequestOptions): Promise<string> {
   assertConfig(settings)
   const request = createRequestSignal(options)
-  const response = await fetch(endpoint(settings.llm.baseUrl), {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${settings.llm.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: settings.llm.model,
-      messages,
-      stream: false,
-      temperature: options?.temperature ?? 0.8,
-      max_tokens: maxTokensFor(options),
-    }),
-    signal: request.signal,
-  }).catch((error) => {
+  let response: Response
+  try {
+    response = await fetch(endpoint(settings.llm.baseUrl), {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${settings.llm.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: settings.llm.model,
+        messages,
+        stream: false,
+        temperature: options?.temperature ?? 0.8,
+        max_tokens: maxTokensFor(options),
+      }),
+      signal: request.signal,
+    })
+  } catch (error) {
     request.cleanup()
     normalizeFetchError(error, request)
-  })
-  request.cleanup()
-
-  if (!response.ok) {
-    if (response.status === 401 || response.status === 403) throw new LlmError('鉴权失败', 'auth')
-    if (response.status === 429) throw new LlmError('请求太频繁', 'rate_limit')
-    throw new LlmError(`服务端返回 ${response.status}`, 'server')
   }
 
-  const parsed = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> }
-  return parsed.choices?.[0]?.message?.content ?? ''
+  try {
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) throw new LlmError('鉴权失败', 'auth')
+      if (response.status === 429) throw new LlmError('请求太频繁', 'rate_limit')
+      throw new LlmError(`服务端返回 ${response.status}`, 'server')
+    }
+
+    const parsed = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> }
+    return parsed.choices?.[0]?.message?.content ?? ''
+  } catch (error) {
+    if (error instanceof LlmError) throw error
+    if (error instanceof SyntaxError) throw new LlmError('LLM 响应格式异常', 'server')
+    normalizeFetchError(error, request)
+  } finally {
+    request.cleanup()
+  }
 }

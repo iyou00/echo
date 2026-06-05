@@ -109,6 +109,7 @@ export function normalizeMusicTitle(value: string): string {
   return value
     .replace(/[，。！？?！,.].*$/, '')
     .replace(/^(?:的|那首|这首|一首)\s*/, '')
+    .replace(/(?:这首|这歌|这个歌|这个首歌|这首歌|这首歌曲|这首作品|这个作品|这首音乐|这个音乐|这个曲子|这首曲子).*$/i, '')
     .trim()
 }
 
@@ -282,6 +283,16 @@ export function resolveMusicEntitiesFromText(text: string): MusicEntityResolutio
     if (pair) {
       const artist = addArtist(entities, pair[1] ?? '', 0.9)
       const title = addTitle(entities, pair[2] ?? '', 0.88)
+      artistQuery = artistQuery ?? artist
+      seedTitle = seedTitle ?? title
+    }
+  }
+
+  if (!seedTitle) {
+    const preferencePair = trimmed.match(/([^《》，。！？?！,.]{1,24})的([^《》，。！？?！,.]{1,40}?)(?:这首|这歌|这个歌|这个首歌|这首歌|这首歌曲|这首作品|这个作品|这首音乐|这个音乐|这个曲子|这首曲子)/i)
+    if (preferencePair) {
+      const artist = addArtist(entities, preferencePair[1] ?? '', 0.84)
+      const title = addTitle(entities, preferencePair[2] ?? '', 0.84)
       artistQuery = artistQuery ?? artist
       seedTitle = seedTitle ?? title
     }

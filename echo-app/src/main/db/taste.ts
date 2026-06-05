@@ -3,19 +3,26 @@ import { getDb } from './index'
 import { parseJson } from './json'
 
 export function getTasteProfile(): TasteProfile | null {
-  const row = getDb().prepare('SELECT profile_json FROM taste_profile WHERE user_id = current_user_id()').get() as { profile_json: string } | undefined
-  return row ? parseJson<TasteProfile | null>(row.profile_json, null, 'taste_profile.profile_json') : null
+  const row = getDb().prepare('SELECT profile_json, summary FROM taste_profile WHERE user_id = current_user_id()').get() as { profile_json: string; summary?: string } | undefined
+  if (!row) return null
+  const profile = parseJson<TasteProfile | null>(row.profile_json, null, 'taste_profile.profile_json')
+  if (!profile) return null
+  return profile.work_summary || !row.summary ? profile : { ...profile, work_summary: row.summary }
 }
 
 export function saveTasteProfile(profile: TasteProfile, summary = ''): TasteProfile {
+  const effectiveSummary = summary && summary !== profile.echo_portrait
+    ? summary
+    : profile.work_summary ?? summary
+  const next = effectiveSummary ? { ...profile, work_summary: effectiveSummary } : profile
   getDb()
     .prepare(
       `INSERT INTO taste_profile (user_id, profile_json, summary, updated_at)
        VALUES (current_user_id(), ?, ?, CURRENT_TIMESTAMP)
        ON CONFLICT(user_id) DO UPDATE SET profile_json = excluded.profile_json, summary = excluded.summary, updated_at = CURRENT_TIMESTAMP`,
     )
-    .run(JSON.stringify(profile), summary || profile.echo_portrait)
-  return profile
+    .run(JSON.stringify(next), effectiveSummary || profile.echo_portrait)
+  return next
 }
 
 export function addTasteQuestion(kind: string, content: string, context: Record<string, unknown> = {}, expiresAt?: string): void {
@@ -41,6 +48,18 @@ function toQuestion(row: Record<string, unknown>): TasteQuestion {
     answered_content: typeof row.answered_content === 'string' ? row.answered_content : undefined,
     context,
   }
+}
+
+export function getTasteQuestion(id: number): TasteQuestion | null {
+  const row = getDb()
+    .prepare(
+      `SELECT id, kind, content, context_json, status, answered_content
+       FROM taste_questions
+       WHERE user_id = current_user_id() AND id = ?
+       LIMIT 1`,
+    )
+    .get(id) as Record<string, unknown> | undefined
+  return row ? toQuestion(row) : null
 }
 
 export function hasRecentTasteQuestionForTrack(kind: string, title: string, artist: string, days: number): boolean {

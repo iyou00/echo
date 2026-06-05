@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from 'react'
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { Download, Upload } from 'lucide-react'
 import type { CareFrequency, EchoApi, ImportProgressPayload, ImportTaskSnapshot, Settings, Track } from '../../types/ipc'
 import type { AppPageProps } from '../appState'
@@ -75,6 +75,7 @@ function detectProvider(baseUrl: string): string {
 }
 
 const defaultTtsBaseUrl = 'https://tts.wangwangit.com'
+const drawerExitMs = 360
 const ttsVoices = [
   ['zh-CN-XiaochenNeural', '晓辰 · 知性'],
   ['zh-CN-XiaoxiaoNeural', '晓晓 · 温柔'],
@@ -196,6 +197,8 @@ export function SettingsPage({
 
   const [activeTab, setActiveTab] = useState<'sync' | 'pref' | 'sys'>(hasLlmConfig ? 'sync' : 'sys')
   const [showNeteaseDrawer, setShowNeteaseDrawer] = useState(false)
+  const [renderNeteaseDrawer, setRenderNeteaseDrawer] = useState(false)
+  const [ttsEditingCustom, setTtsEditingCustom] = useState(false)
 
   function switchProvider(key: string) {
     const preset = providerPresets[key]
@@ -210,12 +213,61 @@ export function SettingsPage({
   const importSectionRef = useRef<HTMLDivElement | null>(null)
   const apiSectionRef = useRef<HTMLDivElement | null>(null)
   const ttsSpeedSaveKeyRef = useRef('')
+  const ttsBaseUrlInputRef = useRef<HTMLInputElement | null>(null)
+  const neteasePlaylistButtonRef = useRef<HTMLButtonElement | null>(null)
+  const drawerSheetRef = useRef<HTMLDivElement | null>(null)
+  const drawerCloseButtonRef = useRef<HTMLButtonElement | null>(null)
+  const drawerReturnFocusRef = useRef<HTMLElement | null>(null)
+  const drawerOpenFrameRef = useRef<number | null>(null)
+  const drawerCloseTimerRef = useRef<number | null>(null)
   const runtimeTasks = useRuntimeTasks(echo)
 
   function commitSettings(next: Settings) {
     skipHydrateRef.current = true
     setSettings(next)
   }
+
+  const restoreDrawerFocus = useCallback(() => {
+    const target = drawerReturnFocusRef.current
+    if (target?.isConnected) target.focus()
+    drawerReturnFocusRef.current = null
+  }, [])
+
+  const finishNeteaseDrawerClose = useCallback(() => {
+    if (drawerCloseTimerRef.current) {
+      window.clearTimeout(drawerCloseTimerRef.current)
+      drawerCloseTimerRef.current = null
+    }
+    setRenderNeteaseDrawer(false)
+    restoreDrawerFocus()
+  }, [restoreDrawerFocus])
+
+  const openNeteaseDrawer = useCallback((trigger?: HTMLElement | null) => {
+    if (drawerCloseTimerRef.current) {
+      window.clearTimeout(drawerCloseTimerRef.current)
+      drawerCloseTimerRef.current = null
+    }
+    if (drawerOpenFrameRef.current) {
+      window.cancelAnimationFrame(drawerOpenFrameRef.current)
+    }
+    const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    drawerReturnFocusRef.current = trigger ?? neteasePlaylistButtonRef.current ?? activeElement
+    setRenderNeteaseDrawer(true)
+    drawerOpenFrameRef.current = window.requestAnimationFrame(() => {
+      drawerOpenFrameRef.current = null
+      setShowNeteaseDrawer(true)
+    })
+  }, [])
+
+  const closeNeteaseDrawer = useCallback(() => {
+    setShowNeteaseDrawer(false)
+    if (drawerOpenFrameRef.current) {
+      window.cancelAnimationFrame(drawerOpenFrameRef.current)
+      drawerOpenFrameRef.current = null
+    }
+    if (drawerCloseTimerRef.current) window.clearTimeout(drawerCloseTimerRef.current)
+    drawerCloseTimerRef.current = window.setTimeout(finishNeteaseDrawerClose, drawerExitMs)
+  }, [finishNeteaseDrawerClose])
 
   useEffect(() => {
     if (!settings) return
@@ -238,7 +290,13 @@ export function SettingsPage({
       careEnabled: settings.carePings.enabled,
       careFrequency: settings.carePings.frequency,
     })
+    setTtsEditingCustom(false)
   }, [patchSettingsPageState, settings])
+
+  useEffect(() => () => {
+    if (drawerOpenFrameRef.current) window.cancelAnimationFrame(drawerOpenFrameRef.current)
+    if (drawerCloseTimerRef.current) window.clearTimeout(drawerCloseTimerRef.current)
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -279,6 +337,45 @@ export function SettingsPage({
       apiSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
     }, 120)
   }, [apiFocusToken])
+
+  useEffect(() => {
+    if (!showNeteaseDrawer) return
+    const focusTimer = window.setTimeout(() => {
+      drawerCloseButtonRef.current?.focus()
+    }, 0)
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeNeteaseDrawer()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const drawer = drawerSheetRef.current
+      if (!drawer) return
+      const focusable = Array.from(
+        drawer.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+        ),
+      )
+      if (focusable.length === 0) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.clearTimeout(focusTimer)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [closeNeteaseDrawer, showNeteaseDrawer])
 
   useEffect(() => {
     if (!neteaseQr) return
@@ -516,14 +613,20 @@ export function SettingsPage({
     const nextVoice = overrides.ttsVoice ?? ttsVoice
     const nextSpeed = overrides.ttsSpeed ?? ttsSpeed
     setVoiceSettingsStatus('')
+    const normalizedBaseUrl = nextBaseUrl.trim()
+    if (normalizedBaseUrl === 'https://' || normalizedBaseUrl === 'http://') {
+      setVoiceSettingsStatus('请填写完整的 TTS 服务地址')
+      return false
+    }
     try {
       const next = await echo.settings.updateBatch([
         { path: 'user.city', value: nextCity.trim() },
-        { path: 'tts.baseUrl', value: nextBaseUrl.trim() || defaultTtsBaseUrl },
+        { path: 'tts.baseUrl', value: normalizedBaseUrl || defaultTtsBaseUrl },
         { path: 'tts.voice', value: nextVoice },
         { path: 'tts.speed', value: Math.max(0.5, Math.min(1.5, nextSpeed)) },
       ])
       commitSettings(next)
+      setTtsEditingCustom(Boolean(normalizedBaseUrl && normalizedBaseUrl !== defaultTtsBaseUrl))
       setVoiceSettingsStatus('已保存')
       return true
     } catch (error) {
@@ -650,7 +753,7 @@ export function SettingsPage({
       setNeteasePlaylists(playlists)
       setNeteasePlaylistStatus(playlists.length > 0 ? `读到 ${playlists.length} 个歌单` : '没有读到歌单')
       if (playlists.length > 0) {
-        setShowNeteaseDrawer(true)
+        openNeteaseDrawer()
       }
     } catch (error) {
       setNeteasePlaylistStatus(error instanceof Error ? error.message : '读取歌单失败')
@@ -737,7 +840,7 @@ export function SettingsPage({
   const schedulerCatchupRunning = Boolean(schedulerCatchupTask)
   const anyRuntimeTaskRunning = runtimeTasks.some((task) => task.status === 'running')
   const activeImportTask = importTask?.status === 'running'
-  const importProgress: ImportProgressPayload | null = importTask && (importTask.phase === 'semantics' || importTask.phase === 'profile' || importTask.phase === 'done')
+  const importProgress: ImportProgressPayload | null = activeImportTask && importTask && (importTask.phase === 'semantics' || importTask.phase === 'profile' || importTask.phase === 'done')
     ? {
       phase: importTask.phase,
       current: importTask.current,
@@ -745,13 +848,9 @@ export function SettingsPage({
       startedAt: importTask.startedAt,
     }
     : null
-  const globalImportStatus = importTask?.status === 'succeeded'
-    ? importTask.message ?? `${importTask.sourceName ?? '歌单'}导入完成`
-    : importTask?.status === 'failed'
-      ? importTask.error ?? '导入失败'
-      : activeImportTask
-        ? importTask.sourceName ? `正在处理 ${importTask.sourceName}` : '导入任务正在进行'
-        : ''
+  const globalImportStatus = activeImportTask
+    ? importTask.sourceName ? `正在处理 ${importTask.sourceName}` : '导入任务正在进行'
+    : ''
   return (
     <div className="phone-surface settings-page">
       {/* Tabs Header */}
@@ -823,7 +922,7 @@ export function SettingsPage({
                   <div className="import-method-actions">
                     {neteaseState.loggedIn ? (
                       <>
-                        <button className="btn" type="button" onClick={loadNeteasePlaylists} disabled={neteaseBusy}>读取歌单</button>
+                        <button className="btn" type="button" onClick={loadNeteasePlaylists} disabled={neteaseBusy} ref={neteasePlaylistButtonRef}>读取歌单</button>
                         <button className="btn danger" type="button" onClick={logoutNetease} disabled={neteaseBusy || activeImportTask}>退出</button>
                       </>
                     ) : (
@@ -863,7 +962,7 @@ export function SettingsPage({
                       <button
                         className="btn sec"
                         type="button"
-                        onClick={() => setShowNeteaseDrawer(true)}
+                        onClick={(event) => openNeteaseDrawer(event.currentTarget)}
                         style={{ width: '100%', justifyContent: 'center' }}
                       >
                         选择要导入的歌单 ({neteasePlaylists.length})
@@ -982,8 +1081,10 @@ export function SettingsPage({
                   <div className="model-presets">
                     <button
                       type="button"
-                      className={ttsBaseUrl === defaultTtsBaseUrl ? 'model-tag active' : 'model-tag'}
+                      className={!ttsEditingCustom && (ttsBaseUrl.trim() || defaultTtsBaseUrl) === defaultTtsBaseUrl ? 'model-tag active' : 'model-tag'}
+                      aria-pressed={!ttsEditingCustom && (ttsBaseUrl.trim() || defaultTtsBaseUrl) === defaultTtsBaseUrl}
                       onClick={() => {
+                        setTtsEditingCustom(false)
                         setTtsBaseUrl(defaultTtsBaseUrl)
                         void saveVoiceSettings({ ttsBaseUrl: defaultTtsBaseUrl })
                       }}
@@ -992,17 +1093,31 @@ export function SettingsPage({
                     </button>
                     <button
                       type="button"
-                      className={ttsBaseUrl && ttsBaseUrl !== defaultTtsBaseUrl ? 'model-tag active' : 'model-tag'}
-                      onClick={() => setTtsBaseUrl(ttsBaseUrl && ttsBaseUrl !== defaultTtsBaseUrl ? ttsBaseUrl : 'https://')}
+                      className={ttsEditingCustom || Boolean(ttsBaseUrl.trim() && ttsBaseUrl.trim() !== defaultTtsBaseUrl) ? 'model-tag active' : 'model-tag'}
+                      aria-pressed={ttsEditingCustom || Boolean(ttsBaseUrl.trim() && ttsBaseUrl.trim() !== defaultTtsBaseUrl)}
+                      onClick={() => {
+                        setTtsEditingCustom(true)
+                        if ((ttsBaseUrl.trim() || defaultTtsBaseUrl) === defaultTtsBaseUrl) {
+                          setTtsBaseUrl('')
+                        }
+                        window.setTimeout(() => ttsBaseUrlInputRef.current?.focus(), 0)
+                      }}
                     >
                       自定义
                     </button>
                   </div>
                   <input
+                    ref={ttsBaseUrlInputRef}
                     className="input"
                     value={ttsBaseUrl}
-                    onChange={(event) => setTtsBaseUrl(event.target.value)}
-                    onBlur={(event) => { void saveVoiceSettings({ ttsBaseUrl: event.target.value }) }}
+                    onChange={(event) => {
+                      setTtsEditingCustom(true)
+                      setTtsBaseUrl(event.target.value)
+                    }}
+                    onBlur={(event) => {
+                      if (!event.target.value.trim()) setTtsEditingCustom(false)
+                      void saveVoiceSettings({ ttsBaseUrl: event.target.value })
+                    }}
                     placeholder={defaultTtsBaseUrl}
                   />
                   <div className="settings-row">
@@ -1252,39 +1367,52 @@ export function SettingsPage({
           </button>
         </div>
 
-        <footer className="page-foot">E C H O · v 0 . 1 . 0</footer>
+        <footer className="page-foot">E C H O · v 0 . 1 . 2</footer>
       </div>
 
-      {/* Slide-up Netease Playlists Drawer */}
-      <div className={`drawer-overlay ${showNeteaseDrawer ? 'active' : ''}`} onClick={() => setShowNeteaseDrawer(false)} />
-      <div className={`drawer-sheet ${showNeteaseDrawer ? 'active' : ''}`}>
-        <div className="drawer-drag-bar" />
-        <div className="drawer-header">
-          <div className="drawer-title">选择歌单导入 Echo</div>
-          <button type="button" className="drawer-close" onClick={() => setShowNeteaseDrawer(false)}>×</button>
-        </div>
-        <div className="drawer-body">
-          {neteasePlaylists.map((playlist) => (
-            <div className="playlist-item" key={playlist.id}>
-              <div className="playlist-info">
-                <div className="playlist-name">{playlist.name}</div>
-                <div className="playlist-count">{playlist.trackCount} 首 · {playlist.creator ?? '网易云'}</div>
-              </div>
-              <button
-                className="playlist-import-btn"
-                type="button"
-                onClick={() => {
-                  setShowNeteaseDrawer(false)
-                  void importNeteasePlaylist(playlist.id)
-                }}
-                disabled={Boolean(importingNeteaseId) || activeImportTask}
-              >
-                {importingNeteaseId === playlist.id ? '导入中...' : '导入'}
-              </button>
+      {renderNeteaseDrawer && (
+        <>
+          <div className={`drawer-overlay ${showNeteaseDrawer ? 'active' : ''}`} onClick={closeNeteaseDrawer} aria-hidden="true" />
+          <div
+            className={`drawer-sheet ${showNeteaseDrawer ? 'active' : ''}`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="netease-playlist-drawer-title"
+            aria-hidden={!showNeteaseDrawer}
+            ref={drawerSheetRef}
+            onTransitionEnd={(event) => {
+              if (event.target === event.currentTarget && !showNeteaseDrawer) finishNeteaseDrawerClose()
+            }}
+          >
+            <div className="drawer-drag-bar" />
+            <div className="drawer-header">
+              <div className="drawer-title" id="netease-playlist-drawer-title">选择歌单导入 Echo</div>
+              <button type="button" className="drawer-close" onClick={closeNeteaseDrawer} ref={drawerCloseButtonRef} aria-label="关闭歌单选择">×</button>
             </div>
-          ))}
-        </div>
-      </div>
+            <div className="drawer-body">
+              {neteasePlaylists.map((playlist) => (
+                <div className="playlist-item" key={playlist.id}>
+                  <div className="playlist-info">
+                    <div className="playlist-name" title={playlist.name}>{playlist.name}</div>
+                    <div className="playlist-count">{playlist.trackCount} 首 · {playlist.creator ?? '网易云'}</div>
+                  </div>
+                  <button
+                    className="playlist-import-btn"
+                    type="button"
+                    onClick={() => {
+                      closeNeteaseDrawer()
+                      void importNeteasePlaylist(playlist.id)
+                    }}
+                    disabled={Boolean(importingNeteaseId) || activeImportTask}
+                  >
+                    {importingNeteaseId === playlist.id ? '导入中...' : '导入'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
 
       {showResetConfirm && (
         <div className="close-dialog-layer settings-reset-layer" role="dialog" aria-modal="true" aria-labelledby="settings-reset-title">

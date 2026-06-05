@@ -2,6 +2,7 @@ import type { TasteQuestion, Track } from '../../types/ipc'
 import {
   answerTasteQuestion,
   countTasteQuestionsAskedToday,
+  getTasteQuestion,
   getLatestQuestionPromptConversationId,
   countUserMessagesAfterConversation,
   getLatestAskedPendingQuestion,
@@ -129,6 +130,7 @@ async function llmClassifyPendingReply(text: string, question: TasteQuestion, si
 2. "这种再来一首"、"按这个氛围继续"、"换一首类似的" → extend_recommendation。
 3. "来一首粤语慢歌"、"推荐五首欢快的"、"魔力红的歌来一首" → none。
 4. 如果 Echo 刚才的问题本身是在问是否换歌、继续类似方向、再接一首,用户回答"可以"、"好"、"行"、"来吧" → extend_recommendation。
+5. 用户问 Echo 是谁、设定、定位、能做什么、天气、设置等新话题 → none。
 
 输出格式: {"action":"answer_only|extend_recommendation|none"}`,
       },
@@ -285,22 +287,48 @@ export async function capturePendingQuestionAnswer(userText: string, signal?: Ab
   if (action === 'none') return { action: 'none' }
 
   answerTasteQuestion(latest.question.id, userText)
+  await applyTasteQuestionAnswerMemory(latest.question, userText)
   const polarity = detectPendingReplyPolarity(userText)
   const focus = detectPendingReplyFocus(userText)
-  await applyMemorySignal('correct_assumption', {
-    target: questionTrackLabel(latest.question),
-    strength: polarity === 'negative' ? 0.12 : 0.24,
-    note: `taste_question:${latest.question.id}; answer:${userText.slice(0, 120)}${focus ? `; focus:${focus}` : ''}`,
-  }, {
-    source: 'taste_question',
-    refreshReason: 'taste_question',
-  })
   return {
     action,
     question: latest.question,
     polarity,
     focus,
     recommendationText: action === 'extend_recommendation' ? buildRecommendationTextFromAnswer(userText, latest.question) : undefined,
+  }
+}
+
+export async function recordTasteQuestionAnswer(questionId: number, userText: string): Promise<{ ok: boolean }> {
+  const question = getTasteQuestion(questionId)
+  answerTasteQuestion(questionId, userText)
+  if (question) await applyTasteQuestionAnswerMemory(question, userText)
+  return { ok: true }
+}
+
+async function applyTasteQuestionAnswerMemory(question: TasteQuestion, userText: string): Promise<void> {
+  const polarity = detectPendingReplyPolarity(userText)
+  const focus = detectPendingReplyFocus(userText)
+  const questionLabel = questionTrackLabel(question)
+  if (polarity === 'negative' || polarity === 'mixed') {
+    await applyMemorySignal('correct_assumption', {
+      target: `${questionLabel}: ${userText.slice(0, 80)}`,
+      strength: 0.2,
+      note: `taste_question:${question.id}; answer:${userText.slice(0, 120)}${focus ? `; focus:${focus}` : ''}`,
+    }, {
+      source: 'taste_question',
+      refreshReason: 'taste_question',
+    })
+  } else if (focus && polarity === 'positive') {
+    await applyMemorySignal('reinforce_vibe', {
+      target: focus,
+      vibe: focus,
+      strength: 0.05,
+      note: `taste_question:${question.id}; track:${questionLabel}; answer:${userText.slice(0, 120)}`,
+    }, {
+      source: 'taste_question',
+      refreshReason: 'taste_question',
+    })
   }
 }
 

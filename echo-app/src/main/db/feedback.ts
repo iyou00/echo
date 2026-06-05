@@ -244,6 +244,42 @@ export function listTrackFeedback(limit = 300): TrackFeedback[] {
   }))
 }
 
+export function listTrackFeedbackUpdatedSince(days: number, limit = 300): TrackFeedback[] {
+  const safeDays = Math.max(1, Math.min(365, Math.floor(Number.isFinite(days) ? days : 7)))
+  const safeLimit = Math.max(1, Math.min(5000, Math.floor(Number.isFinite(limit) ? limit : 300)))
+  const rows = getDb()
+    .prepare(`
+      SELECT track_key, play_count, skip_count, loop_count, favorite_count, last_completion, track_json, updated_at
+      FROM track_feedback
+      WHERE user_id = current_user_id()
+        AND updated_at >= datetime('now', ?)
+      ORDER BY updated_at DESC, id DESC
+      LIMIT ?
+    `)
+    .all(`-${safeDays} days`, safeLimit) as Array<{
+      track_key: string
+      play_count: number
+      skip_count: number
+      loop_count: number
+      favorite_count: number
+      last_completion?: number | null
+      track_json: string
+      updated_at?: string
+    }>
+
+  return rows.map((row) => ({
+    trackKey: row.track_key,
+    track: parseJson<Track>(row.track_json, { title: '', artist: '' }, 'track_feedback.track_json'),
+    playCount: row.play_count,
+    skipCount: row.skip_count,
+    loopCount: row.loop_count,
+    favoriteCount: row.favorite_count,
+    lastCompletion: typeof row.last_completion === 'number' ? row.last_completion : undefined,
+    updatedAt: row.updated_at,
+    score: weightedScore(row),
+  }))
+}
+
 export function getFeedbackSignalCount(): number {
   const row = getDb()
     .prepare(`

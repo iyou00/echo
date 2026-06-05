@@ -291,16 +291,35 @@ export function loadProfileTrackEvents(limit = 500): ProfileTrackEvent[] {
       LIMIT ?
     `)
     .all(limit)
-    .map((row) => {
-      const typed = row as { title: string; artist: string; album?: string; source?: string; listened_at: string; meta_json?: string }
-      const parsed = typed.meta_json ? parseJson<Track | null>(typed.meta_json, null, 'tracks_listened.meta_json') : null
-      return {
-        track: parsed ?? { title: typed.title, artist: typed.artist, album: typed.album, source: typed.source },
-        listenedAt: typed.listened_at,
-        source: typed.source,
-        queueStatus: parsed?.queueStatus,
-      }
-    })
+    .map((row) => toProfileTrackEvent(row as { title: string; artist: string; album?: string; source?: string; listened_at: string; meta_json?: string }))
+}
+
+function toProfileTrackEvent(row: { title: string; artist: string; album?: string; source?: string; listened_at: string; meta_json?: string }): ProfileTrackEvent {
+  const parsed = row.meta_json ? parseJson<Track | null>(row.meta_json, null, 'tracks_listened.meta_json') : null
+  return {
+    track: parsed ?? { title: row.title, artist: row.artist, album: row.album, source: row.source },
+    listenedAt: row.listened_at,
+    source: row.source,
+    queueStatus: parsed?.queueStatus,
+  }
+}
+
+export function loadProfileTrackEventsBetween(startDaysAgo: number, endDaysAgo = 0, limit = 5000): ProfileTrackEvent[] {
+  const safeStart = boundedPositiveInteger(startDaysAgo, 30, 365)
+  const safeEnd = Math.max(0, Math.min(safeStart, Math.floor(Number.isFinite(endDaysAgo) ? endDaysAgo : 0)))
+  const safeLimit = boundedPositiveInteger(limit, 500, 20000)
+  return getDb()
+    .prepare(`
+      SELECT title, artist, album, source, listened_at, meta_json
+      FROM tracks_listened
+      WHERE user_id = current_user_id()
+        AND listened_at >= datetime('now', ?)
+        AND listened_at < datetime('now', ?)
+      ORDER BY listened_at DESC, id DESC
+      LIMIT ?
+    `)
+    .all(`-${safeStart} days`, `-${safeEnd} days`, safeLimit)
+    .map((row) => toProfileTrackEvent(row as { title: string; artist: string; album?: string; source?: string; listened_at: string; meta_json?: string }))
 }
 
 export function updateRecommendedTrackStatus(track: Track, status: NonNullable<Track['queueStatus']>): void {

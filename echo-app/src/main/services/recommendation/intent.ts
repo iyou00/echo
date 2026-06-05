@@ -65,7 +65,7 @@ export const MAX_RECOMMENDATION_COUNT = 5
 export const OVER_LIMIT_RECOMMENDATION_LINE = '歌不在多，慢慢听。我先给你挑 5 首。'
 export const MUSIC_REQUEST_PATTERN = /推|推荐|来几首|来一首|听什么|听啥|值得听|适合听|想听|想要听|要听|我要听|我想听|播放|能听|放点|放首|来点|找首|找一首|给我.*歌|歌|曲|歌单|music|song/i
 export const GENERIC_DISCOVERY_PATTERN = /这个时候|现在|此刻|随便|随机|听点啥|听什么|有什么.*听|值得听|来首歌|来一首歌|放首歌|推首歌|推荐一首|来点音乐|听会儿歌|听会歌/i
-export const SPECIFIC_DISCOVERY_PATTERN = /《|》|像|类似|那种|那类|粤语|广东|英文|欧美|英语|english|外文|外语|国外|外国|韩语|韩国|韩文|kpop|k-pop|日语|日本|日文|j-pop|jpop|华语|中文|国语|激昂|高昂|亢奋|振奋|热血|澎湃|带感|节奏|鼓点|动感|燃|提神|清醒|欢快|开心|轻快|轻松|快歌|快的|快一点|快点|慢|困|累|睡|睡前|休息|安静|放松|舒缓|治愈|发呆|平静|emo|伤心|难过|孤独|想哭|r&b|说唱|rap|hip|摇滚|rock|民谣|folk|电子|edm/i
+export const SPECIFIC_DISCOVERY_PATTERN = /《|》|像|类似|那种|那类|粤语|广东|英文|欧美|英语|english|外文|外语|国外|外国|韩语|韩国|韩文|kpop|k-pop|日语|日本|日文|j-pop|jpop|华语|中文|国语|激情|激昂|高昂|亢奋|振奋|热血|澎湃|带感|节奏|鼓点|动感|燃|提神|清醒|欢快|开心|轻快|轻松|快歌|快的|快一点|快点|慢|困|累|睡|睡前|休息|安静|放松|舒缓|治愈|发呆|平静|emo|伤心|难过|孤独|想哭|r&b|说唱|rap|hip|摇滚|rock|民谣|folk|电子|edm/i
 
 export const GENERIC_MOOD_KEYWORDS: Record<string, string[]> = {
   放松: ['放松 华语', '舒缓 流行', '治愈 慢歌'],
@@ -91,7 +91,7 @@ export const GENERIC_GENRE_KEYWORDS: Record<string, string[]> = {
   爵士: ['爵士', '爵士流行'],
 }
 
-const HIGH_ENERGY_TERMS = ['激昂', '高昂', '亢奋', '振奋', '热血', '澎湃', '炸', '爆', '带感', '节奏感强', '节奏强', '有力量', '力量感', '鼓点', '动感', '燃', '提神', '清醒', '运动', '有劲']
+const HIGH_ENERGY_TERMS = ['激情', '激昂', '高昂', '亢奋', '振奋', '热血', '澎湃', '炸', '爆', '带感', '节奏感强', '节奏强', '有力量', '力量感', '鼓点', '动感', '燃', '提神', '清醒', '运动', '有劲']
 const LOW_ENERGY_TERMS = ['慢', '困', '睡', '安静', '放松', '发呆', '舒缓', '缓和', '轻柔', '松弛', '平静']
 
 export function parseRequestedTrackCount(text: string): { requestedCount: number; targetCount: number; overLimit: boolean; explicit: boolean } {
@@ -388,7 +388,7 @@ export function parseIntent(text: string, options: IntentParseOptions = {}): Rec
   if (/困|累|睡|慢|发呆|安静|放松|平静/.test(lower)) moods.push('放松', '松弛')
   if (/伤心|难过|emo|孤独|想哭/.test(lower)) moods.push('孤独', '陪伴')
   if (/开心|轻松|甜|阳光/.test(lower)) moods.push('轻快')
-  if (/清醒|工作|提神|快|有劲|燃|激昂|高昂|亢奋|振奋|热血|澎湃|炸|爆|带感|节奏感强|节奏强|有力量|力量感|鼓点|动感/.test(lower)) moods.push('清醒', '热烈')
+  if (/清醒|工作|提神|快|有劲|燃|激情|激昂|高昂|亢奋|振奋|热血|澎湃|炸|爆|带感|节奏感强|节奏强|有力量|力量感|鼓点|动感/.test(lower)) moods.push('清醒', '热烈')
   if (/雨/.test(lower)) scenes.push('雨天')
   if (/通勤|路上|开车/.test(lower)) scenes.push('通勤')
   if (/下班|回家/.test(lower)) scenes.push('下班路上')

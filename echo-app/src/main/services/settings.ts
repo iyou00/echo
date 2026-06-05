@@ -173,7 +173,32 @@ export async function exportData(): Promise<{ ok: boolean; path?: string; messag
   if (result.canceled || !result.filePath) return { ok: false, message: '已取消' }
 
   const zip = new JSZip()
-  const tables = ['settings', 'taste_profile', 'events', 'conversations', 'yinyi', 'scheduled_jobs', 'service_health', 'care_pings', 'care_pings_mute', 'care_ping_schedule', 'tracks_listened', 'favorite_tracks', 'track_feedback', 'track_semantics', 'recommendation_cache', 'playlists_imported', 'taste_questions', 'netease_auth']
+  const tables = [
+    'users',
+    'settings',
+    'taste_profile',
+    'events',
+    'conversations',
+    'conversation_summaries',
+    'yinyi',
+    'care_pings',
+    'care_pings_mute',
+    'care_ping_schedule',
+    'scene_sessions',
+    'scheduled_jobs',
+    'service_health',
+    'tracks_listened',
+    'queue_history_hidden_dates',
+    'favorite_tracks',
+    'track_semantics',
+    'recommendation_cache',
+    'track_feedback',
+    'track_feedback_events',
+    'playlists_imported',
+    'taste_questions',
+    'taste_question_prompts',
+    'netease_auth',
+  ]
   for (const table of tables) {
     const rows = getDb().prepare(`SELECT * FROM ${table}`).all() as Array<Record<string, unknown>>
     const safeRows = rows.map((row) => {

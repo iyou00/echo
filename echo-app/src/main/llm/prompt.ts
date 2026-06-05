@@ -30,10 +30,30 @@ function formatCandidates(tracks: Track[]): string {
     .join('\n')
 }
 
+function tasteProfileSummary(profile: ReturnType<typeof getTasteProfile>): string {
+  return profile?.echo_portrait || profile?.work_summary?.trim() || ''
+}
+
+function tasteWorkNotesBlock(profile: ReturnType<typeof getTasteProfile>): string {
+  const notes = profile?.work_summary?.trim()
+  if (!notes || notes === profile?.echo_portrait?.trim()) return ''
+  return `
+
+<taste_work_notes>
+${notes}
+</taste_work_notes>`
+}
+
 export function buildChatContext(userText: string, options: ChatContextOptions = {}): LlmMessage[] {
   const system = readRootFile('prompts/system.md')
   const profile = getTasteProfile()
   const history = loadTodayConversations(12)
+  const contextHistory = history.slice()
+  const currentText = userText.trim()
+  const latest = contextHistory[contextHistory.length - 1]
+  if (latest?.role === 'user' && latest.content.trim() === currentText) {
+    contextHistory.pop()
+  }
   const recentSeal = getMostRecentSeal()
   const candidates = options.recommendationCandidates ?? []
   const musicSession = buildTodayMusicSessionSummary()
@@ -68,8 +88,8 @@ ${formatCandidates(candidates)}
 ${system}
 
 <taste_profile_summary>
-${profile?.echo_portrait ?? '用户还没有导入歌单，Echo 对 Ta 的品味只有很少线索。'}
-</taste_profile_summary>
+${tasteProfileSummary(profile) || '用户还没有导入歌单，Echo 对 Ta 的品味只有很少线索。'}
+</taste_profile_summary>${tasteWorkNotesBlock(profile)}
 
 <memory_policy>
 ${memoryPolicySummary()}
@@ -91,7 +111,7 @@ ${recentSeal}
     },
   ]
 
-  for (const item of history) {
+  for (const item of contextHistory) {
     messages.push({ role: item.role, content: item.content })
   }
   messages.push({ role: 'user', content: userText })
@@ -152,8 +172,8 @@ ${activeEvents.length > 0 ? activeEvents.map((event) => `- ${event.content} (kin
 ${todaySceneContext}
 
 <taste_profile_summary>
-${profile?.echo_portrait ?? '还没有完整画像。'}
-</taste_profile_summary>
+${tasteProfileSummary(profile) || '还没有完整画像。'}
+</taste_profile_summary>${tasteWorkNotesBlock(profile)}
 
 <memory_policy>
 ${memoryPolicySummary()}

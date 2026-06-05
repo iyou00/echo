@@ -67,9 +67,14 @@ const TRAY_SCENE_KEYS: SceneKey[] = ['focus', 'sleepy', 'relax', 'irritated', 'r
 
 function createAppIcon() {
   const publicDir = process.env.VITE_PUBLIC ?? path.join(process.env.APP_ROOT ?? process.cwd(), 'public')
-  const iconPath = path.join(publicDir, 'brand', 'icon.ico')
-  const icon = nativeImage.createFromPath(iconPath)
-  if (!icon.isEmpty()) return icon
+  const iconPaths = [
+    path.join(process.resourcesPath, 'brand', 'icon.ico'),
+    path.join(publicDir, 'brand', 'icon.ico'),
+  ]
+  for (const iconPath of iconPaths) {
+    const icon = nativeImage.createFromPath(iconPath)
+    if (!icon.isEmpty()) return icon
+  }
   return nativeImage.createFromDataURL(
     'data:image/svg+xml;utf8,' +
       encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" rx="14" fill="#639922"/><text x="32" y="41" text-anchor="middle" font-family="Georgia,serif" font-size="34" fill="white">E</text></svg>'),

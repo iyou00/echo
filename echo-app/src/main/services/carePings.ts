@@ -50,9 +50,14 @@ function assertCarePingActive(signal?: AbortSignal): void {
 }
 
 function appIcon() {
-  const iconPath = path.join(process.env.VITE_PUBLIC ?? '', 'brand', 'icon.ico')
-  const icon = nativeImage.createFromPath(iconPath)
-  if (!icon.isEmpty()) return icon
+  const iconPaths = [
+    path.join(process.resourcesPath, 'brand', 'icon.ico'),
+    path.join(process.env.VITE_PUBLIC ?? '', 'brand', 'icon.ico'),
+  ]
+  for (const iconPath of iconPaths) {
+    const icon = nativeImage.createFromPath(iconPath)
+    if (!icon.isEmpty()) return icon
+  }
   return nativeImage.createFromDataURL(
     'data:image/svg+xml;utf8,' +
       encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256"><rect width="256" height="256" rx="58" fill="#639922"/><text x="128" y="161" text-anchor="middle" font-family="Georgia,serif" font-size="128" fill="#F5FAED">E</text></svg>'),

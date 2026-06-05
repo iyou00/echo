@@ -41,6 +41,7 @@ function App() {
   const echo = useMemo(() => getEchoApi(), [])
   const [state, dispatch] = useAppState()
   const handledImportTaskIdsRef = useRef(new Set<string>())
+  const playbackNoticeTimerRef = useRef<number | null>(null)
   const {
     page,
     settings,
@@ -68,6 +69,23 @@ function App() {
   const setPage = useCallback((page: PageKey) => dispatch({ page }), [dispatch])
   const setSettings = useCallback((settings: Settings | null) => dispatch({ settings }), [dispatch])
   const setPlaybackState = useCallback((playbackState: PlaybackState) => dispatch({ playbackState }), [dispatch])
+  const showPlaybackNotice = useCallback((message: string, autoHideMs = 5000) => {
+    if (playbackNoticeTimerRef.current !== null) {
+      window.clearTimeout(playbackNoticeTimerRef.current)
+      playbackNoticeTimerRef.current = null
+    }
+    dispatch({ playbackNotice: message })
+    if (autoHideMs > 0) {
+      playbackNoticeTimerRef.current = window.setTimeout(() => {
+        playbackNoticeTimerRef.current = null
+        dispatch({ playbackNotice: '' })
+      }, autoHideMs)
+    }
+  }, [dispatch])
+
+  useEffect(() => () => {
+    if (playbackNoticeTimerRef.current !== null) window.clearTimeout(playbackNoticeTimerRef.current)
+  }, [])
 
   const hasLlmConfig = Boolean(settings?.llm.baseUrl && settings.llm.apiKey && settings.llm.model)
 
@@ -222,10 +240,9 @@ function App() {
 
   useEffect(() => {
     return echo.playback.onCookieExpired((message) => {
-      dispatch({ playbackNotice: message })
-      window.setTimeout(() => dispatch({ playbackNotice: '' }), 5000)
+      showPlaybackNotice(message)
     })
-  }, [dispatch, echo])
+  }, [echo, showPlaybackNotice])
 
   useEffect(() => {
     return echo.app.onCloseRequested(() => {
@@ -595,8 +612,7 @@ function App() {
             voiceContinuous={voiceContinuous}
             onSceneTrackEnded={(scene) => {
               continueScene(scene).catch((error) => {
-                dispatch({ playbackNotice: error instanceof Error ? error.message : '场景续播失败' })
-                window.setTimeout(() => dispatch({ playbackNotice: '' }), 5000)
+                showPlaybackNotice(error instanceof Error ? error.message : '场景续播失败')
               })
             }}
             onVoiceTrackEnded={() => {

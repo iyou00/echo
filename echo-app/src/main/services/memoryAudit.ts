@@ -1,6 +1,6 @@
 import type { MemoryAuditItem, MemoryAuditSummary, Track } from '../../types/ipc'
-import { loadRecentEvents } from '../db/events'
 import { listExplicitTrackFeedback, listTrackFeedback } from '../db/feedback'
+import { loadTrustedCorrections } from './memoryCorrections'
 
 function toTime(value?: string): number {
   if (!value) return 0
@@ -22,7 +22,7 @@ function trackDetail(track: Track): string {
 }
 
 export function getMemoryAudit(limit = 8): MemoryAuditSummary {
-  const corrections = loadRecentEvents('correction', 20)
+  const corrections = loadTrustedCorrections(20)
   const feedback = listTrackFeedback(120)
   const explicit = listExplicitTrackFeedback(80)
   const items: MemoryAuditItem[] = []

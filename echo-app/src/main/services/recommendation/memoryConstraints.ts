@@ -1,6 +1,6 @@
 import type { TasteProfile, Track } from '../../../types/ipc'
-import { loadRecentEvents } from '../../db/events'
 import { getTasteProfile } from '../../db/taste'
+import { loadTrustedCorrections } from '../memoryCorrections'
 import { normalizeText } from './text'
 import type { RecommendationIntent } from './intent'
 
@@ -60,7 +60,7 @@ function profileAntiPatternTerms(profile: TasteProfile | null): string[] {
 }
 
 export function buildRecommendationMemoryConstraints(profile = getTasteProfile()): RecommendationMemoryConstraints {
-  const corrections = loadRecentEvents('correction', 12)
+  const corrections = loadTrustedCorrections(12)
   const artists = profileArtistNames(profile)
   const softenedArtists: string[] = []
   const blockedTerms: string[] = [...profileAntiPatternTerms(profile)]

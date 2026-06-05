@@ -124,6 +124,26 @@ export async function prepareCandidateStage(input: CandidateStageInput): Promise
   const requested = parseRequestedTrackCount(input.trimmed)
   const targetCount = Math.max(1, Math.min(5, Math.floor(recommendationIntent.targetCount || requested.targetCount)))
   const countExplicit = requested.explicit || targetCount > requested.targetCount
+  if (
+    !hasMusicActionIntent(recommendationIntent)
+    && input.pendingReply.action === 'none'
+    && !input.pendingDirectSongReply?.query
+    && !input.pendingMusicEntityReply?.query
+    && input.sessionFollowUp.kind === 'none'
+  ) {
+    return {
+      ready: {
+        recommendationIntent,
+        requested,
+        targetCount,
+        countExplicit,
+        guardedCandidates: [],
+        authRequired: false,
+        excludeCurrentTrack: false,
+        entityConstraint: undefined,
+      },
+    }
+  }
   input.runtimeReport?.({ phase: 'recommendation', current: 3, total: 5, message: '准备推荐候选' })
   const { candidates, authRequired, canceled: candidatesCanceled, directSong, entityResolution, failure } = await fetchRecommendationCandidates(recommendationQuery, input.active, (patch) => {
     input.runtimeReport?.({

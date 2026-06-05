@@ -321,31 +321,33 @@ export function resetDatabase(): void {
   const database = getDb()
   database.pragma('foreign_keys = OFF')
   try {
-    database.exec(`
-      DELETE FROM taste_question_prompts;
-      DELETE FROM taste_questions;
-      DELETE FROM playlists_imported;
-      DELETE FROM recommendation_cache;
-      DELETE FROM track_semantics;
-      DELETE FROM track_feedback_events;
-      DELETE FROM track_feedback;
-      DELETE FROM queue_history_hidden_dates;
-      DELETE FROM tracks_listened;
-      DELETE FROM favorite_tracks;
-      DELETE FROM yinyi;
-      DELETE FROM scheduled_jobs;
-      DELETE FROM service_health;
-      DELETE FROM care_pings_mute;
-      DELETE FROM care_pings;
-      DELETE FROM care_ping_schedule;
-      DELETE FROM scene_sessions;
-      DELETE FROM conversation_summaries;
-      DELETE FROM conversations;
-      DELETE FROM events;
-      DELETE FROM taste_profile;
-      UPDATE netease_auth SET cookie_encrypted = '', profile_json = '{}', updated_at = CURRENT_TIMESTAMP WHERE id = 1;
-      UPDATE settings SET data_json = '{}', updated_at = CURRENT_TIMESTAMP WHERE id = 1;
-    `)
+    database.transaction(() => {
+      database.exec(`
+        DELETE FROM taste_question_prompts;
+        DELETE FROM taste_questions;
+        DELETE FROM playlists_imported;
+        DELETE FROM recommendation_cache;
+        DELETE FROM track_semantics;
+        DELETE FROM track_feedback_events;
+        DELETE FROM track_feedback;
+        DELETE FROM queue_history_hidden_dates;
+        DELETE FROM tracks_listened;
+        DELETE FROM favorite_tracks;
+        DELETE FROM yinyi;
+        DELETE FROM scheduled_jobs;
+        DELETE FROM service_health;
+        DELETE FROM care_pings_mute;
+        DELETE FROM care_pings;
+        DELETE FROM care_ping_schedule;
+        DELETE FROM scene_sessions;
+        DELETE FROM conversation_summaries;
+        DELETE FROM conversations;
+        DELETE FROM events;
+        DELETE FROM taste_profile;
+        UPDATE netease_auth SET cookie_encrypted = '', profile_json = '{}', updated_at = CURRENT_TIMESTAMP WHERE id = 1;
+        UPDATE settings SET data_json = '{}', updated_at = CURRENT_TIMESTAMP WHERE id = 1;
+      `)
+    })()
   } finally {
     database.pragma('foreign_keys = ON')
   }
