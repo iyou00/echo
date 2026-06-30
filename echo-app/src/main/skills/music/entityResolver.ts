@@ -45,11 +45,28 @@ const ARTIST_ALIASES: Record<string, string> = {
   maroon: 'Maroon 5',
 }
 
-const ACTION_PREFIX_PATTERN = /^(?:我)?(?:想听|想要听|要听|我要听|我想听|播放|放一下|放首|放一首|放点|推|推荐|给我|帮我|找首|找一首|来一首|来点|点播)\s*/i
+const ACTION_PREFIX_PATTERN = /^(?:我)?(?:想要听|我要听|我想听|想听|要听|听听看|听一下|播放|放一下|放一首|放首|放点|推荐|推|给我|帮我|找一首|找首|来一首|来点|点播|整一首|整首|整点|安排一首|安排首|安排点|搞一首|搞首|搞点|弄一首|弄首|弄点|安排|整|搞|弄)\s*/i
 const ASSERTIVE_PREFIX_PATTERN = /^(?:的)?(?:是|就是)\s*/i
 const COUNT_PREFIX_PATTERN = /^(?:(?:\d{1,2}|[一二两三四五六七八九十两几])\s*首\s*)/i
 const GENERIC_TITLE_WORDS = new Set(['歌', '歌曲', '音乐', '作品', '那首', '这首', '一首', '几首', '来一首', '来几首'])
-const IMPLAUSIBLE_ARTIST_TERMS = /是|最|很|挺|特别|温暖|相遇|拥抱|听|想|要|播放|放|推荐|适合|值得|天气|心情|感觉|舒缓|缓和|轻柔|安静|放松|激昂|热血|澎湃|带感|节奏|国外|外国|欧美|英文|粤语|华语|日语|韩语/
+const GENERIC_TITLE_DETAIL_WORDS = new Set([
+  ...GENERIC_TITLE_WORDS,
+  '声音',
+  '嗓音',
+  '唱腔',
+  '旋律',
+  '歌词',
+  '编曲',
+  '风格',
+  '气质',
+  '氛围',
+  '感觉',
+  '味道',
+  '歌声',
+])
+const IMPLAUSIBLE_ARTIST_TERMS = /是|最|很|挺|特别|温暖|相遇|拥抱|听|想|要|播放|放|推荐|适合|值得|天气|心情|感觉|类似|相似|像|好听|耐听|顺耳|入耳|对味|舒缓|缓和|轻柔|安静|放松|激昂|热血|澎湃|带感|节奏|国外|外国|欧美|英文|粤语|华语|日语|韩语/
+const SIMILARITY_PREFIX_PATTERN = /^(?:推荐|推|找|来|给我|帮我)?\s*(?:类似|像|相似于|相近于|和|跟)\s*/i
+const CONTEXTUAL_TRACK_REFERENCE_PATTERN = /^(?:刚才|刚刚|当前|现在|上一首|这首|那首|这个|那个|这种|那种)(?:的)?(?:歌|歌曲|音乐|曲子)?$/i
 
 export function parseMusicRequestCount(text: string): { requestedCount: number; targetCount: number; overLimit: boolean; explicit: boolean } {
   const lower = text.toLowerCase()
@@ -95,10 +112,13 @@ export function parseMusicRequestCount(text: string): { requestedCount: number; 
 export function normalizeMusicArtistName(value: string): string {
   const trimmed = value
     .replace(ACTION_PREFIX_PATTERN, '')
+    .replace(/^(?:我)?(?:喜欢|爱听|蛮喜欢|挺喜欢|很喜欢|还蛮|常听|循环|不喜欢|不爱听|不太喜欢|不是很喜欢|没那么喜欢)\s*/i, '')
     .replace(ASSERTIVE_PREFIX_PATTERN, '')
     .replace(COUNT_PREFIX_PATTERN, '')
     .replace(/(?:的)?(?:歌|歌曲|音乐|作品|那种|那类|这种|来一首|来几首|一首|几首).*$/i, '')
+    .replace(/(?:有哪些|哪些|有什么|有啥|哪几首)$/i, '')
     .replace(/[，。！？?！,.]/g, '')
+    .replace(/(?:吧|呀|啊|呢|呗|啦|咯)$/i, '')
     .trim()
   if (!trimmed) return ''
   const compact = normalizeText(trimmed)
@@ -118,8 +138,18 @@ function usableSongTitle(value: string): string | undefined {
   if (!title) return undefined
   const genericCandidate = normalizeText(title.replace(/[吧吗呢呀啊呗啦咯喽]$/i, ''))
   if (GENERIC_TITLE_WORDS.has(genericCandidate)) return undefined
+  if (CONTEXTUAL_TRACK_REFERENCE_PATTERN.test(title)) return undefined
   if (/的?(歌|歌曲|音乐|作品)$/.test(title)) return undefined
   if (title.length > 40) return undefined
+  return title
+}
+
+function usablePreferenceSongTitle(value: string): string | undefined {
+  const title = usableSongTitle(value)
+  if (!title) return undefined
+  const normalized = normalizeText(title.replace(/[吧吗呢呀啊呗啦咯喽]$/i, ''))
+  if (GENERIC_TITLE_DETAIL_WORDS.has(normalized)) return undefined
+  if (/^(?:声音|嗓音|唱腔|旋律|歌词|编曲|风格|气质|氛围|感觉|味道|歌声)(?:更|很|挺|比较|特别)?.*$/.test(title)) return undefined
   return title
 }
 
@@ -274,8 +304,29 @@ export function resolveMusicEntitiesFromText(text: string): MusicEntityResolutio
   const quoted = trimmed.match(/《([^》]{1,40})》/)
   if (quoted?.[1]) {
     seedTitle = addTitle(entities, quoted[1], 0.96)
-    const prefix = trimmed.slice(0, quoted.index).replace(ACTION_PREFIX_PATTERN, '').trim()
+    const prefix = trimmed.slice(0, quoted.index)
+      .replace(ACTION_PREFIX_PATTERN, '')
+      .replace(COUNT_PREFIX_PATTERN, '')
+      .replace(SIMILARITY_PREFIX_PATTERN, '')
+      .trim()
     if (prefix) artistQuery = addArtist(entities, prefix.replace(/的$/, ''), 0.9)
+  }
+
+  if (!seedTitle) {
+    const similarTitlePatterns = [
+      /(?:类似|像|相似于|相近于|和|跟)\s*([^《》，。！？?！,.]{1,40}?)(?:\s*(?:这首|这歌|这首歌|这首歌曲|这首曲子|这首音乐))(?:的)?(?:歌|歌曲|音乐)?/i,
+      /(?:类似|像|相似于|相近于|和|跟)\s*([^《》，。！？?！,.]{1,40}?)(?:\s*(?:这样|这种|同类型|同风格|差不多|相近)(?:的)?(?:歌|歌曲|音乐))(?!手)/i,
+      /(?:类似|像|相似于|相近于)\s*([^《》，。！？?！,.]{1,24}?)(?:的)?(?:歌|歌曲|音乐)(?!手)(?:推荐|来|找|听|推)?(?:下|一下)?$/i,
+    ]
+    for (const pattern of similarTitlePatterns) {
+      const match = trimmed.match(pattern)
+      const title = addTitle(entities, match?.[1] ?? '', 0.86)
+      if (title) {
+        seedTitle = title
+        ambiguity = 'missing_artist'
+        break
+      }
+    }
   }
 
   if (!seedTitle) {
@@ -298,7 +349,29 @@ export function resolveMusicEntitiesFromText(text: string): MusicEntityResolutio
     }
   }
 
-  if (!artistQuery) {
+  if (!seedTitle) {
+    const preferencePair = trimmed.match(/(?:喜欢|爱听|蛮喜欢|挺喜欢|很喜欢|还蛮|常听|循环|不喜欢|不爱听|不太喜欢|不是很喜欢|没那么喜欢|不好听|没感觉|听不下)\s*([^《》，。！？?！,.]{1,24})的([^《》，。！？?！,.]{1,24})(?:这首|这歌|这个歌|这首歌|这首歌曲|这首作品|这首音乐|这首曲子)?/i)
+    if (preferencePair) {
+      const artist = addArtist(entities, preferencePair[1] ?? '', 0.82)
+      const title = usablePreferenceSongTitle(preferencePair[2] ?? '')
+      if (title) {
+        entities.push(entity('title', title, preferencePair[2]?.trim() ?? title, 0.82))
+        artistQuery = artistQuery ?? artist
+        seedTitle = title
+      }
+    }
+  }
+
+  if (!seedTitle) {
+    const describedTitle = trimmed.match(/^(?:最近|最近的|听说|据说|网上说|短视频里)?\s*([^《》，。！？?！,.]{1,24}?)(?:这首|这歌|这个歌|这首歌|这首歌曲|这首音乐|这首曲子)(?:[^，。！？?！,.]{0,24})?[，。！？?！,.]?\s*(?:听听看|听一下|听听|试试|放一下|播放|能听)/i)
+    const title = addTitle(entities, describedTitle?.[1] ?? '', 0.86)
+    if (title) {
+      seedTitle = title
+      ambiguity = title.length <= 6 ? 'artist_or_title' : 'missing_artist'
+    }
+  }
+
+  if (!artistQuery && !(seedTitle && /(?:类似|像|相似|相近|差不多|同款|同类型|同风格)/i.test(trimmed))) {
     const alias = Object.entries(ARTIST_ALIASES).find(([key]) => normalizeText(trimmed).includes(key))
     if (alias) {
       artistQuery = alias[1]
@@ -306,11 +379,12 @@ export function resolveMusicEntitiesFromText(text: string): MusicEntityResolutio
     }
   }
 
-  if (!artistQuery) {
+  if (!artistQuery && !(seedTitle && /(?:类似|像|相似|相近|差不多|同款|同类型|同风格)/i.test(trimmed))) {
     const artistPatterns = [
-      /(?:想听|来一首|来点|放首|放点|推|推荐|给我|帮我|找首|找一首)\s*(?:(?:\d{1,2}|[一二两三四五六七八九十两几])\s*首\s*)?([A-Za-z0-9 .&'’\-\u4e00-\u9fa5]{1,32}?)(?:的)?(?:歌|歌曲|音乐|作品)/i,
+      /(?:想听|来一首|来点|放首|放点|推荐|推|给我|帮我|找一首|找首|整点|安排点|搞点|弄点|整一首|安排一首|搞一首|弄一首|整首|安排首|搞首|弄首)\s*(?:(?:\d{1,2}|[一二两三四五六七八九十两几])\s*首\s*)?([A-Za-z0-9 .&'’\-\u4e00-\u9fa5]{1,32}?)(?:的)?(?:歌|歌曲|音乐|作品)/i,
       /([A-Za-z0-9 .&'’\-\u4e00-\u9fa5]{1,32}?)(?:的)?(?:歌|歌曲|音乐|作品)(?:来一首|来几首|一首|几首)?/i,
-      /(?:想听|想要听|要听|我要听|我想听|听|播放|放|放首|放一首|来一首|来点|推|推荐|给我|帮我|找首|找一首)\s*(?:一首|几首|[一二两三四五六七八九十两几]\s*首|\d{1,2}\s*首)?\s*([A-Za-z0-9 .&'’\-\u4e00-\u9fa5]{1,32}?)(?:的)?(?:热门|经典|代表作|流行|出名|有名|火一点|火的|好听)(?:的)?(?:歌|歌曲|音乐|作品)?/i,
+      /(?:想听|想要听|要听|我要听|我想听|听|播放|放一首|放首|放|来一首|来点|推荐|推|给我|帮我|找一首|找首|整点|安排点|搞点|弄点|整一首|安排一首|搞一首|弄一首|整首|安排首|搞首|弄首)\s*(?:一首|几首|[一二两三四五六七八九十两几]\s*首|\d{1,2}\s*首)?\s*([A-Za-z0-9 .&'’\-\u4e00-\u9fa5]{1,32}?)(?:的)?(?:热门|经典|代表作|流行|出名|有名|火一点|火的|好听)(?:的)?(?:歌|歌曲|音乐|作品)?/i,
+      /(?:整|安排|搞|弄)\s*(?:一首|首)\s*([A-Za-z0-9 .&'’\-\u4e00-\u9fa5]{1,32})(?:吧|呀|啊)?$/i,
       /([A-Za-z0-9 .&'’-]{2,32})\s*(?:那种|那类|这种)/i,
     ]
     for (const pattern of artistPatterns) {
@@ -324,7 +398,7 @@ export function resolveMusicEntitiesFromText(text: string): MusicEntityResolutio
   }
 
   if (!seedTitle) {
-    const titleOnly = trimmed.match(/(?:我)?(?:想听|想要听|要听|我要听|我想听|播放|放|放首|放一首|找首|找一首|来一首|点播)\s*([^《》，。！？?！,.]{1,40})/i)
+    const titleOnly = trimmed.match(/(?:我)?(?:想听|想要听|要听|我要听|我想听|听听看|听一下|播放|放|放首|放一首|找首|找一首|来一首|点播)\s*([^《》，。！？?！,.]{1,40})/i)
     const title = addTitle(entities, titleOnly?.[1] ?? '', artistQuery ? 0.62 : 0.78)
     if (title && !artistQuery) {
       seedTitle = title
@@ -350,6 +424,12 @@ export function resolveMusicEntitiesFromText(text: string): MusicEntityResolutio
     confidence,
     source: 'rules',
   }
+}
+
+export function hasExplicitSimilarityAnchor(text: string): boolean {
+  if (!/(?:类似|像|相似|相近|差不多|同款|同类型|同风格)/i.test(text)) return false
+  const resolution = resolveMusicEntitiesFromText(text)
+  return Boolean(resolution.artistQuery || resolution.seedTitle)
 }
 
 export interface MusicEntityVerificationOptions {
@@ -418,6 +498,7 @@ export async function verifyMusicEntitiesWithNetease(
     verifiedTrackId,
     verifiedTrackTitle,
     verificationStatus: verified ? 'verified' : 'unverified',
+    ambiguity: verifiedTrackTitle ? 'none' : resolution.ambiguity,
     confidence: verified ? Math.max(resolution.confidence, 0.94) : Math.min(resolution.confidence, 0.72),
     source: verified ? 'netease' : resolution.source,
   }

@@ -2,8 +2,11 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { getDb } from '../db'
 import { getSettings } from '../db/settings'
+import { isExternalListeningSource, isMeaningfulSkippedReason, loadTodayMeaningfulTrackEvents } from '../db/tracks'
 import { completeChat } from '../llm/client'
+import { safePromptJson } from '../llm/promptData'
 import { getSealsDir, readRootFile } from '../utils/paths'
+import type { Track } from '../../types/ipc'
 
 interface ConversationRow {
   role: string
@@ -15,6 +18,9 @@ interface TrackRow {
   title: string
   artist: string
   listened_at: string
+  source?: string
+  queueStatus?: Track['queueStatus']
+  queueStatusReason?: Track['queueStatusReason']
   meta_json?: string
 }
 
@@ -43,36 +49,54 @@ function getTodayConversations(): ConversationRow[] {
 }
 
 function getTodayTracks(): TrackRow[] {
-  return getDb()
-    .prepare(`
-      SELECT title, artist, listened_at, meta_json
-      FROM tracks_listened
-      WHERE user_id = current_user_id()
-        AND date(listened_at, 'localtime') = date('now', 'localtime')
-      ORDER BY listened_at ASC, id ASC
-    `)
-    .all() as TrackRow[]
+  return loadTodayMeaningfulTrackEvents(120).map((track) => ({
+    title: track.title,
+    artist: track.artist,
+    listened_at: track.listenedAt,
+    source: track.source,
+    queueStatus: track.queueStatus,
+    queueStatusReason: track.queueStatusReason,
+  }))
+}
+
+function isPositiveSealTrack(track: TrackRow): boolean {
+  if (track.queueStatus === 'skipped') return false
+  if (track.queueStatus === 'playing' || track.queueStatus === 'completed') return true
+  return isExternalListeningSource(track.source)
+}
+
+function isDismissedSealTrack(track: TrackRow): boolean {
+  return track.queueStatus === 'skipped' && isMeaningfulSkippedReason(track.queueStatusReason)
 }
 
 function frontMatter(date: string, conversations: ConversationRow[], tracks: TrackRow[]): string {
+  const positiveCount = tracks.filter(isPositiveSealTrack).length
+  const dismissedCount = tracks.filter(isDismissedSealTrack).length
+  const positiveEchoRecommendations = tracks.filter((track) => track.source === 'recommended_by_echo' && isPositiveSealTrack(track)).length
   return `---
 date: ${date}
 weekday: ${weekday()}
 sealed_at: ${new Date().toISOString()}
 conversations_count: ${conversations.length}
-tracks_played: ${tracks.length}
-echo_recommendations: ${tracks.length}
-schema_version: 1
+tracks_played: ${positiveCount}
+echo_recommendations: ${positiveEchoRecommendations}
+dismissed_tracks: ${dismissedCount}
+schema_version: 2
 ---`
 }
 
 function fallbackSeal(conversations: ConversationRow[], tracks: TrackRow[]): string {
   const lastUser = [...conversations].reverse().find((item) => item.role === 'user')?.content ?? '今天对话很少。'
-  const trackLine = tracks.slice(-5).map((track) => `${track.title} - ${track.artist}`).join('、') || '今天还没有推荐歌曲。'
+  const positiveTracks = tracks.filter(isPositiveSealTrack)
+  const dismissedTracks = tracks.filter(isDismissedSealTrack)
+  const trackLine = positiveTracks.slice(-5).map((track) => `${track.title} - ${track.artist}`).join('、') || '今天还没有完整停留过的推荐歌曲。'
+  const dismissedLine = dismissedTracks.length
+    ? `\n今天放下的歌:${dismissedTracks.slice(-5).map((track) => `${track.title} - ${track.artist}`).join('、')}`
+    : ''
   return `## 摘要(200 字以内)
 
 今天用户主要留下的线索是:${lastUser.slice(0, 120)}
-Echo 今日推荐:${trackLine}
+今天真正停留过的歌:${trackLine}${dismissedLine}
 
 ## 关键时刻
 
@@ -99,6 +123,14 @@ async function writeFileAtomic(target: string, content: string): Promise<void> {
   }
 }
 
+function sealPromptContent(content: string): string {
+  return content
+    .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '')
+    .replace(/^#\s+\d{4}-\d{2}-\d{2}\s+·\s+日封\s*/m, '')
+    .replace(/\b(conversations_count|tracks_played|echo_recommendations|dismissed_tracks|schema_version):\s*\d+\b/g, '')
+    .trim()
+}
+
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve(null), ms)
@@ -117,17 +149,42 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
 async function generateSeal(conversations: ConversationRow[], tracks: TrackRow[]): Promise<string> {
   const prompt = readRootFile('prompts/seal-writer.md')
   const settings = getSettings()
+  const positiveTracks = tracks.filter(isPositiveSealTrack)
+  const dismissedTracks = tracks.filter(isDismissedSealTrack)
   // 写日封通常发生在 before-quit 路径上，慢响应不能拖住关闭。5 秒不行就走 fallback。
   const content = await withTimeout(
     completeChat(settings, [
       { role: 'system', content: prompt || '你是 Echo。为自己写一份简洁、结构化的日封摘要。' },
       {
         role: 'user',
-        content: `今天对话:
-${conversations.map((item) => `${item.created_at} ${item.role}: ${item.content}`).join('\n')}
-
-今日推荐:
-${tracks.map((track) => `${track.listened_at} ${track.title} - ${track.artist}`).join('\n')}`,
+        content: safePromptJson({
+          conversations: conversations.map((item) => ({
+            createdAt: item.created_at,
+            role: item.role,
+            content: item.content,
+          })),
+          positiveTracks: positiveTracks.map((track) => ({
+            listenedAt: track.listened_at,
+            title: track.title,
+            artist: track.artist,
+            source: track.source,
+            queueStatus: track.queueStatus,
+          })),
+          dismissedTracks: dismissedTracks.map((track) => ({
+            listenedAt: track.listened_at,
+            title: track.title,
+            artist: track.artist,
+            queueStatusReason: track.queueStatusReason,
+          })),
+          trackEvents: tracks.map((track) => ({
+            listenedAt: track.listened_at,
+            title: track.title,
+            artist: track.artist,
+            source: track.source,
+            queueStatus: track.queueStatus,
+            queueStatusReason: track.queueStatusReason,
+          })),
+        }),
       },
     ], { maxTokens: 200 }),
     SEAL_LLM_TIMEOUT_MS,
@@ -193,7 +250,7 @@ async function refreshMostRecentSealCache(): Promise<string> {
     if (sealCache && sealCache.fullPath === fullPath && sealCache.mtimeMs === stat.mtimeMs) {
       return sealCache.content
     }
-    const content = (await fsp.readFile(fullPath, 'utf8')).slice(0, 2500)
+    const content = sealPromptContent(await fsp.readFile(fullPath, 'utf8')).slice(0, 2500)
     sealCache = { filename, fullPath, mtimeMs: stat.mtimeMs, content }
     return content
   } catch {
@@ -225,4 +282,12 @@ export function getMostRecentSeal(): string {
  */
 export function invalidateSealCache(): void {
   sealCache = null
+}
+
+export const daySealTestHelpers = {
+  sealPromptContent,
+  fallbackSeal,
+  frontMatter,
+  isPositiveSealTrack,
+  isDismissedSealTrack,
 }

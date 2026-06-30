@@ -4,6 +4,7 @@ import type { AppPageProps } from '../appState'
 import { BrandLogo, EmptyState } from '../components'
 import { latestRunningRuntimeTask, useRuntimeTasks } from '../hooks/useRuntimeTasks'
 import { pageLabels } from '../labels'
+import { friendlyOperationError } from '../../shared/runtimeRecovery'
 
 interface YinyiPageProps extends AppPageProps {
   echo: EchoApi
@@ -39,8 +40,8 @@ function YinyiWritingState({
         <span />
       </div>
       <div className="writing-copy">
-        <div className="writing-title">Echo 正在写这封信</div>
-        <div className="writing-subtitle">先把今天的声音铺开，再落成几行字。</div>
+        <div className="writing-title">正在写</div>
+        <div className="writing-subtitle">稍等一下。</div>
       </div>
       <div className="writing-paper" aria-hidden="true">
         <span className="writing-line wide" />
@@ -62,6 +63,7 @@ export function YinyiPage({ echo, isActive, openWithRandom }: YinyiPageProps) {
   const [entry, setEntry] = useState<YinyiEntry | null>(null)
   const [range, setRange] = useState<YinyiEntry[]>([])
   const [loading, setLoading] = useState(false)
+  const [notice, setNotice] = useState('')
   const dateInputRef = useRef<HTMLInputElement | null>(null)
   const wasActiveRef = useRef(false)
   const runtimeTasks = useRuntimeTasks(echo)
@@ -70,6 +72,7 @@ export function YinyiPage({ echo, isActive, openWithRandom }: YinyiPageProps) {
 
   const load = useCallback(async (target = date) => {
     setLoading(true)
+    setNotice('')
     try {
       const [nextEntry, nextRange] = await Promise.all([echo.yinyi.getByDate(target), echo.yinyi.getRange(30)])
       setEntry(nextEntry)
@@ -92,10 +95,18 @@ export function YinyiPage({ echo, isActive, openWithRandom }: YinyiPageProps) {
 
   async function generate() {
     setLoading(true)
+    setNotice('')
     try {
       const next = await echo.yinyi.generate(date)
       setEntry(next)
       setRange(await echo.yinyi.getRange(30))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setNotice(
+        /未来/.test(message)
+          ? '那一天还没到，等它发生以后我再写。'
+          : friendlyOperationError(error, '这封信刚才没写出来，稍后再试一次。'),
+      )
     } finally {
       setLoading(false)
     }
@@ -131,13 +142,13 @@ export function YinyiPage({ echo, isActive, openWithRandom }: YinyiPageProps) {
     }
 
     if (loading) return <div className="quiet-line">Echo 正在翻日记本...</div>
+    if (notice) return <div className="quiet-line">{notice}</div>
 
     if (entry?.meta?.status === 'failed') {
       return (
         <EmptyState
           icon="…"
           title={`那天的${pageLabels.yinyi}我没写好。\n可能是我那时候走神了。\n要不你让我重写一次?`}
-          body={entry.meta.error}
           action={<button className="primary-button empty-cta" onClick={generate}>重 新 生 成</button>}
           sign="— E C H O"
         />
@@ -207,7 +218,7 @@ export function YinyiPage({ echo, isActive, openWithRandom }: YinyiPageProps) {
             <input ref={dateInputRef} type="date" value={date} onChange={(event) => setDate(event.target.value)} />
           </span>
           <button className="tb-btn icon-only" onClick={randomEntry} title="随手翻一页">⤴</button>
-          <button className={`tb-btn yinyi-generate-btn${yinyiGenerating ? ' writing' : ''}`} onClick={generate} disabled={loading || yinyiGenerating}>
+          <button className={`tb-btn yinyi-generate-btn${yinyiGenerating ? ' writing' : ''}`} onClick={generate} disabled={loading || yinyiGenerating || date > isoDate()}>
             {yinyiGenerating ? (
               <>
                 <span className="tb-pulse-dot" aria-hidden="true" />

@@ -44,7 +44,51 @@ const migrations: DbMigration[] = [
       rebuildTablesWithoutUserDefaults(database)
     },
   },
+  {
+    version: 5,
+    name: 'separate_explicit_feedback_from_playback_counts',
+    up(database) {
+      separateExplicitFeedbackFromPlaybackCounts(database)
+    },
+  },
+  {
+    version: 6,
+    name: 'backfill_settings_first_used_at',
+    up(database) {
+      backfillSettingsFirstUsedAt(database)
+    },
+  },
 ]
+
+function backfillSettingsFirstUsedAt(database: Database.Database): void {
+  const row = database.prepare('SELECT data_json FROM settings WHERE id = 1').get() as { data_json: string } | undefined
+  let value: Record<string, unknown> = {}
+  try {
+    value = row?.data_json ? JSON.parse(row.data_json) as Record<string, unknown> : {}
+  } catch {
+    value = {}
+  }
+  const meta = value.meta && typeof value.meta === 'object' && !Array.isArray(value.meta)
+    ? value.meta as Record<string, unknown>
+    : {}
+  const firstUsedAt = typeof meta.firstUsedAt === 'string' && meta.firstUsedAt.trim()
+    ? meta.firstUsedAt
+    : new Date().toISOString()
+  const next = {
+    ...value,
+    meta: {
+      schemaVersion: 1,
+      lastViewedYinyiAt: '',
+      onboardingStep: 'api',
+      lastPrunedAt: '',
+      ...meta,
+      firstUsedAt,
+    },
+  }
+  database
+    .prepare('UPDATE settings SET data_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1')
+    .run(JSON.stringify(next))
+}
 
 function uniqueIndexColumns(database: Database.Database, table: string): string[][] {
   const indexes = database.pragma(`index_list(${table})`) as Array<{ name: string; unique: number }>
@@ -371,6 +415,44 @@ function rebuildTablesWithoutUserDefaults(database: Database.Database): void {
       CREATE INDEX IF NOT EXISTS idx_tq_prompts_recent ON taste_question_prompts(user_id, asked_at DESC);
     `)
   }
+}
+
+function countExplicitFeedbackSubquery(action: 'more_like_this' | 'not_right'): string {
+  return `
+    SELECT COUNT(*)
+    FROM track_feedback_events tfe
+    WHERE tfe.user_id = track_feedback.user_id
+      AND tfe.track_key = track_feedback.track_key
+      AND tfe.action = '${action}'
+  `
+}
+
+function separateExplicitFeedbackFromPlaybackCounts(database: Database.Database): void {
+  const explicitLikes = countExplicitFeedbackSubquery('more_like_this')
+  const explicitMisses = countExplicitFeedbackSubquery('not_right')
+  database.exec(`
+    UPDATE track_feedback
+    SET
+      play_count = CASE
+        WHEN play_count > (${explicitLikes}) THEN play_count - (${explicitLikes})
+        ELSE 0
+      END,
+      skip_count = CASE
+        WHEN skip_count > (${explicitMisses}) THEN skip_count - (${explicitMisses})
+        ELSE 0
+      END,
+      last_completion = CASE
+        WHEN play_count <= (${explicitLikes}) AND last_completion = 1 THEN NULL
+        ELSE last_completion
+      END,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE EXISTS (
+      SELECT 1
+      FROM track_feedback_events tfe
+      WHERE tfe.user_id = track_feedback.user_id
+        AND tfe.track_key = track_feedback.track_key
+    );
+  `)
 }
 
 function ensureMigrationTable(database: Database.Database): void {

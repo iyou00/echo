@@ -1,6 +1,7 @@
 import type { SceneKey, TrackSemantic } from '../../../types/ipc'
 import { getSettings } from '../../db/settings'
 import { completeChat } from '../../llm/client'
+import { safePromptJson } from '../../llm/promptData'
 import { asObject } from '../../netease/music'
 import {
   normalizeMusicArtistName,
@@ -29,6 +30,8 @@ export interface RecommendationIntent {
 
 export interface IntentOverride {
   wantsMusic?: boolean
+  clearSeedTitle?: boolean
+  clearArtistQuery?: boolean
   language?: '华语' | '粤语' | '英语' | '韩语' | '日语'
   moods?: string[]
   scenes?: string[]
@@ -53,6 +56,8 @@ export interface IntentRejectIf {
 
 export interface IntentParseOptions {
   inferEntities?: boolean
+  preserveWantsMusic?: boolean
+  preserveSemanticConstraints?: boolean
 }
 
 const ALLOWED_MOODS = new Set(['放松', '松弛', '清醒', '热烈', '轻快', '治愈', '怀旧', '孤独', '陪伴', '发呆'])
@@ -63,9 +68,9 @@ const INTENT_LLM_TIMEOUT_MS = 4000
 
 export const MAX_RECOMMENDATION_COUNT = 5
 export const OVER_LIMIT_RECOMMENDATION_LINE = '歌不在多，慢慢听。我先给你挑 5 首。'
-export const MUSIC_REQUEST_PATTERN = /推|推荐|来几首|来一首|听什么|听啥|值得听|适合听|想听|想要听|要听|我要听|我想听|播放|能听|放点|放首|来点|找首|找一首|给我.*歌|歌|曲|歌单|music|song/i
-export const GENERIC_DISCOVERY_PATTERN = /这个时候|现在|此刻|随便|随机|听点啥|听什么|有什么.*听|值得听|来首歌|来一首歌|放首歌|推首歌|推荐一首|来点音乐|听会儿歌|听会歌/i
-export const SPECIFIC_DISCOVERY_PATTERN = /《|》|像|类似|那种|那类|粤语|广东|英文|欧美|英语|english|外文|外语|国外|外国|韩语|韩国|韩文|kpop|k-pop|日语|日本|日文|j-pop|jpop|华语|中文|国语|激情|激昂|高昂|亢奋|振奋|热血|澎湃|带感|节奏|鼓点|动感|燃|提神|清醒|欢快|开心|轻快|轻松|快歌|快的|快一点|快点|慢|困|累|睡|睡前|休息|安静|放松|舒缓|治愈|发呆|平静|emo|伤心|难过|孤独|想哭|r&b|说唱|rap|hip|摇滚|rock|民谣|folk|电子|edm/i
+export const MUSIC_REQUEST_PATTERN = /推|推荐|挑(?:一|几)?首|选(?:一|几)?首|来几首|来一首|(?:整|安排|搞|弄)(?:一|几)?首|(?:整点|安排点|搞点|弄点)[^，。！？]{0,16}(?:歌|歌曲|音乐|曲子|单曲|好听|耐听|顺耳|入耳|对味|带感)|听什么|听啥|值得听|适合听|想听|想要听|要听|我要听|我想听|播放|能听|放点|放首|来点|找首|找一首|给我.*歌|歌|曲|歌单|music|song/i
+export const GENERIC_DISCOVERY_PATTERN = /这个时候|现在|此刻|随便|随机|听点啥|听什么|有什么.*听|值得听|挑(?:一|几)?首|选(?:一|几)?首|(?:整|安排|搞|弄)(?:一|几)?首|来首歌|来一首歌|放首歌|推首歌|推荐一首|来点音乐|听会儿歌|听会歌/i
+export const SPECIFIC_DISCOVERY_PATTERN = /《|》|像|类似|那种|那类|粤语|广东|英文|欧美|英语|english|外文|外语|国外|外国|韩语|韩国|韩文|kpop|k-pop|日语|日本|日文|j-pop|jpop|华语|中文|国语|激情|激昂|高昂|亢奋|振奋|热血|澎湃|带感|节奏|鼓点|动感|燃|提神|清醒|欢快|开心|轻快|轻松|快歌|快的|快一点|快点|慢|困|累|睡|睡前|休息|安静|放松|舒缓|治愈|温柔|温暖|暖一点|暖和|暖心|发呆|平静|emo|伤心|难过|孤独|想哭|r&b|说唱|rap|hip|摇滚|rock|民谣|folk|电子|edm/i
 
 export const GENERIC_MOOD_KEYWORDS: Record<string, string[]> = {
   放松: ['放松 华语', '舒缓 流行', '治愈 慢歌'],
@@ -92,7 +97,7 @@ export const GENERIC_GENRE_KEYWORDS: Record<string, string[]> = {
 }
 
 const HIGH_ENERGY_TERMS = ['激情', '激昂', '高昂', '亢奋', '振奋', '热血', '澎湃', '炸', '爆', '带感', '节奏感强', '节奏强', '有力量', '力量感', '鼓点', '动感', '燃', '提神', '清醒', '运动', '有劲']
-const LOW_ENERGY_TERMS = ['慢', '困', '睡', '安静', '放松', '发呆', '舒缓', '缓和', '轻柔', '松弛', '平静']
+const LOW_ENERGY_TERMS = ['慢', '困', '睡', '安静', '放松', '发呆', '舒缓', '缓和', '轻柔', '松弛', '平静', '温柔', '温暖', '暖一点', '暖和', '暖心']
 
 export function parseRequestedTrackCount(text: string): { requestedCount: number; targetCount: number; overLimit: boolean; explicit: boolean } {
   return parseMusicRequestCount(text)
@@ -117,20 +122,41 @@ function normalizeEvidence(items: unknown): string[] {
   return unique(items.map(String).map((item) => item.trim()).filter(Boolean)).slice(0, 6)
 }
 
+function sanitizeRejectIf(rejectIf: IntentRejectIf): IntentRejectIf | undefined {
+  const sanitized: IntentRejectIf = { ...rejectIf }
+  if (
+    typeof sanitized.minEnergy === 'number'
+    && typeof sanitized.maxEnergy === 'number'
+    && sanitized.minEnergy > sanitized.maxEnergy
+  ) {
+    delete sanitized.minEnergy
+    delete sanitized.maxEnergy
+  }
+  if (sanitized.requireTempo?.length && sanitized.forbidTempo?.length) {
+    const required = new Set(sanitized.requireTempo)
+    sanitized.forbidTempo = sanitized.forbidTempo.filter((tempo) => !required.has(tempo))
+  }
+  if (!sanitized.forbidTempo?.length) delete sanitized.forbidTempo
+  if (!sanitized.requireTempo?.length) delete sanitized.requireTempo
+  return Object.keys(sanitized).length > 0 ? sanitized : undefined
+}
+
 function normalizeRejectIf(value: unknown): IntentRejectIf | undefined {
   const raw = asObject(value)
   const rejectIf: IntentRejectIf = {}
-  const minEnergy = Number(raw.minEnergy)
-  const maxEnergy = Number(raw.maxEnergy)
-  if (Number.isFinite(minEnergy)) rejectIf.minEnergy = Math.max(0, Math.min(1, minEnergy))
-  if (Number.isFinite(maxEnergy)) rejectIf.maxEnergy = Math.max(0, Math.min(1, maxEnergy))
+  if (typeof raw.minEnergy === 'number' && Number.isFinite(raw.minEnergy)) {
+    rejectIf.minEnergy = Math.max(0, Math.min(1, raw.minEnergy))
+  }
+  if (typeof raw.maxEnergy === 'number' && Number.isFinite(raw.maxEnergy)) {
+    rejectIf.maxEnergy = Math.max(0, Math.min(1, raw.maxEnergy))
+  }
   if (Array.isArray(raw.forbidTempo)) {
     rejectIf.forbidTempo = unique(raw.forbidTempo.filter((tempo): tempo is TrackSemantic['tempo'] => ALLOWED_TEMPOS.has(tempo as TrackSemantic['tempo'])))
   }
   if (Array.isArray(raw.requireTempo)) {
     rejectIf.requireTempo = unique(raw.requireTempo.filter((tempo): tempo is TrackSemantic['tempo'] => ALLOWED_TEMPOS.has(tempo as TrackSemantic['tempo'])))
   }
-  return Object.keys(rejectIf).length > 0 ? rejectIf : undefined
+  return sanitizeRejectIf(rejectIf)
 }
 
 function normalizeIntentOverride(raw: unknown): IntentOverride | null {
@@ -138,6 +164,8 @@ function normalizeIntentOverride(raw: unknown): IntentOverride | null {
   if (Object.keys(value).length === 0) return null
   const override: IntentOverride = {}
   if (typeof value.wantsMusic === 'boolean') override.wantsMusic = value.wantsMusic
+  if (value.clearSeedTitle === true) override.clearSeedTitle = true
+  if (value.clearArtistQuery === true) override.clearArtistQuery = true
   if (typeof value.language === 'string' && ALLOWED_LANGUAGES.has(value.language)) override.language = value.language as IntentOverride['language']
   if (Array.isArray(value.moods)) {
     override.moods = unique(value.moods.map(String).filter((mood) => ALLOWED_MOODS.has(mood))).slice(0, 6)
@@ -178,13 +206,13 @@ export function validateIntentOverride(text: string, override: IntentOverride | 
   const explicitMusic = MUSIC_REQUEST_PATTERN.test(text)
   const next: IntentOverride = { ...override }
 
-  if (explicitMusic && next.wantsMusic === false) next.wantsMusic = true
+  if (!options.preserveWantsMusic && explicitMusic && next.wantsMusic === false) next.wantsMusic = true
   if (next.wantsMusic === undefined && explicitMusic) next.wantsMusic = true
-  if (directSong.seedTitle && !next.seedTitle) next.seedTitle = directSong.seedTitle
-  if (artistQuery && !next.artistQuery) next.artistQuery = artistQuery
+  if (!next.clearSeedTitle && directSong.seedTitle && !next.seedTitle) next.seedTitle = directSong.seedTitle
+  if (!next.clearArtistQuery && artistQuery && !next.artistQuery) next.artistQuery = artistQuery
   if (requested.explicit) next.targetCount = requested.targetCount
 
-  if (highTerms.length > 0) {
+  if (!options.preserveSemanticConstraints && highTerms.length > 0) {
     next.energy = 'high'
     next.tempo = 'fast'
     next.moods = unique([...(next.moods ?? []), '清醒', '热烈']).filter((mood) => ALLOWED_MOODS.has(mood))
@@ -195,7 +223,7 @@ export function validateIntentOverride(text: string, override: IntentOverride | 
       requireTempo: unique([...(next.rejectIf?.requireTempo ?? []), 'fast']),
     }
     next.evidence = unique([...(next.evidence ?? []), ...highTerms]).slice(0, 6)
-  } else if (lowTerms.length > 0) {
+  } else if (!options.preserveSemanticConstraints && lowTerms.length > 0) {
     next.energy = 'low'
     next.tempo = 'slow'
     next.rejectIf = {
@@ -220,9 +248,7 @@ function mergeRejectIf(base?: IntentRejectIf, override?: IntentRejectIf): Intent
   }
   merged.forbidTempo = unique([...(base?.forbidTempo ?? []), ...(override?.forbidTempo ?? [])])
   merged.requireTempo = unique([...(base?.requireTempo ?? []), ...(override?.requireTempo ?? [])])
-  if (!merged.forbidTempo.length) delete merged.forbidTempo
-  if (!merged.requireTempo.length) delete merged.requireTempo
-  return Object.keys(merged).length > 0 ? merged : undefined
+  return sanitizeRejectIf(merged)
 }
 
 export function mergeIntent(base: RecommendationIntent, override?: IntentOverride): RecommendationIntent {
@@ -235,6 +261,8 @@ export function mergeIntent(base: RecommendationIntent, override?: IntentOverrid
     rejectIf: mergeRejectIf(base.rejectIf, override.rejectIf),
   }
 
+  if (override.clearSeedTitle) delete merged.seedTitle
+  if (override.clearArtistQuery) delete merged.artistQuery
   if (override.language && ALLOWED_LANGUAGES.has(override.language)) {
     merged.language = override.language
   }
@@ -327,16 +355,18 @@ export async function inferIntentWithLlm(text: string, recentDialog?: string, op
 3. 用户没说几首就 targetCount: 1；用户说“几首”通常填 3；用户明确说具体数量就照填，最多填 5。
 4. moods/scenes/energy/tempo 只用枚举里的值，不要自己造词。
 5. “激昂 / 热血 / 澎湃 / 带感 / 节奏感强 / 炸 / 动感”都属于 moods:["清醒","热烈"], energy:"high", tempo:"fast", rejectIf.minEnergy 至少 0.55, rejectIf.forbidTempo 包含 "slow"。
-6. “舒缓 / 睡前 / 安静 / 慢一点”属于 energy:"low", tempo:"slow", rejectIf.maxEnergy 不超过 0.78, rejectIf.forbidTempo 包含 "fast"。
+6. “舒缓 / 睡前 / 安静 / 慢一点 / 温暖 / 暖一点”属于 energy:"low", tempo:"slow", moods 可填 ["治愈","陪伴"], rejectIf.maxEnergy 不超过 0.78, rejectIf.forbidTempo 包含 "fast"。
 7. evidence 只摘原文里的关键词，比如 ["激昂"]、["睡前","粤语"]。
 8. 用户说“某歌手/某乐队的歌来一首”“来一首某歌手”“某歌手那种”时，artistQuery 填该艺人/乐队名；“魔力红”统一填 "Maroon 5"。这种请求可以直接推荐一首，不要追问更具体。
 9. 用户直接点歌时要拆出歌手和歌名：例如“我要听王菲的主角”“我要听王菲《主角》”都填 artistQuery:"王菲", seedTitle:"主角", wantsMusic:true。用户只说“我要听主角”时填 seedTitle:"主角"。
 10. “推荐几首陈默之歌曲”这类句子里，“陈默之”是艺人名，“几首”表示 targetCount:3。
+11. “类似/像某首歌”的请求里,seedTitle 填参照歌名；artistQuery 只填明确出现的歌手。“像刚才那首”不填 seedTitle。
 
 例子：
 - "我累了" → {"wantsMusic":true,"intentConfidence":0.84,"moods":["放松","松弛"],"energy":"low","tempo":"slow","targetCount":1,"evidence":["累"],"rejectIf":{"maxEnergy":0.78,"forbidTempo":["fast"]}}
 - "推荐国外的歌曲" → {"wantsMusic":true,"intentConfidence":0.88,"language":"英语","targetCount":1,"evidence":["国外","歌曲"]}
 - "来点舒缓的" → {"wantsMusic":true,"intentConfidence":0.9,"moods":["放松","治愈"],"energy":"low","tempo":"slow","targetCount":1,"evidence":["舒缓"],"rejectIf":{"maxEnergy":0.78,"forbidTempo":["fast"]}}
+- "我有点冷，来点暖一点的" → {"wantsMusic":true,"intentConfidence":0.9,"moods":["治愈","陪伴"],"energy":"low","tempo":"slow","targetCount":1,"evidence":["冷","暖一点"],"rejectIf":{"maxEnergy":0.78,"forbidTempo":["fast"]}}
 - "来一首激昂的歌曲" → {"wantsMusic":true,"intentConfidence":0.95,"moods":["清醒","热烈"],"energy":"high","tempo":"fast","targetCount":1,"evidence":["激昂","歌曲"],"rejectIf":{"minEnergy":0.55,"forbidTempo":["slow"],"requireTempo":["fast"]}}
 - "节奏感强一点的" → {"wantsMusic":true,"intentConfidence":0.92,"moods":["清醒","热烈"],"energy":"high","tempo":"fast","targetCount":1,"evidence":["节奏感强"],"rejectIf":{"minEnergy":0.55,"forbidTempo":["slow"],"requireTempo":["fast"]}}
 - "睡前粤语三首" → {"wantsMusic":true,"intentConfidence":0.93,"language":"粤语","scenes":["睡前"],"energy":"low","tempo":"slow","targetCount":3,"evidence":["睡前","粤语"],"rejectIf":{"maxEnergy":0.78,"forbidTempo":["fast"]}}
@@ -346,12 +376,16 @@ export async function inferIntentWithLlm(text: string, recentDialog?: string, op
 - "推荐几首陈默之歌曲" → {"wantsMusic":true,"intentConfidence":0.96,"artistQuery":"陈默之","targetCount":3,"evidence":["几首","陈默之","歌曲"]}
 - "我要听王菲的主角" → {"wantsMusic":true,"intentConfidence":0.98,"artistQuery":"王菲","seedTitle":"主角","targetCount":1,"evidence":["王菲","主角"]}
 - "我想听主角" → {"wantsMusic":true,"intentConfidence":0.92,"seedTitle":"主角","targetCount":1,"evidence":["主角"]}
+- "类似大鱼海棠这首歌的歌曲推荐下" → {"wantsMusic":true,"intentConfidence":0.96,"seedTitle":"大鱼海棠","targetCount":1,"evidence":["类似","大鱼海棠"]}
+- "推荐几首像周深《大鱼》这样的歌" → {"wantsMusic":true,"intentConfidence":0.98,"artistQuery":"周深","seedTitle":"大鱼","targetCount":3,"evidence":["周深","大鱼"]}
+- "像刚才那首再来一首" → {"wantsMusic":true,"intentConfidence":0.92,"targetCount":1,"evidence":["刚才那首","再来一首"]}
 - "Maroon 5 那种偏轻快的" → {"wantsMusic":true,"intentConfidence":0.9,"artistQuery":"Maroon 5","moods":["轻快"],"targetCount":1,"evidence":["Maroon 5","轻快"]}
 - "今天天气真不错" → {"wantsMusic":false,"intentConfidence":0.82,"evidence":[]}`
 
-  const userPrompt = recentDialog
-    ? `<recent_dialog>\n${recentDialog}\n</recent_dialog>\n\n用户这一句:${text}`
-    : `用户这一句:${text}`
+  const userPrompt = safePromptJson({
+    recentDialog: recentDialog || '',
+    userText: text,
+  })
 
   const response = await withTimeout(
     completeChat(settings, [
@@ -386,6 +420,7 @@ export function parseIntent(text: string, options: IntentParseOptions = {}): Rec
   const hasHighEnergy = highTerms.length > 0 || /快/.test(lower)
   const hasLowEnergy = lowTerms.length > 0
   if (/困|累|睡|慢|发呆|安静|放松|平静/.test(lower)) moods.push('放松', '松弛')
+  if (/治愈|温柔|温暖|暖一点|暖和|暖心/.test(lower)) moods.push('治愈', '陪伴')
   if (/伤心|难过|emo|孤独|想哭/.test(lower)) moods.push('孤独', '陪伴')
   if (/开心|轻松|甜|阳光/.test(lower)) moods.push('轻快')
   if (/清醒|工作|提神|快|有劲|燃|激情|激昂|高昂|亢奋|振奋|热血|澎湃|炸|爆|带感|节奏感强|节奏强|有力量|力量感|鼓点|动感/.test(lower)) moods.push('清醒', '热烈')

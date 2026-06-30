@@ -1,9 +1,11 @@
-import type { SchedulerCatchupResult } from '../../../types/ipc'
+import type { SchedulerCatchupResult, TasteProfile } from '../../../types/ipc'
+import { getLatestCorrectionCreatedAt } from '../../db/events'
 import { getFeedbackSignalCount, getLatestFeedbackUpdatedAt } from '../../db/feedback'
 import { getLatestScheduledJob, insertScheduledJob } from '../../db/scheduledJobs'
 import { getTasteProfile } from '../../db/taste'
 import { recordSchedulerHealth } from '../health'
 import { refreshStructuredProfile, regeneratePortrait } from '../taste'
+import { tastePortraitReadiness, tasteStructuredReadiness } from './readiness'
 import { runSchedulerResultTask } from './runtimeTask'
 
 export const TASTE_STRUCTURED_TIME = { hour: 17, minute: 0 }
@@ -36,39 +38,79 @@ function toTime(value?: string | null): number {
   return Number.isNaN(time) ? 0 : time
 }
 
+function hasNewTasteSignalsSinceStructuredSnapshot(
+  profile: TasteProfile,
+  feedbackSignalCount: number,
+  latestFeedbackAt: string | null,
+  latestCorrectionAt: string | null,
+): boolean {
+  const lastSignalCount = profile.profile_meta?.signalCount ?? 0
+  const lastSignalRevision = profile.profile_meta?.structuredSignalRevision ?? 0
+  const signalRevision = profile.profile_meta?.signalRevision ?? 0
+  const structuredUpdatedAt = profile.profile_meta?.structuredUpdatedAt
+  const signalUpdatedAt = profile.profile_meta?.signalUpdatedAt
+  return signalRevision > lastSignalRevision
+    || feedbackSignalCount > lastSignalCount
+    || toTime(latestFeedbackAt) > toTime(structuredUpdatedAt)
+    || toTime(latestCorrectionAt) > toTime(structuredUpdatedAt)
+    || toTime(signalUpdatedAt) > toTime(structuredUpdatedAt)
+}
+
 function hasNewTasteSignalsSinceLastStructured(): boolean {
   const profile = getTasteProfile()
   if (!profile) return false
-  const lastSignalCount = profile.profile_meta?.signalCount ?? 0
-  const latestFeedbackAt = getLatestFeedbackUpdatedAt()
-  const structuredUpdatedAt = profile.profile_meta?.structuredUpdatedAt
-  return getFeedbackSignalCount() > lastSignalCount || toTime(latestFeedbackAt) > toTime(structuredUpdatedAt)
+  return hasNewTasteSignalsSinceStructuredSnapshot(
+    profile,
+    getFeedbackSignalCount(),
+    getLatestFeedbackUpdatedAt(),
+    getLatestCorrectionCreatedAt(),
+  )
 }
 
-function hasNewTasteSignalsSinceLastPortrait(date: string): boolean {
+function hasNewTasteSignalsSincePortraitSnapshot(
+  profile: TasteProfile,
+  feedbackSignalCount: number,
+  latestFeedbackAt: string | null,
+  latestCorrectionAt: string | null,
+): boolean {
+  const updatedAt = lastPortraitUpdatedAt(profile)
+  const lastPortraitSignalCount = profile.profile_meta?.portraitSignalCount ?? 0
+  const lastPortraitSignalRevision = profile.profile_meta?.portraitSignalRevision ?? 0
+  const signalRevision = profile.profile_meta?.signalRevision ?? 0
+  const signalUpdatedAt = profile.profile_meta?.signalUpdatedAt
+  if (!updatedAt) return true
+  return signalRevision > lastPortraitSignalRevision
+    || feedbackSignalCount > lastPortraitSignalCount
+    || toTime(latestFeedbackAt) > toTime(updatedAt)
+    || toTime(latestCorrectionAt) > toTime(updatedAt)
+    || toTime(signalUpdatedAt) > toTime(updatedAt)
+}
+
+function hasNewTasteSignalsSinceLastPortrait(): boolean {
   const profile = getTasteProfile()
   if (!profile) return false
-  const updatedAt = profile.profile_meta?.updatedAt
-  const lastPortraitSignalCount = profile.profile_meta?.portraitSignalCount ?? 0
-  const latestFeedbackAt = getLatestFeedbackUpdatedAt()
-  if (!updatedAt) return true
-  if (updatedAt.slice(0, 10) !== date) return true
-  return getFeedbackSignalCount() > lastPortraitSignalCount || toTime(latestFeedbackAt) > toTime(updatedAt)
+  return hasNewTasteSignalsSincePortraitSnapshot(
+    profile,
+    getFeedbackSignalCount(),
+    getLatestFeedbackUpdatedAt(),
+    getLatestCorrectionCreatedAt(),
+  )
+}
+
+function lastPortraitUpdatedAt(profile: TasteProfile): string | undefined {
+  return profile.profile_meta?.portraitUpdatedAt ?? profile.profile_meta?.updatedAt
 }
 
 async function runTasteStructuredJob(date: string): Promise<SchedulerCatchupResult> {
+  const readiness = tasteStructuredReadiness()
+  if (!readiness.ready) {
+    return { ok: true, job: 'taste_profile_structured', date, status: 'skipped', message: readiness.reason ?? '暂时不需要刷新结构画像。' }
+  }
   const latest = getLatestScheduledJob('taste_profile_structured', date)
-  if (latest?.status === 'completed') {
-    return { ok: true, job: 'taste_profile_structured', date, status: latest.status, message: latest.message ?? '结构画像今天已经处理过。' }
-  }
-  if (!getTasteProfile()) {
-    if (latest?.status === 'skipped') {
-      return { ok: true, job: 'taste_profile_structured', date, status: 'skipped', message: latest.message ?? '还没有画像，跳过结构刷新。' }
-    }
-    insertScheduledJob('taste_profile_structured', date, 'skipped', '还没有画像，跳过结构刷新。')
-    return { ok: true, job: 'taste_profile_structured', date, status: 'skipped', message: '还没有画像，跳过结构刷新。' }
-  }
   if (!hasNewTasteSignalsSinceLastStructured()) {
+    if (latest?.status === 'completed') {
+      return { ok: true, job: 'taste_profile_structured', date, status: latest.status, message: latest.message ?? '结构画像今天已经处理过。' }
+    }
     if (latest?.status === 'skipped') {
       return { ok: true, job: 'taste_profile_structured', date, status: 'skipped', message: latest.message ?? '今天没有新增口味信号，跳过结构刷新。' }
     }
@@ -100,18 +142,15 @@ export function runTasteStructuredRuntimeJob(date: string): Promise<SchedulerCat
 }
 
 async function runTastePortraitJob(date: string, signal?: AbortSignal): Promise<SchedulerCatchupResult> {
+  const readiness = tastePortraitReadiness()
+  if (!readiness.ready) {
+    return { ok: true, job: 'taste_profile_portrait', date, status: 'skipped', message: readiness.reason ?? '暂时不需要刷新画像文案。' }
+  }
   const latest = getLatestScheduledJob('taste_profile_portrait', date)
-  if (latest?.status === 'completed') {
-    return { ok: true, job: 'taste_profile_portrait', date, status: latest.status, message: latest.message ?? '画像文案今天已经处理过。' }
-  }
-  if (!getTasteProfile()) {
-    if (latest?.status === 'skipped') {
-      return { ok: true, job: 'taste_profile_portrait', date, status: 'skipped', message: latest.message ?? '还没有画像，跳过文案刷新。' }
+  if (!hasNewTasteSignalsSinceLastPortrait()) {
+    if (latest?.status === 'completed') {
+      return { ok: true, job: 'taste_profile_portrait', date, status: latest.status, message: latest.message ?? '画像文案今天已经处理过。' }
     }
-    insertScheduledJob('taste_profile_portrait', date, 'skipped', '还没有画像，跳过文案刷新。')
-    return { ok: true, job: 'taste_profile_portrait', date, status: 'skipped', message: '还没有画像，跳过文案刷新。' }
-  }
-  if (!hasNewTasteSignalsSinceLastPortrait(date)) {
     if (latest?.status === 'skipped') {
       return { ok: true, job: 'taste_profile_portrait', date, status: 'skipped', message: latest.message ?? '今天没有新增口味信号，跳过文案刷新。' }
     }
@@ -119,7 +158,18 @@ async function runTastePortraitJob(date: string, signal?: AbortSignal): Promise<
     return { ok: true, job: 'taste_profile_portrait', date, status: 'skipped', message: '今天没有新增口味信号，跳过文案刷新。' }
   }
   try {
-    await runTasteStructuredJob(date)
+    const structured = await runTasteStructuredJob(date)
+    if (!structured.ok && structured.status === 'failed') {
+      insertScheduledJob('taste_profile_portrait', date, 'failed', '结构画像刷新失败，已停止画像文案刷新。', structured.message)
+      recordSchedulerHealth('taste-portrait', 'degraded', '结构画像刷新失败，已停止文案刷新。', structured.message)
+      return {
+        ok: false,
+        job: 'taste_profile_portrait',
+        date,
+        status: 'failed',
+        message: '结构画像刷新失败，已停止画像文案刷新。',
+      }
+    }
     const profile = await regeneratePortrait({ refreshStructured: false, signal })
     const status = profile ? 'completed' : 'skipped'
     const message = profile ? '画像文案已刷新。' : '画像文案暂无可刷新内容。'
@@ -155,4 +205,10 @@ export async function runTasteProfileCatchup(): Promise<SchedulerCatchupResult[]
     results.push(await runTastePortraitRuntimeJob(portraitDate))
   }
   return results
+}
+
+export const tasteProfileJobsTestHelpers = {
+  hasNewTasteSignalsSincePortraitSnapshot,
+  hasNewTasteSignalsSinceStructuredSnapshot,
+  lastPortraitUpdatedAt,
 }

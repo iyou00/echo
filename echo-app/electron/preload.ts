@@ -3,20 +3,29 @@ import type { EchoApi } from '../src/types/ipc'
 
 const rawInvoke = ipcRenderer.invoke.bind(ipcRenderer)
 const DEFAULT_IPC_TIMEOUT_MS = 30_000
+const RUNTIME_MANAGED_CHANNELS = new Set([
+  'chat:send',
+  'settings:importPlaylist',
+  'semantics:buildForImportedTracks',
+  'recommendation:recommendFromNetease',
+  'scene:play',
+  'taste:regeneratePortrait',
+  'yinyi:generate',
+  'voice:generate',
+  'listening:generateSegment',
+  'netease:importPlaylist',
+  'scheduler:runCatchup',
+  'carePings:test',
+])
 const LONG_IPC_TIMEOUTS: Record<string, number> = {
-  'settings:importPlaylist': 10 * 60_000,
   'settings:exportData': 2 * 60_000,
   'settings:resetData': 2 * 60_000,
-  'semantics:buildForImportedTracks': 10 * 60_000,
-  'recommendation:recommendFromNetease': 90_000,
-  'chat:send': 90_000,
-  'yinyi:generate': 2 * 60_000,
-  'voice:generate': 90_000,
-  'listening:generateSegment': 90_000,
-  'netease:importPlaylist': 10 * 60_000,
 }
 
 function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
+  if (RUNTIME_MANAGED_CHANNELS.has(channel)) {
+    return rawInvoke(channel, ...args) as Promise<T>
+  }
   const timeoutMs = LONG_IPC_TIMEOUTS[channel] ?? DEFAULT_IPC_TIMEOUT_MS
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<never>((_, reject) => {
@@ -83,6 +92,7 @@ const echoApi: EchoApi = {
   taste: {
     getProfile: () => invoke('taste:getProfile'),
     getMemoryAudit: () => invoke('taste:getMemoryAudit'),
+    refreshStructuredProfile: () => invoke('taste:refreshStructuredProfile'),
     regeneratePortrait: () => invoke('taste:regeneratePortrait'),
     applySignal: (kind, payload) => invoke('taste:applySignal', kind, payload),
     correctMemory: (note) => invoke('taste:correctMemory', note),
@@ -188,6 +198,7 @@ const echoApi: EchoApi = {
     },
   },
   app: {
+    openFeedback: () => invoke('app:openFeedback'),
     minimizeToTray: () => invoke('app:minimizeToTray'),
     quit: () => invoke('app:quit'),
     onCloseRequested: (listener) => {
@@ -228,6 +239,9 @@ const echoApi: EchoApi = {
     getLoginState: () => invoke('netease:getLoginState'),
     createQrLogin: () => invoke('netease:createQrLogin'),
     checkQrLogin: (key) => invoke('netease:checkQrLogin', key),
+    sendCaptcha: (phone) => invoke('netease:sendCaptcha', phone),
+    loginWithCaptcha: (phone, captcha) => invoke('netease:loginWithCaptcha', phone, captcha),
+    importCookie: (cookie) => invoke('netease:importCookie', cookie),
     logout: () => invoke('netease:logout'),
     listPlaylists: () => invoke('netease:listPlaylists'),
     importPlaylist: (id) => invoke('netease:importPlaylist', id),

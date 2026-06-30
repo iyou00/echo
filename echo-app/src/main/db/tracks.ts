@@ -11,6 +11,7 @@ export interface TodayTrackEvent {
   source?: string
   listenedAt: string
   queueStatus?: Track['queueStatus']
+  queueStatusReason?: Track['queueStatusReason']
   echoNote?: string
   recommendSource?: string
   reason?: string
@@ -21,6 +22,7 @@ export interface ProfileTrackEvent {
   listenedAt: string
   source?: string
   queueStatus?: Track['queueStatus']
+  queueStatusReason?: Track['queueStatusReason']
 }
 
 export interface ListenedTrackWindows {
@@ -28,12 +30,77 @@ export interface ListenedTrackWindows {
   history: Track[]
 }
 
+const PASSIVE_IMPORTED_TRACK_SOURCES = new Set([
+  'manual_import',
+  'playlist_import',
+  'netease_playlist_import',
+  'imported_playlist',
+  'imported',
+  'import',
+])
+
+const NON_EXTERNAL_LISTENING_SOURCES = ['', 'recommended_by_echo', ...PASSIVE_IMPORTED_TRACK_SOURCES] as const
+const NON_EXTERNAL_LISTENING_SOURCE_SQL = NON_EXTERNAL_LISTENING_SOURCES.map((source) => `'${source}'`).join(', ')
+
+const SAME_DAY_MEANINGFUL_TRACK_EVENT_SQL = `
+  LOWER(COALESCE(source, '')) NOT IN (${NON_EXTERNAL_LISTENING_SOURCE_SQL})
+  OR (
+    json_valid(meta_json)
+    AND (
+      json_extract(meta_json, '$.queueStatus') IN ('playing', 'completed')
+      OR (
+        json_extract(meta_json, '$.queueStatus') = 'skipped'
+        AND COALESCE(json_extract(meta_json, '$.queueStatusReason'), 'playback_skipped') IN ('playback_skipped', 'explicit_feedback')
+      )
+    )
+  )
+`
+
+const PROFILE_TRACK_EVENT_SQL = `
+  LOWER(COALESCE(source, '')) NOT IN (${NON_EXTERNAL_LISTENING_SOURCE_SQL})
+  OR (
+    json_valid(meta_json)
+    AND (
+      json_extract(meta_json, '$.queueStatus') = 'completed'
+      OR (
+        json_extract(meta_json, '$.queueStatus') = 'skipped'
+        AND COALESCE(json_extract(meta_json, '$.queueStatusReason'), 'playback_skipped') IN ('playback_skipped', 'explicit_feedback')
+      )
+    )
+  )
+`
+
 function queueTrackKey(track: Track): string {
   return trackIdentity(track)
 }
 
 function parseTrack(row: { title: string; artist: string; album?: string; source?: string; meta_json?: string }): Track {
   return row.meta_json ? parseJson<Track>(row.meta_json, { title: row.title, artist: row.artist, album: row.album, source: row.source }, 'tracks_listened.meta_json') : { title: row.title, artist: row.artist, album: row.album, source: row.source }
+}
+
+type TrackEventRow = {
+  title: string
+  artist: string
+  album?: string
+  source?: string
+  listened_at: string
+  meta_json?: string
+}
+
+function toTodayTrackEvent(typed: TrackEventRow): TodayTrackEvent {
+  const parsed = typed.meta_json ? parseJson<Track | null>(typed.meta_json, null, 'tracks_listened.meta_json') : null
+  return {
+    title: typed.title,
+    artist: typed.artist,
+    album: typed.album,
+    source: typed.source,
+    listenedAt: typed.listened_at,
+    queueStatus: parsed?.queueStatus,
+    queueStatusReason: parsed?.queueStatusReason,
+    echoNote: parsed?.echoNote ?? parsed?.reason,
+    recommendSource: parsed?.recommendSource,
+    reason: parsed?.reason,
+  }
 }
 
 function parseSqliteTimestampMs(value: string): number {
@@ -44,6 +111,32 @@ function parseSqliteTimestampMs(value: string): number {
 function boundedPositiveInteger(value: number, fallback: number, max: number): number {
   if (!Number.isFinite(value)) return fallback
   return Math.min(max, Math.max(1, Math.floor(value)))
+}
+
+function mergeRecommendedQueueStatus(
+  existing?: Pick<Track, 'queueStatus' | 'queueStatusReason'>,
+  incoming?: Pick<Track, 'queueStatus' | 'queueStatusReason'>,
+): Pick<Track, 'queueStatus' | 'queueStatusReason'> {
+  if (incoming?.queueStatus && incoming.queueStatus !== 'pending') {
+    return {
+      queueStatus: incoming.queueStatus,
+      queueStatusReason: incoming.queueStatusReason,
+    }
+  }
+  if (existing?.queueStatus === 'playing' || existing?.queueStatus === 'completed' || existing?.queueStatus === 'skipped') {
+    return {
+      queueStatus: existing.queueStatus,
+      queueStatusReason: existing.queueStatusReason,
+    }
+  }
+  return {
+    queueStatus: incoming?.queueStatus ?? 'pending',
+    queueStatusReason: incoming?.queueStatusReason,
+  }
+}
+
+function shouldMarkRecommendedTrackSkippedOnReplace(track: Pick<Track, 'queueStatus'> | null): boolean {
+  return Boolean(track && track.queueStatus !== 'completed' && track.queueStatus !== 'skipped')
 }
 
 export function appendListenedTrack(track: Track, source = 'recommended_by_echo'): void {
@@ -77,11 +170,12 @@ export function appendRecommendedTracks(tracks: Track[]): void {
 
     for (const track of [...items].reverse()) {
       const current = existing.get(queueTrackKey(track))
+      const queueStatus = mergeRecommendedQueueStatus(current?.track, track)
       const enriched: Track = {
         ...(current?.track ?? {}),
         ...track,
         recommendedAt,
-        queueStatus: current?.track.queueStatus === 'playing' ? 'playing' : 'pending',
+        ...queueStatus,
         echoNote: track.reason ?? current?.track.echoNote,
       }
       if (current) {
@@ -96,7 +190,7 @@ export function appendRecommendedTracks(tracks: Track[]): void {
   write(tracks)
 }
 
-export function skipTodayRecommendedTracks(): void {
+export function skipTodayRecommendedTracks(reason: Track['queueStatusReason'] = 'scene_replaced'): void {
   const rows = getDb()
     .prepare(`
       SELECT id, meta_json
@@ -111,29 +205,37 @@ export function skipTodayRecommendedTracks(): void {
     for (const row of items) {
       if (!row.meta_json) continue
       const parsed = parseJson<Track | null>(row.meta_json, null, 'tracks_listened.meta_json')
-      if (!parsed || parsed.queueStatus === 'completed') continue
-      update.run(JSON.stringify({ ...parsed, queueStatus: 'skipped' }), row.id)
+      if (!shouldMarkRecommendedTrackSkippedOnReplace(parsed)) continue
+      update.run(JSON.stringify({ ...parsed, queueStatus: 'skipped', queueStatusReason: reason }), row.id)
     }
   })
   write(rows)
 }
 
 export function loadRecentTracks(limit = 20): Track[] {
+  return loadTracksForDate(new Date().toLocaleDateString('sv-SE'), limit)
+}
+
+export function loadTracksForDate(date: string, limit = 20): Track[] {
   return getDb()
     .prepare(`
       SELECT title, artist, album, source, meta_json
       FROM tracks_listened
       WHERE user_id = current_user_id()
         AND source = 'recommended_by_echo'
-        AND date(listened_at, 'localtime') = date('now', 'localtime')
+        AND date(listened_at, 'localtime') = date(?)
       ORDER BY listened_at DESC, id DESC
       LIMIT ?
     `)
-    .all(limit)
+    .all(date, limit)
     .map((row) => {
       const typed = row as { title: string; artist: string; album?: string; source?: string; meta_json?: string }
       return parseTrack(typed)
     })
+}
+
+export function hasListeningEvidenceForDate(date: string): boolean {
+  return loadMeaningfulTrackEventsForDate(date, 1).length > 0
 }
 
 export function loadRecentRecommendedTracks(limit = 80): Track[] {
@@ -194,31 +296,70 @@ export function loadListenedTrackWindows(historyHours: number, historyLimit = 30
 }
 
 export function loadTodayTrackEvents(limit = 60): TodayTrackEvent[] {
+  return loadTrackEventsForDate(new Date().toLocaleDateString('sv-SE'), limit)
+}
+
+export function loadTodayMeaningfulTrackEvents(limit = 60): TodayTrackEvent[] {
+  return loadMeaningfulTrackEventsForDate(new Date().toLocaleDateString('sv-SE'), limit)
+}
+
+export function loadTrackEventsForDate(date: string, limit = 60): TodayTrackEvent[] {
   return getDb()
     .prepare(`
       SELECT title, artist, album, source, listened_at, meta_json
       FROM tracks_listened
       WHERE user_id = current_user_id()
-        AND date(listened_at, 'localtime') = date('now', 'localtime')
+        AND date(listened_at, 'localtime') = date(?)
       ORDER BY listened_at ASC, id ASC
       LIMIT ?
     `)
-    .all(limit)
-    .map((row) => {
-      const typed = row as { title: string; artist: string; album?: string; source?: string; listened_at: string; meta_json?: string }
-      const parsed = typed.meta_json ? parseJson<Track | null>(typed.meta_json, null, 'tracks_listened.meta_json') : null
-      return {
-        title: typed.title,
-        artist: typed.artist,
-        album: typed.album,
-        source: typed.source,
-        listenedAt: typed.listened_at,
-        queueStatus: parsed?.queueStatus,
-        echoNote: parsed?.echoNote ?? parsed?.reason,
-        recommendSource: parsed?.recommendSource,
-        reason: parsed?.reason,
-      }
-    })
+    .all(date, limit)
+    .map((row) => toTodayTrackEvent(row as TrackEventRow))
+}
+
+export function isMeaningfulSkippedReason(reason?: Track['queueStatusReason']): boolean {
+  return !reason || reason === 'playback_skipped' || reason === 'explicit_feedback'
+}
+
+export function isExternalListeningSource(source?: string): boolean {
+  const clean = source?.trim().toLowerCase()
+  return Boolean(clean && clean !== 'recommended_by_echo' && !PASSIVE_IMPORTED_TRACK_SOURCES.has(clean))
+}
+
+export function isMeaningfulTrackEvent(event: Pick<TodayTrackEvent, 'source' | 'queueStatus' | 'queueStatusReason'>): boolean {
+  return isExternalListeningSource(event.source)
+    || event.queueStatus === 'playing'
+    || event.queueStatus === 'completed'
+    || (event.queueStatus === 'skipped' && isMeaningfulSkippedReason(event.queueStatusReason))
+}
+
+export function isMeaningfulProfileTrackEvent(event: Pick<ProfileTrackEvent, 'source' | 'queueStatus' | 'queueStatusReason'>): boolean {
+  return isExternalListeningSource(event.source)
+    || event.queueStatus === 'completed'
+    || (event.queueStatus === 'skipped' && isMeaningfulSkippedReason(event.queueStatusReason))
+}
+
+export function isLongTermRecommendationCooldownTrack(event: Pick<Track, 'source' | 'queueStatus' | 'queueStatusReason'>): boolean {
+  return isExternalListeningSource(event.source)
+    || event.queueStatus === 'playing'
+    || event.queueStatus === 'completed'
+    || (event.queueStatus === 'skipped' && isMeaningfulSkippedReason(event.queueStatusReason))
+}
+
+export function loadMeaningfulTrackEventsForDate(date: string, limit = 60): TodayTrackEvent[] {
+  const safeLimit = Math.max(1, Math.min(500, Math.floor(limit)))
+  const rows = getDb()
+    .prepare(`
+      SELECT title, artist, album, source, listened_at, meta_json
+      FROM tracks_listened
+      WHERE user_id = current_user_id()
+        AND date(listened_at, 'localtime') = date(?)
+        AND (${SAME_DAY_MEANINGFUL_TRACK_EVENT_SQL})
+      ORDER BY listened_at DESC, id DESC
+      LIMIT ?
+    `)
+    .all(date, safeLimit) as TrackEventRow[]
+  return rows.reverse().map(toTodayTrackEvent)
 }
 
 export function loadRecommendedTrackHistory(limitDays = 7): QueueHistoryDay[] {
@@ -287,6 +428,7 @@ export function loadProfileTrackEvents(limit = 500): ProfileTrackEvent[] {
       SELECT title, artist, album, source, listened_at, meta_json
       FROM tracks_listened
       WHERE user_id = current_user_id()
+        AND (${PROFILE_TRACK_EVENT_SQL})
       ORDER BY listened_at DESC, id DESC
       LIMIT ?
     `)
@@ -301,6 +443,7 @@ function toProfileTrackEvent(row: { title: string; artist: string; album?: strin
     listenedAt: row.listened_at,
     source: row.source,
     queueStatus: parsed?.queueStatus,
+    queueStatusReason: parsed?.queueStatusReason,
   }
 }
 
@@ -315,6 +458,7 @@ export function loadProfileTrackEventsBetween(startDaysAgo: number, endDaysAgo =
       WHERE user_id = current_user_id()
         AND listened_at >= datetime('now', ?)
         AND listened_at < datetime('now', ?)
+        AND (${PROFILE_TRACK_EVENT_SQL})
       ORDER BY listened_at DESC, id DESC
       LIMIT ?
     `)
@@ -322,7 +466,7 @@ export function loadProfileTrackEventsBetween(startDaysAgo: number, endDaysAgo =
     .map((row) => toProfileTrackEvent(row as { title: string; artist: string; album?: string; source?: string; listened_at: string; meta_json?: string }))
 }
 
-export function updateRecommendedTrackStatus(track: Track, status: NonNullable<Track['queueStatus']>): void {
+export function updateRecommendedTrackStatus(track: Track, status: NonNullable<Track['queueStatus']>, reason?: Track['queueStatusReason']): void {
   const rows = getDb()
     .prepare(`
       SELECT id, meta_json
@@ -345,6 +489,14 @@ export function updateRecommendedTrackStatus(track: Track, status: NonNullable<T
   const next: Track = {
     ...parsed,
     queueStatus: status,
+    queueStatusReason: reason,
   }
   getDb().prepare('UPDATE tracks_listened SET meta_json = ? WHERE id = ?').run(JSON.stringify(next), target.id)
+}
+
+export const tracksTestHelpers = {
+  mergeRecommendedQueueStatus,
+  shouldMarkRecommendedTrackSkippedOnReplace,
+  isLongTermRecommendationCooldownTrack,
+  isExternalListeningSource,
 }

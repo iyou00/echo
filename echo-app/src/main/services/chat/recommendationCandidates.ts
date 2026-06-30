@@ -9,7 +9,7 @@ import {
 } from '../../skills/music/search'
 import type { MusicEntityResolution } from '../../skills/music/entityResolver'
 import { getCurrentScene } from '../scene'
-import { classifyChatIntent, type ChatIntent } from './intent'
+import { classifyFallbackChatIntent, type ChatIntent } from './intent'
 
 export interface ChatActiveTask {
   readonly canceled: boolean
@@ -53,7 +53,8 @@ export async function fetchRecommendationCandidates(
   text: string,
   active: ChatActiveTask,
   onProgress?: (patch: ChatRecommendationProgressPatch) => void,
-  chatIntent: ChatIntent = classifyChatIntent(text),
+  chatIntent: ChatIntent = classifyFallbackChatIntent(text),
+  context: { similarityReference?: Track } = {},
 ): Promise<ChatRecommendationCandidatesResult> {
   if (active.canceled) return { candidates: [], authRequired: false, canceled: true }
   const currentScene = getCurrentScene()
@@ -87,6 +88,9 @@ export async function fetchRecommendationCandidates(
       query: text,
       mode: searchMode,
       intentOverride: llmIntent,
+      authoritativeIntentEntities: Boolean(chatIntent.llmIntentOverride),
+      authoritativeIntentSemantics: Boolean(chatIntent.llmIntentOverride),
+      similarityReference: context.similarityReference,
       signal: active.signal,
       onEntitiesResolved: (resolution) => {
         entityResolution = resolution

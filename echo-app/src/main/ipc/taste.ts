@@ -3,12 +3,13 @@ import { runAgent } from '../runtime/runtime'
 import { getMemoryAudit } from '../services/memoryAudit'
 import { correctProfileMemory } from '../services/profileCorrection'
 import { tastePortraitRefreshAgent } from '../services/schedulerAgents'
-import { applySignal, getProfileWithQuestions } from '../services/taste'
+import { applySignal, getProfileWithQuestions, refreshStructuredProfile } from '../services/taste'
 import { recordTasteQuestionAnswer } from '../services/tasteQuestionScheduler'
 
 export function registerTasteIpc(): void {
   ipcMain.handle('taste:getProfile', () => getProfileWithQuestions())
   ipcMain.handle('taste:getMemoryAudit', () => getMemoryAudit())
+  ipcMain.handle('taste:refreshStructuredProfile', () => refreshStructuredProfile('semantic_update'))
   ipcMain.handle('taste:regeneratePortrait', () => runAgent(tastePortraitRefreshAgent, undefined, {
     phase: 'portrait',
     total: 3,

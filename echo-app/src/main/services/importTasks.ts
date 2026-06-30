@@ -7,12 +7,14 @@ import { onRuntimeTaskChanged } from '../runtime/eventBus'
 type ImportTaskKind = ImportTaskSnapshot['kind']
 type ImportTaskReporter = (payload: Omit<ImportProgressPayload, 'startedAt'>) => void
 
-type ImportTaskRunner<T> = (report: ImportTaskReporter) => Promise<T>
+type ImportTaskRunner<T> = (report: ImportTaskReporter, signal: AbortSignal) => Promise<T>
 
 let currentTaskId: string | null = null
 let currentSnapshot: ImportTaskSnapshot | null = null
+let clearCompletedSnapshotTimer: ReturnType<typeof setTimeout> | null = null
 
 const RUNTIME_IMPORT_UNIQUE_KEY = 'import'
+const COMPLETED_IMPORT_SNAPSHOT_TTL_MS = 3000
 
 const importKindToRuntime: Record<ImportTaskKind, string> = {
   'playlist-file': 'playlist-import',
@@ -60,6 +62,10 @@ function toImportSnapshot(snapshot: RuntimeTaskSnapshot): ImportTaskSnapshot | n
 }
 
 function setImportSnapshot(snapshot: ImportTaskSnapshot | null): void {
+  if (clearCompletedSnapshotTimer) {
+    clearTimeout(clearCompletedSnapshotTimer)
+    clearCompletedSnapshotTimer = null
+  }
   currentSnapshot = snapshot
   broadcastImportTask(snapshot)
   if (snapshot && (snapshot.phase === 'semantics' || snapshot.phase === 'profile' || snapshot.phase === 'done')) {
@@ -77,7 +83,16 @@ onRuntimeTaskChanged((snapshot) => {
   const mapped = toImportSnapshot(snapshot)
   if (!mapped) return
   setImportSnapshot(mapped)
-  if (mapped.status !== 'running') currentTaskId = null
+  if (mapped.status !== 'running') {
+    currentTaskId = null
+    const completedTaskId = mapped.id
+    clearCompletedSnapshotTimer = setTimeout(() => {
+      clearCompletedSnapshotTimer = null
+      if (currentSnapshot?.id === completedTaskId && currentSnapshot.status !== 'running') {
+        setImportSnapshot(null)
+      }
+    }, COMPLETED_IMPORT_SNAPSHOT_TTL_MS)
+  }
 })
 
 export function getImportTaskSnapshot(): ImportTaskSnapshot | null {
@@ -94,6 +109,10 @@ export function reportStandaloneImportProgress(payload: ImportProgressPayload): 
 
 export function clearImportTaskSnapshot(): void {
   currentTaskId = null
+  if (clearCompletedSnapshotTimer) {
+    clearTimeout(clearCompletedSnapshotTimer)
+    clearCompletedSnapshotTimer = null
+  }
   setImportSnapshot(null)
 }
 
@@ -118,7 +137,7 @@ export async function runImportTask<T>(kind: ImportTaskKind, sourceName: string 
         total: payload.total,
       })
     }
-    const result = await runner(report)
+    const result = await runner(report, context.signal)
     context.report({
       phase: 'done',
       current: 1,

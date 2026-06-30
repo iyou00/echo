@@ -13,7 +13,7 @@ function reportListenerError(error: unknown): void {
   console.error('[runtime] listener failed', error)
 }
 
-export function setRuntimeBroadcaster(next: RuntimeBroadcaster): void {
+export function setRuntimeBroadcaster(next: RuntimeBroadcaster | null): void {
   broadcaster = next
 }
 
@@ -35,10 +35,12 @@ export function emitRuntimeTaskChanged(snapshot: RuntimeTaskSnapshot): void {
       reportListenerError(error)
     }
   }
-  try {
-    broadcaster?.('runtime:task-changed', structuredClone(snapshot))
-  } catch (error) {
-    reportListenerError(error)
+  if (snapshot.visibility === 'user') {
+    try {
+      broadcaster?.('runtime:task-changed', structuredClone(snapshot))
+    } catch (error) {
+      reportListenerError(error)
+    }
   }
 }
 
@@ -55,11 +57,13 @@ export function emitRuntimeEvent(input: Omit<RuntimeEvent, 'id' | 'createdAt'>):
       reportListenerError(error)
     }
   }
-  try {
-    broadcaster?.('runtime:event', structuredClone(event))
-    if (event.channel) broadcaster?.(event.channel, structuredClone(event.payload))
-  } catch (error) {
-    reportListenerError(error)
+  if (event.visibility === 'user') {
+    try {
+      broadcaster?.('runtime:event', structuredClone(event))
+      if (event.channel) broadcaster?.(event.channel, structuredClone(event.payload))
+    } catch (error) {
+      reportListenerError(error)
+    }
   }
   return structuredClone(event)
 }

@@ -4,6 +4,7 @@ import { StorageUnavailableError } from '../utils/secureStorage'
 import { resetPlaybackState } from '../services/playback'
 import { rescheduleCarePings, rescheduleYinyi } from '../services/scheduler'
 import { getImportTaskSnapshot } from '../services/importTasks'
+import { clearRuntimeTasks, getRecentTasks } from '../runtime/runtime'
 import { broadcast, maskSettings } from './shared'
 
 function applySettingsSideEffects(paths: string[]): void {
@@ -48,7 +49,11 @@ export function registerSettingsIpc(): void {
   ipcMain.handle('settings:downloadPlaylistTemplate', () => downloadPlaylistTemplate())
   ipcMain.handle('settings:exportData', () => exportData())
   ipcMain.handle('settings:resetData', () => {
+    if (getRecentTasks().some((task) => task.status === 'running')) {
+      throw new Error('运行任务还在进行，完成后再清空数据。')
+    }
     const result = resetAllData()
+    clearRuntimeTasks()
     resetPlaybackState()
     rescheduleYinyi()
     rescheduleCarePings()

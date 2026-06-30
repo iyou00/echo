@@ -1,6 +1,6 @@
 import type { TasteProfile, Track } from '../../types/ipc'
 import { getRecommendationCache, setRecommendationCache } from '../db/recommendationCache'
-import { loadListenedTrackWindows, loadRecentRecommendedTracks } from '../db/tracks'
+import { isLongTermRecommendationCooldownTrack, loadListenedTrackWindows, loadRecentRecommendedTracks } from '../db/tracks'
 import { getTasteProfile } from '../db/taste'
 import { filterPlayableTracks } from '../netease/music'
 import { readNeteaseCookie } from '../netease/auth'
@@ -38,7 +38,7 @@ import {
 import { selectFinalTracks } from './recommendation/selection'
 import { fetchCandidates, fetchGenericDiscoveryCandidates } from './recommendation/recall'
 import { NeteaseAuthRequiredError } from './recommendation/errors'
-import { buildRecommendationMemoryConstraints } from './recommendation/memoryConstraints'
+import { allowsTrackFromMemoryConstraints, buildRecommendationMemoryConstraints, type RecommendationMemoryConstraints } from './recommendation/memoryConstraints'
 import { currentMusicCorrectionConstraintForQuery } from '../skills/music/correctionMemory'
 import { filterTracksByMusicEntity, mergeMusicEntityConstraints, titleMatchesConstraint, type MusicEntityConstraint } from '../skills/music/verifier'
 import { createRecommendationDeterminismContext, stableShuffle, type RecommendationDeterminismContext } from './recommendation/deterministic'
@@ -57,9 +57,14 @@ export type { IntentOverride, RecommendationIntent } from './recommendation/inte
 export interface RecommendationOptions {
   ignoreScene?: boolean
   disableEntityInference?: boolean
+  respectCooldown?: boolean
   candidatePoolSize?: number
   /** @deprecated use candidatePoolSize */
   candidateCount?: number
+  similarityReference?: Track
+  similarityArtistQuery?: string
+  similarityArtistId?: string
+  preserveIntentSemantics?: boolean
   signal?: AbortSignal
   onProgress?: (patch: RecommendationProgressPatch) => void
 }
@@ -96,7 +101,44 @@ function queryFingerprint(text: string): string {
     .slice(0, 48)
 }
 
-function buildCacheKey(intent: RecommendationIntent, determinism?: Partial<RecommendationDeterminismContext>): string {
+function tasteProfileFingerprint(profile: TasteProfile | null): string {
+  if (!profile) return 'no-profile'
+  const rounded = (value: unknown, fallback = 0): number => (
+    typeof value === 'number' && Number.isFinite(value)
+      ? Number(value.toFixed(3))
+      : fallback
+  )
+  return normalizeText(JSON.stringify({
+    artists: profile.artists.slice(0, 12).map((artist) => [artist.name, rounded(artist.affinity)]),
+    genres: profile.genres.slice(0, 12).map((genre) => [genre.name, rounded(genre.weight), genre.trend]),
+    moods: profile.moods.slice(0, 10).map((mood) => [mood.tag, rounded(mood.frequency)]),
+    antiPatterns: profile.anti_patterns.slice(0, 32),
+    signatureTracks: profile.signature_tracks.slice(0, 10).map((track) => [track.artist, track.title]),
+    discoveryAppetite: rounded(profile.discovery_appetite, 0.5),
+  }))
+}
+
+function memoryConstraintsFingerprint(constraints: RecommendationMemoryConstraints | undefined): string {
+  if (!constraints) return 'no-memory-constraints'
+  return normalizeText(JSON.stringify({
+    blockedArtists: constraints.blockedArtists,
+    blockedTerms: constraints.blockedTerms,
+    softenedArtists: constraints.softenedArtists,
+    softenedTerms: constraints.softenedTerms,
+    preferredTerms: constraints.preferredTerms,
+    notes: constraints.notes,
+  }))
+}
+
+function buildCacheKey(
+  intent: RecommendationIntent,
+  determinism?: Partial<RecommendationDeterminismContext>,
+  similarityReference?: Track,
+  similarityArtistQuery?: string,
+  similarityArtistId?: string,
+  profile?: TasteProfile | null,
+  memoryConstraints?: RecommendationMemoryConstraints,
+): string {
   return normalizeText(JSON.stringify({
     daySeed: determinism?.daySeed,
     moods: intent.moods,
@@ -112,6 +154,18 @@ function buildCacheKey(intent: RecommendationIntent, determinism?: Partial<Recom
     rejectIf: intent.rejectIf,
     sceneKey: intent.sceneKey,
     query: queryFingerprint(intent.query),
+    similarityReference: similarityReference
+      ? {
+          id: similarityReference.neteaseId ?? similarityReference.id,
+          title: similarityReference.title,
+          artist: similarityReference.artist,
+        }
+      : undefined,
+    similarityArtistQuery,
+    similarityArtistId,
+    tasteProfile: tasteProfileFingerprint(profile ?? null),
+    memoryConstraints: memoryConstraintsFingerprint(memoryConstraints),
+    musicCorrection: currentMusicCorrectionConstraintForQuery(intent.query) ?? null,
   }))
 }
 
@@ -147,12 +201,14 @@ async function recommendGenericDiscovery(intent: RecommendationIntent, options: 
   const desiredCount = poolSize ?? intent.targetCount
   const candidates = await fetchGenericDiscoveryCandidates(recallIntent, options.signal, determinism, { profile })
   assertRecommendationActive(options.signal)
-  const memory = buildDirectionMemory()
+  const memory = buildDirectionMemory(profile)
   const constraints = buildRecommendationMemoryConstraints(profile)
+  const allowedByMemory = (track: Track) => allowsTrackFromMemoryConstraints(track, intent, constraints)
   const listenedWindows = loadListenedTrackWindows(24 * 7, 800, 24, 400)
   const lastDayKeys = trackIdentitySet(listenedWindows.recent)
-  const lastSevenDayKeys = trackIdentitySet(listenedWindows.history)
+  const lastSevenDayKeys = trackIdentitySet(listenedWindows.history.filter(isLongTermRecommendationCooldownTrack))
   const enriched = uniqueTracks(candidates.map((track) => ({ ...track, semantic: semanticForCandidate(track) })))
+    .filter(allowedByMemory)
     .map((track) => ({ track, score: genericDiscoveryScoreWithContext(track, lastSevenDayKeys, memory, determinism, intent, constraints) }))
     .sort((a, b) => b.score - a.score)
     .map((item) => item.track)
@@ -191,6 +247,11 @@ function isDirectSongRequest(text: string, intent: RecommendationIntent): boolea
   if (!intent.seedTitle) return false
   if (/像|类似|相似|那种|那类|风格/.test(text)) return false
   return /想听|想要听|要听|我要听|我想听|播放|放首|放|找首|找一首|来一首|听/.test(text)
+}
+
+function shouldAllowCooldownFallback(intent: RecommendationIntent, options: Pick<RecommendationOptions, 'respectCooldown'> = {}): boolean {
+  if (options.respectCooldown) return false
+  return Boolean(intent.seedTitle || intent.artistQuery || intent.sceneKey)
 }
 
 function titleMatchesSeed(track: Track, seedTitle?: string): boolean {
@@ -251,6 +312,9 @@ export const recommendationTestHelpers = {
   matchesIntentFloor,
   parseIntent,
   scoreCandidate: scoreCandidateForTest,
+  shouldAllowCooldownFallback,
+  memoryConstraintsFingerprint,
+  tasteProfileFingerprint,
   trackIdentitySet,
 }
 
@@ -259,7 +323,11 @@ export async function recommendFromNetease(text: string, override?: IntentOverri
   if (!readNeteaseCookie()) throw new NeteaseAuthRequiredError()
   const inferEntities = !options.disableEntityInference
   const baseIntent = mergeIntent(parseIntent(text, { inferEntities }), options.ignoreScene ? undefined : sceneIntentOverride())
-  const intent = mergeIntent(baseIntent, validateIntentOverride(text, override ?? null, { inferEntities }) ?? undefined)
+  const intent = mergeIntent(baseIntent, validateIntentOverride(text, override ?? null, {
+    inferEntities,
+    preserveWantsMusic: options.preserveIntentSemantics,
+    preserveSemanticConstraints: options.preserveIntentSemantics,
+  }) ?? undefined)
   const determinism = createRecommendationDeterminismContext()
   const poolSize = candidatePoolSize(options)
   const recallIntent = intentForCandidatePool(intent, poolSize)
@@ -270,22 +338,39 @@ export async function recommendFromNetease(text: string, override?: IntentOverri
     return recommendGenericDiscovery(intent, options, poolSize, determinism, profile)
   }
   const directSongRequest = isDirectSongRequest(text, intent)
-  const allowCooldownFallback = Boolean(intent.seedTitle || intent.artistQuery || intent.sceneKey)
+  const allowCooldownFallback = shouldAllowCooldownFallback(intent, options)
   function matchesSeedTitle(track: Track): boolean {
     if (!intent.seedTitle) return false
     return normalizeText(track.title).includes(normalizeText(intent.seedTitle))
   }
-  const cacheKey = buildCacheKey(intent, determinism)
-  const memory = buildDirectionMemory()
+  const similarityReferenceKeys = options.similarityReference
+    ? trackIdentitySet([options.similarityReference])
+    : new Set<string>()
+  const excludeSimilarityReference = (tracks: Track[]): Track[] => tracks.filter((track) => !hasTrackIdentity(similarityReferenceKeys, track))
+  const memory = buildDirectionMemory(profile)
   const constraints = buildRecommendationMemoryConstraints(profile)
+  const cacheKey = buildCacheKey(
+    intent,
+    determinism,
+    options.similarityReference,
+    options.similarityArtistQuery,
+    options.similarityArtistId,
+    profile,
+    constraints,
+  )
+  const allowedByMemory = (track: Track) => allowsTrackFromMemoryConstraints(track, intent, constraints)
   const listenedWindows = loadListenedTrackWindows(24 * 7, 900, 24, 500)
   const hardCooldownKeys = trackIdentitySet(listenedWindows.recent)
-  const recentKeys = trackIdentitySet([...loadRecentRecommendedTracks(120), ...listenedWindows.history])
+  const recentKeys = trackIdentitySet([
+    ...loadRecentRecommendedTracks(120),
+    ...listenedWindows.history,
+  ].filter(isLongTermRecommendationCooldownTrack))
   const cached = getRecommendationCache(cacheKey)
   reportRecommendationProgress(options, { phase: 'cache', current: 2, total: 5, message: '检查推荐缓存和冷却' })
   if (cached?.tracks.length && !poolSize) {
-    const cachedFreshSource = directSongRequest ? directSongCandidates(cached.tracks, intent) : constrainByIntent(cached.tracks, intent)
+    const cachedFreshSource = excludeSimilarityReference(directSongRequest ? directSongCandidates(cached.tracks, intent) : constrainByIntent(cached.tracks, intent))
     const cachedFresh = cachedFreshSource
+      .filter(allowedByMemory)
       .filter((track) => !hasTrackIdentity(hardCooldownKeys, track) && (matchesSeedTitle(track) || !hasTrackIdentity(recentKeys, track)))
       .map((track) => ({ ...track, semantic: track.semantic ?? semanticForCandidate(track), playUrl: undefined, urlExpiresAt: undefined }))
       .filter((track) => matchesIntentFloor(track, intent))
@@ -295,7 +380,20 @@ export async function recommendFromNetease(text: string, override?: IntentOverri
   }
 
   reportRecommendationProgress(options, { phase: 'recall', current: 3, total: 5, message: '召回网易云候选歌曲' })
-  const candidates = constrainByIntent(await fetchCandidates(recallIntent, options.signal, determinism, { profile }), intent)
+  const similarityArtistKey = normalizeText(options.similarityArtistQuery ?? '')
+  const excludeSimilarityArtist = (tracks: Track[]): Track[] => similarityArtistKey
+    ? tracks.filter((track) => !normalizeText(track.artist).includes(similarityArtistKey))
+    : tracks
+  const candidates = excludeSimilarityArtist(excludeSimilarityReference(constrainByIntent(
+    await fetchCandidates(recallIntent, options.signal, determinism, {
+      profile,
+      similarityReference: options.similarityReference,
+      similarityArtistQuery: options.similarityArtistQuery,
+      similarityArtistId: options.similarityArtistId,
+    }),
+    intent,
+  )))
+    .filter(allowedByMemory)
   assertRecommendationActive(options.signal)
   if (directSongRequest) {
     const directPool = directSongCandidates(candidates, intent)
@@ -329,7 +427,7 @@ export async function recommendFromNetease(text: string, override?: IntentOverri
     if (playableArtistTracks.length) {
       const picked = playableArtistTracks.slice(0, desiredCount).map((track) => ({
         ...track,
-        reason: track.reason ?? `${intent.artistQuery} 的歌里,这首现在接上就行。`,
+        reason: track.reason ?? `${intent.artistQuery} 的歌里,这首现在比较合适。`,
       }))
       if (!poolSize) setRecommendationCache(cacheKey, intent as unknown as Record<string, unknown>, picked.map((track) => ({ ...track, playUrl: undefined, urlExpiresAt: undefined })))
       return picked

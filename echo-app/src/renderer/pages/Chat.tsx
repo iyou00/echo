@@ -5,7 +5,9 @@ import type { AppPageProps } from '../appState'
 import { BrandLogo, EmptyState, SceneRail, TrackCard } from '../components'
 import { latestRunningRuntimeTask, useRuntimeTasks } from '../hooks/useRuntimeTasks'
 import { trackIdentity as trackKey } from '../../shared/trackIdentity'
-import { stableInt } from '../../shared/deterministic'
+import { friendlyOperationError } from '../../shared/runtimeRecovery'
+import { pickWaitingLineFor } from './chatWaitingLines'
+import { mergeReturnedTracksIntoMessage } from './chatMessageTracks'
 
 interface ChatPageProps extends AppPageProps {
   echo: EchoApi
@@ -25,55 +27,6 @@ interface ChatPageProps extends AppPageProps {
   focusApiSettings?: () => void
 }
 
-const WAITING_LINES = [
-  '等我翻翻我的宝藏歌单',
-  '让我在旋律里捞一首合适的',
-  '我在听，也在找，稍等呀',
-  '耳朵已经竖起来了，在找了',
-  '音符正在赶来的路上',
-  '这次有点难到我了，让我再琢磨下',
-  '你的心情有点复杂，我需要多听几秒',
-  '这个氛围有点微妙，得仔细挑一首',
-  '我在很认真地感受你说的',
-  '正在把感觉翻译成旋律',
-  '别急，好音乐值得等一小下',
-  '想给你一首，刚好接住你心情的歌',
-  '在脑内开了一场小型试听会',
-  '像翻旧唱片一样，为你找那一轨',
-  '嗯，我听到了',
-  '正在感受你此刻的心情频率',
-  '马上就好，旋律正在加载',
-  '在翻了在翻了，歌单有点长',
-  '等等，我正从耳机里往外掏歌',
-  '脑内点歌台，正在为你连线',
-  '挑歌中，请允许我纠结几秒',
-  '马上，等我抓个旋律塞给你',
-  '稍等，我在心里过一遍前奏',
-  '嗯……这首味道好像对了',
-  '让我猜猜你现在想听什么',
-  '别急，好旋律不怕晚',
-  '感觉要来了，就在下一首',
-  '正在调动我的音乐直觉',
-  '快了，音符排队上车中',
-  '等我，在跟某首歌对个眼神',
-  '耳朵已经忙起来了，马上好',
-]
-
-const CASUAL_WAITING_LINES = [
-  '嗯，我在听',
-  '等我想想怎么接你这句话',
-  '这句我得认真回',
-  '让我慢慢想一下',
-  '我先接住你这句话',
-  '有点懂你的意思了',
-  '我在想怎么说更贴近一点',
-  '等我把话放软一点',
-  '我听见了，等我一下',
-  '这句我想认真想想',
-  '我在心里过一遍',
-  '让我找个更像朋友的说法',
-]
-
 // 让 Echo 看起来像在"打字思考":
 // - DELAY: 接到 result 后先压住至少 2 秒, 让"思考期"明确
 // - TICK 间隔动态算: 短回复放慢看清, 长回复不卡死, 总打字时长目标 ≥ MIN_TOTAL_MS
@@ -90,15 +43,6 @@ function computeTickInterval(totalChars: number): number {
   if (totalChars <= 0) return REPLY_MIN_TICK_MS
   const ideal = Math.floor(REPLY_MIN_TOTAL_MS / totalChars)
   return Math.max(REPLY_MIN_TICK_MS, Math.min(REPLY_MAX_TICK_MS, ideal))
-}
-
-function looksLikeMusicRelated(text: string): boolean {
-  return /推|推荐|来几首|听什么|听啥|值得听|适合听|想听|能听|放点|放首|来点|歌|曲|歌单|music|song|慢|快|安静|热闹|循环|舒缓|轻|燃|治愈|怀旧|睡前|通勤|粤语|英文|欧美|韩|日语|kpop|雨天|发呆/i.test(text)
-}
-
-function pickWaitingLineFor(text: string) {
-  const pool = looksLikeMusicRelated(text) ? WAITING_LINES : CASUAL_WAITING_LINES
-  return pool[stableInt(text, pool.length)] ?? CASUAL_WAITING_LINES[0]
 }
 
 function isNearConversationBottom(element: HTMLElement): boolean {
@@ -158,8 +102,7 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
   const inputBusy = sending || sceneTaskRunning
 
   function actionErrorMessage(error: unknown, fallback: string): string {
-    const message = error instanceof Error ? error.message.trim() : ''
-    return message || fallback
+    return friendlyOperationError(error, fallback)
   }
 
   function showChatNotice(message: string) {
@@ -270,7 +213,7 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
 
   async function submitText(rawText: string) {
     const text = rawText.trim()
-    if (!text || inputBusy || !hasLlmConfig || currentScene) return
+    if (!text || inputBusy || !hasLlmConfig) return
 
     const userMessage: ChatMessage = {
       id: -Date.now(),
@@ -301,9 +244,16 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
         cancelTokens.current.delete(assistantMessage.id)
         return
       }
-      finalMessages.current[assistantMessage.id] = result.message
+      const returnedTracks = result.message.tracks?.length ? result.message.tracks : result.tracks
+      const finalMessage = mergeReturnedTracksIntoMessage(result.message, returnedTracks)
+      finalMessages.current[assistantMessage.id] = finalMessage
       // 不再依赖 onChunk 累积, send return 时直接用完整 content 灌满。
-      chunkBuffers.current[assistantMessage.id] = result.message.content
+      chunkBuffers.current[assistantMessage.id] = finalMessage.content
+      if (returnedTracks.length > 0) {
+        setMessages((items) => items.map((item) => (
+          item.id === assistantMessage.id ? { ...item, tracks: returnedTracks } : item
+        )))
+      }
       if (result.hints?.neteaseAuthRequired) {
         // 把按钮挂在最终落地的 message id 上（持久化到 DB 的真实 id），打字结束后会替换占位 message。
         const finalId = result.message.id
@@ -314,12 +264,15 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
         })
       }
       scheduleReplyStart(assistantMessage.id)
-      const returnedTracks = result.message.tracks?.length ? result.message.tracks : result.tracks
       const nextTrack = returnedTracks.find((track) => track.playUrl) ?? null
       if (nextTrack) {
-        const nextState = await echo.playback.play(nextTrack)
+        const nextState = result.hints?.playbackAlreadyApplied
+          ? await echo.playback.getState()
+          : await echo.playback.play(nextTrack)
         setPlaybackState(nextState)
-        await primePlaybackQueue(returnedTracks, nextTrack)
+        if (!result.hints?.playbackAlreadyApplied) {
+          await primePlaybackQueue(returnedTracks, nextTrack)
+        }
       }
       await refreshQueue()
     } catch (error) {
@@ -680,15 +633,15 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
           <input
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            placeholder={currentScene ? `正在「${currentScene.label}」中…` : hasLlmConfig ? '和 Echo 说点什么...' : '先填好 LLM 才能说话...'}
-            disabled={Boolean(currentScene) || !hasLlmConfig || sceneTaskRunning}
+            placeholder={hasLlmConfig ? '和 Echo 说点什么...' : '先填好 LLM 才能说话...'}
+            disabled={!hasLlmConfig || sceneTaskRunning}
           />
           {sending ? (
             <button className="cancel-button" type="button" onClick={cancelMessage} title="让 Echo 先停一下">
               <Square size={13} fill="currentColor" />
             </button>
           ) : (
-            <button type="submit" disabled={!draft.trim() || !hasLlmConfig || Boolean(currentScene) || sceneTaskRunning} title="发送">
+            <button type="submit" disabled={!draft.trim() || !hasLlmConfig || sceneTaskRunning} title="发送">
               <Send size={17} />
             </button>
           )}

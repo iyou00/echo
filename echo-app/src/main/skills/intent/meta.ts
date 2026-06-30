@@ -9,6 +9,7 @@ function compactMetaText(text: string): string {
 export function isEchoIdentityQuestion(text: string): boolean {
   const compact = compactMetaText(text).replace(/^echo/, '')
   return /^(你)?(到底)?(是谁|是什么|叫什么|是干嘛的|能做什么|会做什么|可以做什么|有什么用)$/.test(compact)
+    || /^(你)?(到底)?(是谁|是什么|叫什么).{0,12}(能做什么|会做什么|可以做什么|有什么用)$/.test(compact)
     || /^(你)?的?(设定|定位|人设)(是什么|是啥|什么|啥|怎么回事)?$/.test(compact)
     || /^(你)?(到底)?(是什么)?(设定|定位|人设)$/.test(compact)
     || /^(你)?(是怎么设定的|作为音乐伴侣能做什么|作为ai音乐伴侣能做什么)$/.test(compact)

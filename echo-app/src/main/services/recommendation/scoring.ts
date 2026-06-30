@@ -1,6 +1,7 @@
 import type { TasteProfile, Track, TrackSemantic } from '../../../types/ipc'
 import { getFeedbackScore, listExplicitTrackFeedback } from '../../db/feedback'
 import { listFavoriteTracks } from '../../db/favorites'
+import { getTasteProfile } from '../../db/taste'
 import { getTrackSemantic } from '../../db/semantics'
 import { inferTrackSemanticFallback } from '../semantics'
 import type { RecommendationIntent } from './intent'
@@ -10,6 +11,8 @@ import { stableUnit, type RecommendationDeterminismContext } from './determinist
 
 const EXPLICIT_FEEDBACK_LIMIT = 50
 const FAVORITE_DIRECTION_LIMIT = 60
+const CHAT_SIGNATURE_DIRECTION_LIMIT = 20
+const CHAT_SIGNATURE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
 const GENERIC_DISCOVERY_JITTER_MAX = 3
 const EXPLORE_FAMILIARITY_BONUS = 0.6
 const STYLE_SOURCE_BONUS = 0.9
@@ -22,6 +25,18 @@ export interface DirectionMemoryItem {
   artist: string
   trackKey: string
   weight: number
+}
+
+function latestExplicitFeedbackByTrack(limit: number): ReturnType<typeof listExplicitTrackFeedback> {
+  const seen = new Set<string>()
+  const latest: ReturnType<typeof listExplicitTrackFeedback> = []
+  for (const item of listExplicitTrackFeedback(limit)) {
+    const key = item.trackKey || trackKey(item.track)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    latest.push(item)
+  }
+  return latest
 }
 
 export function semanticForCandidate(track: Track): TrackSemantic {
@@ -52,8 +67,8 @@ function artistOverlap(left: string, right: string): boolean {
   return left.toLowerCase().split(/[/、,，&＋+]| feat\.?| ft\.?| and /i).map((item) => item.trim()).filter(Boolean).some((item) => rightParts.has(item))
 }
 
-export function buildDirectionMemory(): DirectionMemoryItem[] {
-  const explicit = listExplicitTrackFeedback(EXPLICIT_FEEDBACK_LIMIT).map((item, index) => ({
+export function buildDirectionMemory(profile: TasteProfile | null = getTasteProfile()): DirectionMemoryItem[] {
+  const explicit = latestExplicitFeedbackByTrack(EXPLICIT_FEEDBACK_LIMIT).map((item, index) => ({
     action: item.action,
     semantic: semanticForCandidate(item.track),
     artist: item.track.artist,
@@ -67,10 +82,36 @@ export function buildDirectionMemory(): DirectionMemoryItem[] {
     trackKey: trackKey(track),
     weight: Math.max(0.25, 0.65 - index * 0.006),
   }))
-  return [...explicit, ...favorites]
+  const now = Date.now()
+  const chatSignatures = (profile?.signature_tracks ?? [])
+    .filter((track) => track.source === 'chat')
+    .filter((track) => {
+      const recordedAt = track.recommendedAt ? new Date(track.recommendedAt).getTime() : Number.NaN
+      return Number.isFinite(recordedAt) && now - recordedAt <= CHAT_SIGNATURE_MAX_AGE_MS
+    })
+    .slice(0, CHAT_SIGNATURE_DIRECTION_LIMIT)
+    .map((track, index) => ({
+      action: 'favorite' as const,
+      semantic: semanticForCandidate(track),
+      artist: track.artist,
+      trackKey: trackKey(track),
+      weight: Math.max(0.12, 0.24 - index * 0.006),
+    }))
+  return [...explicit, ...favorites, ...chatSignatures]
 }
 
-export function directionMemoryScore(track: Track, semantic: TrackSemantic, memory: DirectionMemoryItem[]): number {
+function intentExplicitlyRequestsExactTrack(track: Track, intent?: RecommendationIntent): boolean {
+  const seedTitle = normalizeText(intent?.seedTitle ?? '')
+  if (!seedTitle) return false
+  const title = normalizeText(track.title)
+  if (!title || !(title.includes(seedTitle) || seedTitle.includes(title))) return false
+  const artistQuery = normalizeText(intent?.artistQuery ?? '')
+  if (!artistQuery) return true
+  const artist = normalizeText(track.artist)
+  return Boolean(artist && (artist.includes(artistQuery) || artistQuery.includes(artist)))
+}
+
+export function directionMemoryScore(track: Track, semantic: TrackSemantic, memory: DirectionMemoryItem[], options: { ignoreNegative?: boolean } = {}): number {
   let score = 0
   for (const item of memory) {
     const similarity = semanticSimilarity(semantic, item.semantic)
@@ -80,6 +121,7 @@ export function directionMemoryScore(track: Track, semantic: TrackSemantic, memo
     if (item.action === 'more_like_this') {
       score += Math.min(4.4, similarity * 0.75 + (sameArtist ? 0.7 : 0) + (sameTrack ? 1.4 : 0)) * item.weight
     } else if (item.action === 'not_right') {
+      if (options.ignoreNegative) continue
       score -= Math.min(6.2, similarity * 1.05 + (sameArtist ? 1.2 : 0) + (sameTrack ? 2.8 : 0)) * item.weight
     } else {
       score += Math.min(2.1, similarity * 0.28 + (sameArtist ? 0.25 : 0) + (sameTrack ? 0.7 : 0)) * item.weight
@@ -120,8 +162,12 @@ function scoreCandidateWithFeedback(
   if (track.recommendSource === 'artist') score += 0.9
   if (track.recommendSource === 'playlist') score += 0.7
   if (track.recommendSource === 'daily' || track.recommendSource === 'fm') score += 0.8
-  score += Math.max(-5, Math.min(5, feedbackScore(track)))
-  score += directionMemoryScore(track, semantic, memory)
+  const explicitExactTrackRequest = intentExplicitlyRequestsExactTrack(track, intent)
+  const rawFeedbackScore = feedbackScore(track)
+  score += explicitExactTrackRequest
+    ? Math.max(0, Math.min(5, rawFeedbackScore))
+    : Math.max(-5, Math.min(5, rawFeedbackScore))
+  score += directionMemoryScore(track, semantic, memory, { ignoreNegative: explicitExactTrackRequest })
   if (constraints) score += recommendationMemoryConstraintScore(track, intent, constraints)
   if (hasTrackIdentity(recentKeys, track) && !(intent.seedTitle && normalizeText(track.title).includes(normalizeText(intent.seedTitle)))) score -= 12
   if (profile?.energy_preference != null && intent.energy == null) {
@@ -148,8 +194,15 @@ export function scoreCandidate(
   return scoreCandidateWithFeedback(track, intent, recentKeys, memory, getFeedbackScore, profile, constraints)
 }
 
-export function scoreCandidateForTest(track: Track, intent: RecommendationIntent, recentKeys: Set<string>, memory: DirectionMemoryItem[]): number {
-  return scoreCandidateWithFeedback(track, intent, recentKeys, memory, () => 0)
+export function scoreCandidateForTest(
+  track: Track,
+  intent: RecommendationIntent,
+  recentKeys: Set<string>,
+  memory: DirectionMemoryItem[],
+  profile?: TasteProfile | null,
+  constraints?: RecommendationMemoryConstraints,
+): number {
+  return scoreCandidateWithFeedback(track, intent, recentKeys, memory, () => 0, profile, constraints)
 }
 
 export function genericDiscoveryScore(track: Track, recentSevenDayKeys: Set<string>, memory: DirectionMemoryItem[], intent?: RecommendationIntent, constraints?: RecommendationMemoryConstraints): number {
@@ -170,7 +223,7 @@ export function genericDiscoveryScoreWithContext(
   if (semantic.familiarity === 'explore') score += EXPLORE_FAMILIARITY_BONUS
   if (track.recommendSource === 'style') score += STYLE_SOURCE_BONUS
   if (track.recommendSource === 'search') score += SEARCH_SOURCE_BONUS
-  score += directionMemoryScore(track, semantic, memory)
+  score += directionMemoryScore(track, semantic, memory, { ignoreNegative: intentExplicitlyRequestsExactTrack(track, intent) })
   if (intent && constraints) score += recommendationMemoryConstraintScore(track, intent, constraints)
   if (hasTrackIdentity(recentSevenDayKeys, track)) score -= RECENT_DISCOVERY_PENALTY
   return score

@@ -15,7 +15,17 @@ export function loadActiveEvents(limit = 8): ActiveEvent[] {
       SELECT kind, content, confidence, weight, started_at, created_at
       FROM events
       WHERE user_id = current_user_id()
-        AND (expected_end_at IS NULL OR expected_end_at > datetime('now', 'localtime'))
+        AND kind != 'correction'
+        AND (
+          (
+            kind = 'context'
+            AND COALESCE(expected_end_at, datetime(COALESCE(started_at, created_at), '+6 hours')) > datetime('now', 'localtime')
+          )
+          OR (
+            kind != 'context'
+            AND (expected_end_at IS NULL OR expected_end_at > datetime('now', 'localtime'))
+          )
+        )
         AND weight > 0.2
       ORDER BY weight DESC, created_at DESC
       LIMIT ?
@@ -55,4 +65,28 @@ export function loadRecentEvents(kind: string, limit = 8): ActiveEvent[] {
         createdAt: typed.created_at,
       }
     })
+}
+
+export function getCorrectionEventCount(): number {
+  const row = getDb()
+    .prepare(`
+      SELECT COUNT(*) AS total
+      FROM events
+      WHERE user_id = current_user_id()
+        AND kind = 'correction'
+    `)
+    .get() as { total?: number } | undefined
+  return Number(row?.total ?? 0)
+}
+
+export function getLatestCorrectionCreatedAt(): string | null {
+  const row = getDb()
+    .prepare(`
+      SELECT MAX(created_at) AS created_at
+      FROM events
+      WHERE user_id = current_user_id()
+        AND kind = 'correction'
+    `)
+    .get() as { created_at?: string | null } | undefined
+  return row?.created_at ?? null
 }

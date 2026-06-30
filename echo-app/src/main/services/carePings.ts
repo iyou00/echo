@@ -13,9 +13,12 @@ import {
   type CarePingRecord,
 } from '../db/carePings'
 import { loadRecentConversations, appendConversation } from '../db/conversations'
+import { loadActiveEvents, type ActiveEvent } from '../db/events'
 import { appendRecommendedTracks } from '../db/tracks'
+import { getTasteProfile } from '../db/taste'
 import { completeChat } from '../llm/client'
 import { stripKnownSystemBlocks } from '../llm/outputSanitize'
+import { safePromptJson } from '../llm/promptData'
 import { buildSoulPolicyPrompt } from '../skills/soul/policy'
 import { readRootFile } from '../utils/paths'
 import { getWeather } from '../weather/client'
@@ -24,6 +27,9 @@ import { recordSchedulerHealth } from './health'
 import { play } from './playback'
 import { recommendFromNetease } from './recommendation'
 import { stableDaySeed, stableInt } from './recommendation/deterministic'
+import { carePingReadiness } from './scheduler/readiness'
+import { buildMemoryEvidencePrompt } from './memoryEvidence'
+import { hasExplicitMemorySource, hasMemorySourceLeak } from './memorySourceGuard'
 
 export interface TimeSlot {
   key?: string
@@ -41,6 +47,23 @@ export interface CarePingRunResult {
 
 export interface CarePingRunOptions {
   signal?: AbortSignal
+}
+
+interface CarePingPromptContext {
+  currentTime: string
+  weather: string
+  recentConversations: string
+  yesterdaySeal: string
+  recentNotifications: string
+  trackLine: string
+  memoryEvidence: string
+  activeEvents: Array<{
+    content: string
+    kind: string
+    scope: 'today_context' | 'active_event'
+    weight: number | null
+    confidence: number | null
+  }>
 }
 
 const activeNotifications = new Set<Notification>()
@@ -64,6 +87,16 @@ function appIcon() {
   )
 }
 
+function activeEventsForCarePrompt(events: ActiveEvent[] = loadActiveEvents(4)): CarePingPromptContext['activeEvents'] {
+  return events.map((event) => ({
+    content: event.content,
+    kind: event.kind,
+    scope: event.kind === 'context' ? 'today_context' : 'active_event',
+    weight: event.weight ?? null,
+    confidence: event.confidence ?? null,
+  }))
+}
+
 function pickPingType(): PingType {
   const hour = new Date().getHours()
   const value = stableInt(`${stableDaySeed()}:care-ping-type:${hour}`, 10) / 10
@@ -74,7 +107,7 @@ function pickPingType(): PingType {
 
 function cleanBody(value: string, max = 80): string {
   const normalized = stripKnownSystemBlocks(value)
-    .replace(/```[\s\S]*?```/g, '')
+    .replace(/```[\s\S]*?```/g, (block) => block.replace(/```[a-z]*|```/gi, ''))
     .split(/\r?\n/)
     .map((line) => line.trim().replace(/^>\s*/, ''))
     .filter(Boolean)
@@ -111,6 +144,35 @@ const UNSAFE_BODY_PATTERNS = [
   /通知格式/,
   /核心信息/,
   /关键信息/,
+  /我给你接上/,
+  /给你安排/,
+  /安排上/,
+  /让你稳稳的/,
+  /接住你/,
+  /把情绪接住/,
+  /把空气撑住/,
+  /音乐是治愈的力量/,
+  /完全理解你的心情/,
+  /根据你的画像/,
+  /根据你的轨迹/,
+  /根据你的数据/,
+  /画像/,
+  /轨迹/,
+  /数据/,
+  /算法/,
+  /记忆策略/,
+  /纠正过/,
+  /标签/,
+  /诊断/,
+  /人格/,
+  /你其实/,
+  /你总是/,
+  /你一直/,
+  /太满/,
+  /太猛/,
+  /上头/,
+  /燃爆/,
+  /往里收/,
   /#+\s*/,
   /---/,
   /\[[^\]]+\]/,
@@ -120,7 +182,30 @@ function isUnsafeBody(body: string): boolean {
   const normalized = body.trim()
   if (!normalized) return true
   if (normalized.length > 110) return true
+  if (hasMemorySourceLeak(normalized, { maxGap: 32, tail: '不喜欢|少推|别总|别老|纠正|画像|数据|轨迹|记忆' })) return true
+  if (hasExplicitMemorySource(normalized)) return true
   return UNSAFE_BODY_PATTERNS.some((pattern) => pattern.test(normalized))
+}
+
+function compactTrackText(value: string): string {
+  return value.replace(/\s+/g, '').trim().toLowerCase()
+}
+
+function bracketedTitles(value: string): string[] {
+  return Array.from(value.matchAll(/《([^》]{1,80})》/g), (match) => match[1]?.trim() ?? '').filter(Boolean)
+}
+
+function hasWrongBracketedTrackTitle(body: string, track: Track): boolean {
+  const expected = compactTrackText(track.title)
+  const titles = bracketedTitles(body)
+  return titles.some((title) => compactTrackText(title) !== expected)
+}
+
+function isCarePingBodyUsableForTrack(body: string, track: Track): boolean {
+  if (isUnsafeBody(body)) return false
+  if (hasWrongBracketedTrackTitle(body, track)) return false
+  const compact = compactTrackText(body)
+  return compact.includes(compactTrackText(track.title)) && compact.includes(compactTrackText(track.artist))
 }
 
 function fallbackPingBody(type: PingType, track?: Track): string {
@@ -160,10 +245,12 @@ async function buildPromptContext(track?: Track, options: CarePingRunOptions = {
     yesterdaySeal: getMostRecentSeal().slice(0, 700) || '(暂无)',
     recentNotifications: getRecentCarePingBodies(7).filter((body) => !isUnsafeBody(body)).join('\n') || '(暂无)',
     trackLine: track ? `${track.artist}的《${track.title}》` : '',
+    memoryEvidence: buildMemoryEvidencePrompt(getTasteProfile()),
+    activeEvents: activeEventsForCarePrompt(),
   }
 }
 
-function fillPrompt(template: string, context: Awaited<ReturnType<typeof buildPromptContext>>): string {
+function fillPrompt(template: string, context: CarePingPromptContext): string {
   return template
     .replace(/\{time\}/g, context.currentTime)
     .replace(/\{weather\}/g, context.weather)
@@ -173,6 +260,20 @@ function fillPrompt(template: string, context: Awaited<ReturnType<typeof buildPr
     .replace(/\{recent_conversations\}/g, context.recentConversations)
     .replace(/\{yesterday_seal_summary\}/g, context.yesterdaySeal)
     .replace(/\{recent_notifications\}/g, context.recentNotifications)
+    .replace(/\{memory_evidence\}/g, context.memoryEvidence)
+}
+
+function buildCarePingPromptInput(user: string, context: CarePingPromptContext): string {
+  return [
+    context.memoryEvidence,
+    safePromptJson({
+      prompt: user,
+      recentNotifications: context.recentNotifications,
+      activeEvents: context.activeEvents,
+      activeEventsContract: 'activeEvents 只表示今天仍在发生的短期状态,只能作为时机和语气线索,不能写成稳定人格、长期偏好或反复模式。',
+      instruction: '现在输出最终通知正文。',
+    }),
+  ].join('\n')
 }
 
 async function writePingBody(type: PingType, track?: Track, options: CarePingRunOptions = {}): Promise<string> {
@@ -200,13 +301,14 @@ async function writePingBody(type: PingType, track?: Track, options: CarePingRun
           '不要暴露画像、记忆、候选、策略、标签或内部规则。',
         ].join('\n'),
       },
-      { role: 'user', content: `${user}\n\n最近 7 条已经发过的通知，避免重复:\n${context.recentNotifications}\n\n现在输出最终通知正文。` },
+      { role: 'user', content: buildCarePingPromptInput(user, context) },
     ], { temperature: 0.86, signal: options.signal, maxTokens: 100 }), type === 'recommend_track' ? 96 : 72)
     assertCarePingActive(options.signal)
     if (!body || isUnsafeBody(body)) return fallback
-    if (track && (!body.includes(track.title) || !body.includes(track.artist))) {
+    if (track && hasWrongBracketedTrackTitle(body, track)) return fallback
+    if (track && (!compactTrackText(body).includes(compactTrackText(track.title)) || !compactTrackText(body).includes(compactTrackText(track.artist)))) {
       const withTrack = `${body} ${track.artist}的《${track.title}》。`
-      return isUnsafeBody(withTrack) ? fallback : withTrack
+      return isCarePingBodyUsableForTrack(withTrack, track) ? withTrack : fallback
     }
     return body
   } catch (error) {
@@ -318,6 +420,10 @@ export async function runCarePingSlot(slot: TimeSlot, options: CarePingRunOption
   if (isCarePingsMutedToday()) {
     return { triggered: false, status: 'skipped', message: '今天已开启免打扰。' }
   }
+  const readiness = carePingReadiness()
+  if (!readiness.ready) {
+    return { triggered: false, status: 'skipped', message: readiness.reason ?? 'Echo 还在积累相处线索。' }
+  }
 
   try {
     await generateAndSendCarePing(pickPingType(), options)
@@ -342,6 +448,14 @@ export async function testCarePing(type?: PingType, options: CarePingRunOptions 
     assertCarePingActive(options.signal)
     return { ok: false, message: error instanceof Error ? error.message : '测试通知失败' }
   }
+}
+
+export const carePingTestHelpers = {
+  activeEventsForCarePrompt,
+  cleanBody,
+  isUnsafeBody,
+  isCarePingBodyUsableForTrack,
+  buildCarePingPromptInput,
 }
 
 export function muteToday(): { ok: boolean; message: string } {

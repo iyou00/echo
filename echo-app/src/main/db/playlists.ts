@@ -1,4 +1,5 @@
 import type { Track } from '../../types/ipc'
+import { trackIdentity } from '../../shared/trackIdentity'
 import { getDb } from './index'
 import { parseJson } from './json'
 
@@ -26,9 +27,23 @@ export function clearImportedTracksCache(): void {
 }
 
 export function importPlaylist(payload: PlaylistPayload): void {
-  getDb()
-    .prepare('INSERT INTO playlists_imported (user_id, source, name, raw_json) VALUES (current_user_id(), ?, ?, ?)')
-    .run(payload.source ?? 'json', payload.name, JSON.stringify(payload))
+  const source = payload.source?.trim() || 'json'
+  const hasStableSource = source.startsWith('netease:') || source.startsWith('file:')
+  const database = getDb()
+  database.transaction(() => {
+    if (hasStableSource) {
+      database
+        .prepare('DELETE FROM playlists_imported WHERE user_id = current_user_id() AND source = ?')
+        .run(source)
+    } else {
+      database
+        .prepare('DELETE FROM playlists_imported WHERE user_id = current_user_id() AND source = ? AND name = ?')
+        .run(source, payload.name)
+    }
+    database
+      .prepare('INSERT INTO playlists_imported (user_id, source, name, raw_json) VALUES (current_user_id(), ?, ?, ?)')
+      .run(source, payload.name, JSON.stringify({ ...payload, source }))
+  })()
   clearImportedTracksCache()
 }
 
@@ -42,8 +57,15 @@ export function getAllImportedTracks(): Track[] {
     const parsed = parseJson<PlaylistPayload>(row.raw_json, { name: '', tracks: [] }, 'playlists.raw_json')
     return Array.isArray(parsed.tracks) ? parsed.tracks : []
   })
-  importedTracksCache = { signature, tracks }
-  return tracks.map((track) => ({ ...track }))
+  const seen = new Set<string>()
+  const uniqueTracks = tracks.filter((track) => {
+    const key = trackIdentity(track)
+    if (!key || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+  importedTracksCache = { signature, tracks: uniqueTracks }
+  return uniqueTracks.map((track) => ({ ...track }))
 }
 
 export function searchImportedTracks(query: string, limit = 5): Track[] {

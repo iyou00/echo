@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import type { EchoApi } from '../types/ipc'
+import { friendlyOperationError } from '../shared/runtimeRecovery'
 import { ECHO_API_CONTRACT, assertEchoApiContract, assertEchoApiReadContract } from './mockContract'
 
 beforeAll(() => {
@@ -126,5 +127,21 @@ describe('assertEchoApiReadContract', () => {
   it('passes for mockEcho', async () => {
     const mock = await getMock()
     await expect(assertEchoApiReadContract(mock, 'mockEcho')).resolves.toBeUndefined()
+  })
+})
+
+describe('friendlyOperationError', () => {
+  it('removes Electron IPC details from user-facing failures', () => {
+    const error = new Error("Error invoking remote method 'scene:play': Error: fetch failed")
+    expect(friendlyOperationError(error)).toBe('网络连接没有接通，请检查网络后再试。')
+  })
+
+  it('keeps scene failures concise without Electron IPC prefixes', () => {
+    const error = new Error("Error invoking remote method 'scene:play': Error: Echo 这次没找到能播的歌。")
+    expect(friendlyOperationError(error, '场景启动失败，可以再试一次。')).toBe('场景启动失败，可以再试一次。')
+  })
+
+  it('maps expired music login to a recovery action', () => {
+    expect(friendlyOperationError(new Error('网易云 cookie 已过期'))).toBe('网易云登录已经失效，请重新登录网易云。')
   })
 })

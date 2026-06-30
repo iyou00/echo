@@ -1301,13 +1301,19 @@ button:disabled {
   text-align: center;
 }
 
-/* About link in settings */
-.about-link {
-  text-align: center;
+/* Support links in settings */
+.settings-support-links {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   margin: 16px 0 4px;
 }
 
-.about-link-btn {
+.settings-support-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   border: 0;
   background: transparent;
   color: var(--text-tertiary);
@@ -1317,8 +1323,21 @@ button:disabled {
   transition: color 0.15s ease;
 }
 
-.about-link-btn:hover {
+.settings-support-link:hover,
+.settings-support-link:focus-visible {
   color: var(--text-primary);
+}
+
+.settings-support-separator {
+  color: rgba(0, 0, 0, 0.2);
+  font-size: 11px;
+}
+
+.settings-support-status {
+  min-height: 16px;
+  color: var(--danger);
+  font-size: 11px;
+  text-align: center;
 }
 
 .onboarding-layer {
@@ -1399,6 +1418,26 @@ button:disabled {
   border-radius: 10px;
   background: var(--bg-card);
   border: 1px solid var(--border);
+}
+
+.semantic-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  margin: 0 0 12px;
+  padding: 7px 9px;
+  border: 1px solid rgba(112, 143, 86, 0.16);
+  border-radius: 8px;
+  background: rgba(246, 250, 239, 0.7);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.semantic-summary.warn {
+  color: var(--color-warning, #7a5a12);
+  background: rgba(255, 248, 224, 0.72);
 }
 
 .import-method-title {
@@ -1729,11 +1768,6 @@ button:disabled {
   transition: filter 0.4s ease, opacity 0.4s ease;
 }
 
-.portrait-content.out {
-  filter: blur(4px);
-  opacity: 0;
-}
-
 .portrait-content.loading {
   filter: none;
   opacity: 1;
@@ -1878,21 +1912,33 @@ button:disabled {
   to { opacity: 1; transform: translateY(0); }
 }
 
+.portrait-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 0.5px solid rgba(99, 153, 34, 0.14);
+}
+
 .portrait-sign {
-  margin-top: 12px;
+  min-width: 0;
   color: var(--text-tertiary);
   font-family: var(--font-mono);
   font-size: 10px;
-  text-align: right;
+  line-height: 1.6;
+  text-align: left;
 }
 
 .portrait-correction {
-  margin-top: 12px;
+  margin-top: 10px;
   display: flex;
   justify-content: flex-end;
 }
 
 .portrait-correction-link {
+  flex-shrink: 0;
   border: 0;
   background: transparent;
   color: var(--text-tertiary);
@@ -3623,6 +3669,42 @@ button:disabled {
 
 .settings-page .settings-row {
   margin-top: 16px;
+}
+
+.netease-phone-field {
+  position: relative;
+  margin-top: 16px;
+}
+
+.netease-phone-field .input {
+  padding-right: 92px;
+}
+
+.netease-code-btn {
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  transform: translateY(-50%);
+  min-width: 74px;
+  height: calc(100% - 10px);
+  border: 0;
+  border-left: 0.5px solid rgba(99, 153, 34, 0.2);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: rgba(99, 153, 34, 0.08);
+  color: var(--ayin-green-700);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.netease-code-btn:disabled {
+  color: var(--text-tertiary);
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.netease-code-btn:not(:disabled):hover {
+  background: rgba(99, 153, 34, 0.14);
+  color: var(--ayin-green-900);
 }
 
 .status-ind {
@@ -5683,13 +5765,17 @@ body {
 .profile-stats-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-bottom: 16px;
+  gap: 9px;
+  margin-bottom: 18px;
 }
 
 .profile-stat-card {
+  display: grid;
+  align-content: start;
+  grid-template-rows: auto auto 1fr;
+  min-height: 82px;
   min-width: 0;
-  padding: 9px 10px;
+  padding: 10px 11px;
   border: 0.5px solid rgba(99, 153, 34, 0.08);
   border-radius: var(--radius-md);
   background: rgba(245, 250, 237, 0.52);
@@ -5706,9 +5792,10 @@ body {
 
 .profile-stat-card strong {
   display: block;
-  margin-top: 3px;
+  margin-top: 4px;
   color: var(--ayin-green-900);
   font-size: 14px;
+  line-height: 1.35;
   font-weight: 620;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5717,21 +5804,22 @@ body {
 
 .profile-stat-card small {
   display: block;
-  margin-top: 2px;
+  margin-top: 4px;
   color: var(--text-secondary);
   font-size: 9.5px;
+  line-height: 1.45;
 }
 
 .profile-analysis-group {
-  margin-top: 16px;
+  margin-top: 18px;
 }
 
 .profile-analysis-group.compact {
-  margin-top: 14px;
+  margin-top: 16px;
 }
 
 .profile-analysis-title {
-  margin-bottom: 8px;
+  margin-bottom: 9px;
   color: var(--text-secondary);
 }
 

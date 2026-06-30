@@ -1,10 +1,32 @@
 import { type CSSProperties, useEffect, useRef, useState } from 'react'
 import { Pause, Play, RefreshCw, Settings } from 'lucide-react'
-import type { EchoApi, PlaybackState, ProfileEvidenceLevel, ProfileEvidenceSource, TasteProfile, Track } from '../../types/ipc'
+import type { EchoApi, PlaybackState, TasteProfile, Track } from '../../types/ipc'
 import type { AppPageProps } from '../appState'
 import { BrandLogo, EmptyState, Section } from '../components'
 import { latestRunningRuntimeTask, useRuntimeTasks } from '../hooks/useRuntimeTasks'
 import { stableHash } from '../../shared/deterministic'
+import { friendlyOperationError } from '../../shared/runtimeRecovery'
+import {
+  ERA_SCALE,
+  eraNeedleLeft,
+  findPortraitClueMatch,
+  hasProfileBehaviorEvidence,
+  percentDisplay,
+  profileChangeSectionCopy,
+  profileEnergyLine,
+  profileEvidenceSourceLabel,
+  profileItemIsPositiveDisplaySignal,
+  profileSignatureItemVisible,
+  profileItemHasBehaviorEvidence,
+  profileItemHasUserActionEvidence,
+  profileMoodLine,
+  profileAsPercent as asPercent,
+  profileSummaryCardMeta,
+  profileTrendLines,
+  profileWeightDisplay,
+  tempoPreferenceDisplay,
+  type ProfileStatsEvidence,
+} from './echoProfileDisplay'
 
 interface EchoProfileProps extends AppPageProps {
   echo: EchoApi
@@ -12,22 +34,6 @@ interface EchoProfileProps extends AppPageProps {
   setPlaybackState: (state: PlaybackState) => void
   refreshQueue: () => Promise<Track[]>
   refreshProfile: () => Promise<void>
-}
-
-function asPercent(value: number) {
-  if (!Number.isFinite(value)) return 0
-  return Math.max(0, Math.min(100, Math.round(value <= 1 ? value * 100 : value)))
-}
-
-function percentDisplay(value: number, minBar = 3) {
-  if (!Number.isFinite(value) || value <= 0) return { value: 0, label: '0%', bar: 0 }
-  const clamped = Math.max(0, Math.min(100, value))
-  const rounded = Math.round(clamped)
-  return {
-    value: rounded,
-    label: rounded === 0 ? '<1%' : `${rounded}%`,
-    bar: Math.max(minBar, rounded),
-  }
 }
 
 function displayDate(value?: string) {
@@ -41,60 +47,6 @@ type MoodItem = NonNullable<TasteProfile['display']>['moodItems'][number]
 
 type SignatureDisplayItem = NonNullable<TasteProfile['display']>['signatureItems'][number]
 
-const SIGNATURE_VARIANTS: Record<ProfileEvidenceSource, string[]> = {
-  favorite: [
-    '你亲手收藏过,这首会被我放在前排。',
-    '被你留过心,所以它在这里有位置。',
-    '收藏过的声音,我会记得更牢。',
-    '这首被你标记过,分量比普通播放更重。',
-  ],
-  loop: [
-    '你回头听过这首,它不是路过。',
-    '循环播放过,像一条熟路。',
-    '重复拿起过这首,有回声。',
-    '你反复听过它,像一个稳的回头点。',
-  ],
-  played: [
-    '完整听过,它通过了你的耐心。',
-    '从头听到尾过,这条线索够稳。',
-    '认真听完过,耳朵很少抗拒它。',
-    '完整播放过,不算路过。',
-  ],
-  scene: [
-    '在某个场景里接上过,这条线索很清楚。',
-    '某个场景里出现过,像一枚书签。',
-    '和某个场景贴得比较近。',
-    '在特定时刻被记下过。',
-  ],
-  semantic: [
-    '偏向某种情绪的线索。',
-    '落在情绪光谱的某一侧。',
-    '更像某种心情时会靠近的声音。',
-    '留下了某种情绪的主要轮廓。',
-  ],
-  imported: [
-    '来自你的歌单,先浮上来的那一批。',
-    '歌单里比较稳的一枚锚点。',
-    '导入时就在,是旧歌单的底色之一。',
-    '从你的歌单里留下来的坐标。',
-    '歌单里先被注意到的一首。',
-    '它来自你的旧歌单,有稳定的位置。',
-  ],
-  fallback: [
-    '我还在观察它和你的关系。',
-    '线索还浅,先放在这里。',
-    '暂时是一枚待确认的坐标。',
-    '我会继续听它和你的距离。',
-  ],
-}
-
-function signatureNote(track: Track, source: ProfileEvidenceSource, note?: string, _count?: number, evidenceLevel?: ProfileEvidenceLevel): string {
-  if (note && evidenceLevel === 'strong') return note
-  const variants = SIGNATURE_VARIANTS[source] ?? SIGNATURE_VARIANTS.fallback
-  const key = `${track.neteaseId ?? track.id ?? ''}:${track.title}:${track.artist}`
-  return variants[stableHash(key) % variants.length]
-}
-
 function moodCloudStyle(mood: MoodItem, index: number): CSSProperties {
   const percent = asPercent(mood.frequency)
   const shift = (stableHash(`${mood.tag}:${index}`) % 9) - 4
@@ -107,17 +59,46 @@ function moodCloudStyle(mood: MoodItem, index: number): CSSProperties {
   } as CSSProperties
 }
 
-function topMoodLine(moods: MoodItem[]) {
-  const top = moods[0]
-  if (!top) return ''
-  const percent = asPercent(top.frequency)
-  if (percent >= 45) return `最近氛围：${top.tag}`
-  return `氛围线索：${top.tag}`
+type StatEvidenceKind = 'era' | 'energy' | 'tempo'
+
+function statsEvidence(profile?: TasteProfile | null): ProfileStatsEvidence | undefined {
+  return profile?.profile_meta?.statsEvidence
+}
+
+function statCounts(evidence: ProfileStatsEvidence | undefined, kind: StatEvidenceKind) {
+  if (!evidence) return { imported: undefined as number | undefined, behavior: undefined as number | undefined }
+  if (kind === 'era') return { imported: evidence.eraImportedCount, behavior: evidence.eraBehaviorCount }
+  if (kind === 'energy') return { imported: evidence.energyImportedCount, behavior: evidence.energyBehaviorCount }
+  return { imported: evidence.tempoImportedCount, behavior: evidence.tempoBehaviorCount }
+}
+
+function hasStatSignal(evidence: ProfileStatsEvidence | undefined, kind: StatEvidenceKind, hasLegacyValue: boolean): boolean {
+  const { imported, behavior } = statCounts(evidence, kind)
+  if (imported == null || behavior == null) return hasLegacyValue
+  return imported + behavior > 0
+}
+
+function statMetaLabel(evidence: ProfileStatsEvidence | undefined, kind: StatEvidenceKind, fallback: string): string {
+  const { imported, behavior } = statCounts(evidence, kind)
+  if (imported == null || behavior == null) return fallback
+  if (behavior >= 3) return `${Math.round(behavior)} 条播放/反馈`
+  if (behavior > 0) return `${Math.round(behavior)} 条行为线索`
+  if (imported >= 5) return '来自导入歌单'
+  if (imported > 0) return '导入线索偏少'
+  return '继续观察'
 }
 
 function eraEvidenceLine(profile: TasteProfile, era: string): string {
   const percent = asPercent(profile.era_preference?.[era] ?? 0)
+  const evidence = statsEvidence(profile)
+  const { imported, behavior } = statCounts(evidence, 'era')
   if (percent <= 0) return '这个年代暂时没有足够线索。'
+  if (behavior != null && imported != null) {
+    if (behavior >= 3) return `这个频段占比 ${percent}%，主要来自你最近的播放和反馈。`
+    if (behavior > 0) return `这个频段占比 ${percent}%，已经有少量行为线索。`
+    if (imported >= 5) return `这个频段占比 ${percent}%，目前主要来自导入歌单。`
+    return `这个频段占比 ${percent}%，线索还少。`
+  }
   if (percent >= 35) return `这个频段占比 ${percent}%，已经是你歌单里的明显线索。`
   if (percent >= 15) return `这个频段占比 ${percent}%，有一些稳定出现的声音。`
   return `这个频段占比 ${percent}%，目前只是轻微信号。`
@@ -135,9 +116,24 @@ function energyLabel(percent: number) {
   return '中等能量'
 }
 
+function signalStrengthLabel(value: number) {
+  const percent = asPercent(value)
+  if (percent >= 70) return '线索很强'
+  if (percent >= 45) return '线索稳定'
+  if (percent > 0) return '轻微信号'
+  return '还在观察'
+}
+
+function discoveryLabel(value: number) {
+  const percent = asPercent(value)
+  if (percent >= 64) return '更愿意探索'
+  if (percent <= 38) return '偏熟悉安全'
+  return '探索适中'
+}
+
 export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, refreshQueue, refreshProfile }: EchoProfileProps) {
   const [busy, setBusy] = useState(false)
-  const [phase, setPhase] = useState<'idle' | 'out' | 'loading' | 'in'>('idle')
+  const [phase, setPhase] = useState<'idle' | 'loading' | 'in'>('idle')
   const [playingKey, setPlayingKey] = useState('')
   const playingKeyRef = useRef('')
   const statusTimerRef = useRef<ReturnType<typeof setTimeout>>()
@@ -176,9 +172,13 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
   // Listen to Global Playback Changes for persistent HUD
   useEffect(() => {
     let active = true
-    echo.playback.getState().then((state) => {
-      if (active) setLocalPlaybackState(state)
-    })
+    echo.playback.getState()
+      .then((state) => {
+        if (active) setLocalPlaybackState(state)
+      })
+      .catch(() => {
+        if (active) setLocalPlaybackState(null)
+      })
     const unsubscribe = echo.playback.onStateChanged((state) => {
       if (active) setLocalPlaybackState(state)
     })
@@ -196,17 +196,12 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
     }
   }, [])
 
-  const portraitUpdatedAt = profile?.profile_meta?.updatedAt ?? profile?.profile_meta?.structuredUpdatedAt
+  const portraitUpdatedAt = profile?.profile_meta?.portraitUpdatedAt ?? profile?.profile_meta?.updatedAt ?? profile?.profile_meta?.structuredUpdatedAt
   const display = profile?.display
   
   const signatureItems: SignatureDisplayItem[] = profile
     ? (display?.signatureItems?.length ? display.signatureItems : profile.signature_tracks.slice(0, 7).map((track) => ({ track, note: track.reason, evidenceLevel: 'weak' as const, source: 'fallback' as const })))
     : []
-  
-  const signatureDisplay = signatureItems.map((item) => ({
-    ...item,
-    displayNote: signatureNote(item.track, item.source, item.note, item.count, item.evidenceLevel),
-  }))
 
   const genreItems = profile
     ? (display?.genreItems?.length ? display.genreItems : profile.genres.map((genre) => ({ ...genre, representativeArtists: [] as string[], note: undefined, evidenceLevel: 'weak' as const, source: 'fallback' as const })))
@@ -215,6 +210,7 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
   const artistItems = profile
     ? (display?.artistItems?.length ? display.artistItems : profile.artists.map((artist) => ({ name: artist.name, affinity: artist.affinity, note: artist.notes ?? '还在观察', evidenceLevel: 'weak' as const, source: 'fallback' as const })))
     : []
+  const positiveArtistItems = artistItems.filter(profileItemIsPositiveDisplaySignal)
 
   const artistNamesSet = new Set(artistItems.map(a => a.name.trim().toLowerCase()))
 
@@ -225,15 +221,9 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
   })
 
   const rawDisplayedGenres = genreItemsFiltered.slice(0, 5)
-  const totalGenreWeight = genreItemsFiltered.reduce((sum, genre) => {
-    return sum + (Number.isFinite(genre.weight) && genre.weight > 0 ? genre.weight : 0)
-  }, 0)
 
   const displayedGenres = rawDisplayedGenres.map((genre) => {
-    const percent = totalGenreWeight > 0 && Number.isFinite(genre.weight) && genre.weight > 0
-      ? (genre.weight / totalGenreWeight) * 100
-      : 0
-    const display = percentDisplay(percent)
+    const display = profileWeightDisplay(genre.weight)
     return {
       ...genre,
       displayPercent: display.value,
@@ -276,10 +266,6 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
     setBusy(true)
     clearStatus()
     try {
-      setPhase('out')
-      await sleep(400)
-      if (!mountedRef.current) return
-
       setPhase('loading')
       await Promise.all([echo.taste.regeneratePortrait(), sleep(900)])
       try {
@@ -297,6 +283,11 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
       setPhase('in')
       await sleep(400)
       if (!mountedRef.current) return
+      try {
+        await refreshProfile()
+      } catch {
+        // The saved fallback profile is best-effort; keep the friendly error visible if refresh fails too.
+      }
       setPhase('idle')
       showStatus('error', portraitFriendlyError(error))
     } finally {
@@ -313,7 +304,7 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
       setPlaybackState(next)
       await refreshQueue()
     } catch (error) {
-      showStatus('error', error instanceof Error ? error.message : '播放失败', 3000)
+      showStatus('error', friendlyOperationError(error, '这首歌暂时没播放出来。'), 3000)
     } finally {
       if (playingKeyRef.current === key) setPlayingKey('')
     }
@@ -325,6 +316,7 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
   const isPlaying = localPlaybackState?.status === 'playing'
   const currentTrack = localPlaybackState?.current
   const togglePlayback = async () => {
+    if (!currentTrack) return
     try {
       let nextState
       if (isPlaying) {
@@ -339,17 +331,23 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
     }
   }
 
-  // Highlight artist and genre clue evidence triggers
   const triggerClueEvidence = (term: string) => {
-    const matchedArtist = artistItems.find(a => term.toLowerCase().includes(a.name.toLowerCase()))
-    const matchedGenre = genreItems.find(g => term.toLowerCase().includes(g.name.toLowerCase()))
+    const match = findPortraitClueMatch(
+      term,
+      artistItems.map((artist) => artist.name),
+      genreItems.map((genre) => genre.name),
+    )
 
-    if (matchedArtist) {
-      showStatus('success', `证据线索：${matchedArtist.name} · ${matchedArtist.note ?? '听歌积累的品味碎片'}`, 4000)
-    } else if (matchedGenre) {
-      showStatus('success', `流派偏好：${matchedGenre.name} · ${matchedGenre.note ?? '你歌单中的主流底色'}`, 4000)
+    if (match?.kind === 'artist') {
+      const matchedArtist = artistItems.find((artist) => artist.name === match.name)
+      if (!matchedArtist) return
+      showStatus('success', `${matchedArtist.name} · ${matchedArtist.note ?? '从你的听歌里慢慢记下来的'}`, 4000)
+    } else if (match?.kind === 'genre') {
+      const matchedGenre = genreItems.find((genre) => genre.name === match.name)
+      if (!matchedGenre) return
+      showStatus('success', `${matchedGenre.name} · ${matchedGenre.note ?? '你歌单里的一个稳定方向'}`, 4000)
     } else {
-      showStatus('success', `Echo 听音洞察：来自你的日常音乐互动证据。`, 3000)
+      showStatus('success', '这是我从你平时听歌里慢慢拼出来的。', 3000)
     }
   }
 
@@ -368,32 +366,17 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
         showStatus('error', result.message, 3000)
       }
     } catch (error) {
-      showStatus('error', error instanceof Error ? error.message : '纠正保存失败', 3000)
+      showStatus('error', friendlyOperationError(error, '这次纠正没有记下来，请稍后再试。'), 3000)
     } finally {
       if (mountedRef.current) setCorrectionSaving(false)
     }
   }
 
-  const tunerNeedleLefts: Record<string, string> = {
-    '80s': '10%',
-    '90s': '30%',
-    '00s': '50%',
-    '10s': '70%',
-    '20s': '90%'
-  }
-
   // Filter signature tracks only by explicit evidence.
-  const filteredSignatureDisplay = signatureDisplay.filter((item) => {
-    if (activeMoodFilter === 'all') return true
-    return (
-      (item.track.profileEvidence?.moods?.includes(activeMoodFilter)) ||
-      (item.track.semantic?.moods?.includes(activeMoodFilter)) ||
-      (item.note?.includes(activeMoodFilter)) ||
-      (item.track.reason?.includes(activeMoodFilter))
-    )
-  })
+  const filteredSignatureDisplay = signatureItems.filter((item) => profileSignatureItemVisible(item, activeMoodFilter))
 
-  const energyKnown = profile?.energy_preference != null
+  const evidence = statsEvidence(profile)
+  const energyKnown = hasStatSignal(evidence, 'energy', profile?.energy_preference != null)
   const energyValue = profile?.energy_preference ?? 0
   const energyPercent = asPercent(energyValue)
   const eraEntries = profile?.era_preference
@@ -402,12 +385,9 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
         .sort((a, b) => b[1] - a[1])
     : []
   const topEra = eraEntries[0]
-  const tempoEntries = profile?.tempo_preference
-    ? (Object.entries(profile.tempo_preference) as Array<['slow' | 'medium' | 'fast', number]>)
-        .filter(([, value]) => Number.isFinite(value) && value > 0)
-        .sort((a, b) => b[1] - a[1])
-    : []
+  const tempoEntries = tempoPreferenceDisplay(profile?.tempo_preference)
   const topTempo = tempoEntries[0]
+  const tempoKnown = hasStatSignal(evidence, 'tempo', Boolean(topTempo))
   const sceneSource = profile?.scenes?.filter((scene) => scene.tag.trim() && scene.frequency > 0).slice(0, 5) ?? []
   const sceneTotal = sceneSource.reduce((sum, scene) => sum + scene.frequency, 0)
   const sceneItems = sceneSource.map((scene) => {
@@ -418,22 +398,31 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
       barPercent: display.bar,
     }
   })
-  const risingGenres = genreItemsFiltered.filter((genre) => genre.trend === 'up').slice(0, 3)
-  const fallingGenres = genreItemsFiltered.filter((genre) => genre.trend === 'down').slice(0, 2)
-  const trendLines = [
-    risingGenres.length ? `最近更明显：${risingGenres.map((genre) => genre.name).join('、')}` : '',
-    fallingGenres.length ? `最近变少：${fallingGenres.map((genre) => genre.name).join('、')}` : '',
-    topMoodLine(moodItems),
-    energyKnown ? `整体能量：${energyLabel(energyPercent)}` : '',
-  ].filter(Boolean)
+  const trendLines = profileTrendLines(genreItemsFiltered, {
+    evidence,
+    moodLine: profileMoodLine(moodItems, evidence),
+    energyLine: energyKnown ? profileEnergyLine(energyLabel(energyPercent), evidence) : '',
+  })
+  const hasDisplayUserActionEvidence = [
+    ...signatureItems,
+    ...genreItemsFiltered,
+    ...artistItems,
+    ...moodItems,
+  ].some(profileItemHasUserActionEvidence)
+  const hasBehaviorEvidence = hasProfileBehaviorEvidence(evidence) || hasDisplayUserActionEvidence
+  const hasSignatureBehaviorEvidence = signatureItems.some(profileItemHasBehaviorEvidence)
   const statsCards = [
-    { label: '主要流派', value: displayedGenres[0]?.name ?? '线索不足', meta: displayedGenres[0] ? displayedGenres[0].displayPercentLabel : '继续听几首会更准' },
-    { label: '常听艺人', value: artistItems[0]?.name ?? '线索不足', meta: artistItems[0] ? `${asPercent(artistItems[0].affinity)}%` : '还在观察' },
-    { label: '氛围倾向', value: moodItems[0]?.tag ?? '线索不足', meta: moodItems[0] ? `${asPercent(moodItems[0].frequency)}%` : '还在观察' },
-    { label: '年代偏好', value: topEra?.[0] ?? '线索不足', meta: topEra ? `${asPercent(topEra[1])}%` : '还在观察' },
-    { label: '节奏速度', value: topTempo ? tempoLabel(topTempo[0]) : '线索不足', meta: topTempo ? `${asPercent(topTempo[1])}%` : '还在观察' },
-    { label: '能量水平', value: energyKnown ? energyLabel(energyPercent) : '线索不足', meta: energyKnown ? `${energyPercent}%` : '还在观察' },
+    { label: '主要流派', value: displayedGenres[0]?.name ?? '线索不足', meta: displayedGenres[0] ? profileSummaryCardMeta(displayedGenres[0], displayedGenres[0].displayPercentLabel) : '继续听几首会更准' },
+    { label: '艺人线索', value: positiveArtistItems[0]?.name ?? '线索不足', meta: positiveArtistItems[0] ? profileSummaryCardMeta(positiveArtistItems[0], signalStrengthLabel(positiveArtistItems[0].affinity)) : '还在观察' },
+    { label: '氛围倾向', value: moodItems[0]?.tag ?? '线索不足', meta: moodItems[0] ? profileSummaryCardMeta(moodItems[0], `${asPercent(moodItems[0].frequency)}%`) : '还在观察' },
+    { label: '年代偏好', value: topEra?.[0] ?? '线索不足', meta: topEra ? statMetaLabel(evidence, 'era', `${asPercent(topEra[1])}%`) : '还在观察' },
+    { label: '节奏速度', value: tempoKnown && topTempo ? tempoLabel(topTempo.tempo) : '线索不足', meta: tempoKnown && topTempo ? statMetaLabel(evidence, 'tempo', topTempo.label) : '还在观察' },
+    { label: '能量水平', value: energyKnown ? energyLabel(energyPercent) : '线索不足', meta: energyKnown ? statMetaLabel(evidence, 'energy', signalStrengthLabel(energyValue)) : '还在观察' },
   ]
+  const signatureSectionLabel = activeMoodFilter === 'all'
+    ? (hasSignatureBehaviorEvidence ? '代表歌曲' : '歌单代表')
+    : `${activeMoodFilter} · ${hasSignatureBehaviorEvidence ? '代表歌曲' : '歌单代表'}`
+  const changeSectionCopy = profileChangeSectionCopy(hasBehaviorEvidence)
 
   // Segments calculate for 30 bars Bottom Seeker HUD
   const duration = localPlaybackState?.duration ?? 180
@@ -474,21 +463,19 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
               <div className={`portrait-content ${portraitPhase}`}>
                 {portraitPhase === 'idle' || portraitPhase === 'in' ? (
                   <p className="portrait-text">
-                    {/* Make clue terms inside echo portrait highlightable on click */}
                     {profile.echo_portrait.split(/(，|。|、|！|？|”|“)/).map((segment, index) => {
-                      // Detect key artists or genres to highlight as evidence clues
-                      const cleanSegment = segment.replace(/["'「」“]/g, '').trim()
-                      const hasClue = cleanSegment.length > 1 && (
-                        artistItems.some(a => cleanSegment.toLowerCase().includes(a.name.toLowerCase())) ||
-                        genreItems.some(g => cleanSegment.toLowerCase().includes(g.name.toLowerCase()))
+                      const match = findPortraitClueMatch(
+                        segment,
+                        artistItems.map((artist) => artist.name),
+                        genreItems.map((genre) => genre.name),
                       )
 
-                      if (hasClue) {
+                      if (match) {
                         return (
                           <span 
                             key={index} 
                             className="clue-term"
-                            onClick={() => triggerClueEvidence(cleanSegment)}
+                            onClick={() => triggerClueEvidence(segment)}
                           >
                             {segment}
                           </span>
@@ -507,16 +494,19 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
                   </div>
                 )}
               </div>
-              <div className="portrait-sign">
-                — Echo · {portraitUpdatedAt ? `写于 ${displayDate(portraitUpdatedAt)}` : '初次见面'}
-                {status !== 'idle' && <span className={`portrait-status ${status}`}>{statusMessage}</span>}
-              </div>
-              <div className="portrait-correction">
-                {!correctionOpen ? (
+              <div className="portrait-meta-row">
+                <div className="portrait-sign">
+                  — Echo · {portraitUpdatedAt ? `写于 ${displayDate(portraitUpdatedAt)}` : '初次见面'}
+                  {status !== 'idle' && <span className={`portrait-status ${status}`}>{statusMessage}</span>}
+                </div>
+                {!correctionOpen && (
                   <button className="portrait-correction-link" type="button" onClick={() => setCorrectionOpen(true)}>
                     这段理解不准
                   </button>
-                ) : (
+                )}
+              </div>
+              {correctionOpen && (
+                <div className="portrait-correction">
                   <div className="portrait-correction-box">
                     <textarea
                       value={correctionDraft}
@@ -533,25 +523,25 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
                       </button>
                     </div>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
             </Section>
 
-            <Section label="最近变化">
+            <Section label={changeSectionCopy.label}>
               <div className="profile-change-list">
                 {trendLines.length > 0 ? trendLines.map((line) => (
                   <div className="profile-change-item" key={line}>{line}</div>
                 )) : (
-                  <div className="profile-change-item muted">最近还没有明显变化，画像会继续根据播放、收藏和切歌更新。</div>
+                  <div className="profile-change-item muted">{changeSectionCopy.emptyText}</div>
                 )}
               </div>
               {eraEntries.length > 0 && (
                 <div className="profile-analysis-group compact">
                   <div className="profile-analysis-title">年代偏好</div>
                   <div className="tuner-dial">
-                    <div className="tuner-needle" style={{ left: tunerNeedleLefts[tunerActiveEra] ?? '50%' }} />
+                    <div className="tuner-needle" style={{ left: eraNeedleLeft(tunerActiveEra) }} />
                     <div className="tuner-scale">
-                      {['80s', '90s', '00s', '10s', '20s'].map((era) => {
+                      {ERA_SCALE.map((era) => {
                         const isSelected = tunerActiveEra === era
                         return (
                           <div
@@ -583,24 +573,24 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
                     <div className="battery-fill" style={{ width: `${energyKnown ? energyPercent : 0}%` }} />
                   </div>
                   <p className="energy-desc">
-                    {energyKnown ? `${energyLabel(energyPercent)} · ${topTempo ? tempoLabel(topTempo[0]) : '节奏还在观察'}` : '能量线索还不够，我会按真实播放继续观察。'}
+                    {energyKnown ? `${energyLabel(energyPercent)} · ${tempoKnown && topTempo ? tempoLabel(topTempo.tempo) : '节奏还在观察'}` : '能量线索还不够，我会按真实播放继续观察。'}
                   </p>
                 </div>
                 {showEnergyDetails && (
                   <div className="energy-dropdown">
                     <div className="energy-drop-item">
                       <span>能量水平</span>
-                      <span className="energy-drop-val">{energyKnown ? `${energyPercent}%` : '线索不足'}</span>
+                      <span className="energy-drop-val">{energyKnown ? signalStrengthLabel(energyValue) : '线索不足'}</span>
                     </div>
-                    {tempoEntries.map(([tempo, value]) => (
-                      <div className="energy-drop-item" key={tempo}>
-                        <span>{tempoLabel(tempo)}</span>
-                        <span className="energy-drop-val">{asPercent(value)}%</span>
+                    {tempoKnown && tempoEntries.map((entry) => (
+                      <div className="energy-drop-item" key={entry.tempo}>
+                        <span>{tempoLabel(entry.tempo)}</span>
+                        <span className="energy-drop-val">{entry.label}</span>
                       </div>
                     ))}
                     <div className="energy-drop-item" style={{ borderTop: '0.5px dashed var(--border)', paddingTop: '4px', marginTop: '4px' }}>
                       <span>探索倾向</span>
-                      <span className="energy-drop-val">{asPercent(profile.discovery_appetite ?? 0.5)}%</span>
+                      <span className="energy-drop-val">{discoveryLabel(profile.discovery_appetite ?? 0.5)}</span>
                     </div>
                   </div>
                 )}
@@ -641,16 +631,16 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
                   ))}
                 </div>
               )}
-              {artistItems.length > 0 && (
+              {positiveArtistItems.length > 0 && (
                 <div className="profile-analysis-group">
-                  <div className="profile-analysis-title">常听艺人</div>
+                  <div className="profile-analysis-title">艺人线索</div>
                   <div className="artist-list">
-                    {artistItems.slice(0, 5).map((artist, index) => (
+                    {positiveArtistItems.slice(0, 5).map((artist, index) => (
                       <div className={`artist-item evidence-${artist.evidenceLevel}`} key={artist.name}>
                         <span className="artist-rank">{String(index + 1).padStart(2, '0')}</span>
                         <div className="artist-name">
                           {artist.name}
-                          <small>{artist.note ?? '还在观察'}</small>
+                          <small>{artist.note ?? profileEvidenceSourceLabel(artist)}</small>
                         </div>
                         <div className="affinity-bar">
                           <span className="affinity-fill" style={{ width: `${asPercent(artist.affinity)}%` }} />
@@ -691,7 +681,7 @@ export function EchoProfilePage({ echo, navigate, profile, setPlaybackState, ref
               )}
             </Section>
 
-            <Section label={activeMoodFilter === 'all' ? '代表歌曲' : `${activeMoodFilter} · 代表歌曲`}>
+            <Section label={signatureSectionLabel}>
               <div className="signature-list">
                 {filteredSignatureDisplay.length === 0 ? (
                   <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', padding: '16px 0', textAlign: 'center', fontStyle: 'italic' }}>

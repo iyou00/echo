@@ -23,6 +23,22 @@ function hasUsableFile(filePath: string): boolean {
   }
 }
 
+function hasSqliteHeader(filePath: string): boolean {
+  if (!hasUsableFile(filePath)) return false
+  try {
+    const handle = fs.openSync(filePath, 'r')
+    try {
+      const header = Buffer.alloc(16)
+      const bytesRead = fs.readSync(handle, header, 0, header.length, 0)
+      return bytesRead === header.length && header.toString('utf8') === 'SQLite format 3\u0000'
+    } finally {
+      fs.closeSync(handle)
+    }
+  } catch {
+    return false
+  }
+}
+
 function removeDirQuietly(dir: string): void {
   try {
     fs.rmSync(dir, { recursive: true, force: true })
@@ -39,7 +55,7 @@ function copyLegacyDataToTemp(legacyDir: string, tempDir: string): string {
   copyIfExists(`${legacyDb}-wal`, `${tempDb}-wal`)
   copyIfExists(`${legacyDb}-shm`, `${tempDb}-shm`)
   copyIfExists(path.join(legacyDir, 'seals'), path.join(tempDir, 'seals'))
-  if (!hasUsableFile(tempDb)) throw new Error('legacy database copy is empty')
+  if (!hasSqliteHeader(tempDb)) throw new Error('legacy database copy is invalid')
   return tempDb
 }
 
@@ -66,8 +82,8 @@ export function migrateLegacyDataDir(targetDir: string, legacyDir = legacyDataDi
   if (path.resolve(legacyDir) === path.resolve(targetDir)) return true
   const legacyDb = path.join(legacyDir, 'echo.db')
   const targetDb = path.join(targetDir, 'echo.db')
-  if (!hasUsableFile(legacyDb)) return true
-  if (hasUsableFile(targetDb)) return true
+  if (!hasSqliteHeader(legacyDb)) return true
+  if (hasSqliteHeader(targetDb)) return true
 
   const tempDir = path.join(targetDir, `.legacy-migration-${process.pid}`)
   try {

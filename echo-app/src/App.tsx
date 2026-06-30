@@ -12,7 +12,25 @@ import { FirstRunWelcome } from './renderer/components/FirstRunWelcome'
 import { Player } from './renderer/components/Player'
 import { HeaderAvatar, WindowControls } from './renderer/components'
 import { pageLabels } from './renderer/labels'
-import { type AppPageProps, type PageKey, useAppState } from './renderer/appState'
+import {
+  isVoiceContinuousActive,
+  scenePlaybackStatePatch,
+  voiceContinuousStatePatch,
+  type AppPageProps,
+  type PageKey,
+  useAppState,
+} from './renderer/appState'
+import { friendlyOperationError } from './shared/runtimeRecovery'
+import {
+  getOnboardingDisplayState,
+  hasConfiguredLlm,
+  isOnboardingComplete,
+  onboardingCompletionPatchesIfReady,
+  onboardingPatchesAfterImport,
+  onboardingPatchesAfterLlmReady,
+} from './shared/onboardingPolicy'
+
+const SCENE_CONTINUATION_RETRY_DELAYS_MS = [8000, 20_000]
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
   state = { hasError: false }
@@ -25,7 +43,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
       return (
         <div style={{ padding: 32, textAlign: 'center', color: '#666' }}>
           <p>Echo 遇到了一个意外错误。</p>
-          <button onClick={() => this.setState({ hasError: false })} style={{ marginTop: 12, padding: '6px 16px', cursor: 'pointer' }}>重试</button>
+          <button onClick={() => window.location.reload()} style={{ marginTop: 12, padding: '6px 16px', cursor: 'pointer' }}>重新载入</button>
         </div>
       )
     }
@@ -42,6 +60,10 @@ function App() {
   const [state, dispatch] = useAppState()
   const handledImportTaskIdsRef = useRef(new Set<string>())
   const playbackNoticeTimerRef = useRef<number | null>(null)
+  const sceneRetryTimerRef = useRef<number | null>(null)
+  const sceneRetryAttemptsRef = useRef(0)
+  const onboardingDeferredForSessionRef = useRef(false)
+  const voiceContinuousRef = useRef(false)
   const {
     page,
     settings,
@@ -68,6 +90,16 @@ function App() {
 
   const setPage = useCallback((page: PageKey) => dispatch({ page }), [dispatch])
   const setSettings = useCallback((settings: Settings | null) => dispatch({ settings }), [dispatch])
+
+  const resetPlaybackSnapshot = useCallback((): PlaybackState => ({
+    current: null,
+    position: 0,
+    duration: 0,
+    status: 'idle',
+    volume: 100,
+    queue: [],
+    history: [],
+  }), [])
   const setPlaybackState = useCallback((playbackState: PlaybackState) => dispatch({ playbackState }), [dispatch])
   const showPlaybackNotice = useCallback((message: string, autoHideMs = 5000) => {
     if (playbackNoticeTimerRef.current !== null) {
@@ -85,7 +117,12 @@ function App() {
 
   useEffect(() => () => {
     if (playbackNoticeTimerRef.current !== null) window.clearTimeout(playbackNoticeTimerRef.current)
+    if (sceneRetryTimerRef.current !== null) window.clearTimeout(sceneRetryTimerRef.current)
   }, [])
+
+  useEffect(() => {
+    voiceContinuousRef.current = voiceContinuous
+  }, [voiceContinuous])
 
   const hasLlmConfig = Boolean(settings?.llm.baseUrl && settings.llm.apiKey && settings.llm.model)
 
@@ -102,7 +139,11 @@ function App() {
 
   const refreshScene = useCallback(async (): Promise<ActiveScene | null> => {
     const next = await echo.scene.getCurrent()
-    dispatch({ currentScene: next })
+    dispatch((current) => {
+      if (!next) return { currentScene: null }
+      if (current.voiceContinuous) return {}
+      return scenePlaybackStatePatch(next)
+    })
     return next
   }, [dispatch, echo])
 
@@ -113,9 +154,30 @@ function App() {
       dispatch({ playbackNotice: '' })
     } catch (error) {
       logAppAsyncError('reload settings', error)
-      dispatch({ playbackNotice: error instanceof Error ? error.message : '设置读取失败' })
+      dispatch({ playbackNotice: friendlyOperationError(error, '设置读取失败，请重新读取。') })
     }
   }, [dispatch, echo, setSettings])
+
+  const handleDataReset = useCallback((nextSettings: Settings) => {
+    clearSceneContinuationRetry()
+    onboardingDeferredForSessionRef.current = false
+    handledImportTaskIdsRef.current.clear()
+    const onboardingDisplay = getOnboardingDisplayState(nextSettings, false)
+    dispatch({
+      settings: nextSettings,
+      profile: null,
+      queue: [],
+      currentScene: null,
+      importTask: null,
+      playbackState: resetPlaybackSnapshot(),
+      latestYinyiDate: '',
+      playbackNotice: '',
+      careMuteToast: false,
+      voiceContinuous: false,
+      firstRunWelcomeOpen: onboardingDisplay.firstRunWelcomeOpen,
+      onboardingOpen: onboardingDisplay.onboardingOpen,
+    })
+  }, [dispatch, resetPlaybackSnapshot])
 
   useEffect(() => {
     let alive = true
@@ -164,15 +226,21 @@ function App() {
         if (!nextSettings) {
           dispatch({ page: 'settings' })
         } else {
-          const isExistingUser = Boolean(nextSettings.meta.onboardingCompletedAt) || Boolean(nextTaste.profile)
-          const shouldShowFirstRunWelcome = !isExistingUser && !nextSettings.meta.firstRunWelcomeCompletedAt
+          const llmReady = hasConfiguredLlm(nextSettings)
+          const completionPatches = onboardingCompletionPatchesIfReady(nextSettings, Boolean(nextTaste.profile))
+          if (completionPatches.length > 0) {
+            echo.settings.updateBatch(completionPatches)
+              .then(setSettings)
+              .catch((error) => logAppAsyncError('backfill onboarding completion', error))
+          }
+          const onboardingDisplay = getOnboardingDisplayState(nextSettings, Boolean(nextTaste.profile))
           dispatch({
-            firstRunWelcomeOpen: shouldShowFirstRunWelcome,
-            onboardingOpen: !shouldShowFirstRunWelcome && !nextSettings.meta.onboardingCompletedAt && !nextTaste.profile,
+            firstRunWelcomeOpen: onboardingDisplay.firstRunWelcomeOpen,
+            onboardingOpen: onboardingDisplay.onboardingOpen,
           })
           const isRealElectron = Boolean(window.echo)
-          const needsOnboarding = !shouldShowFirstRunWelcome && !nextSettings.meta.onboardingCompletedAt && !nextTaste.profile
-          if (!needsOnboarding && isRealElectron && (!nextSettings.llm.baseUrl || !nextSettings.llm.apiKey || !nextSettings.llm.model)) {
+          const onboardingActive = onboardingDisplay.firstRunWelcomeOpen || onboardingDisplay.onboardingOpen
+          if (!onboardingActive && isRealElectron && !llmReady) {
             dispatch({ page: 'settings' })
           }
         }
@@ -181,7 +249,7 @@ function App() {
         if (!alive) return
         dispatch({
           page: 'settings',
-          playbackNotice: error instanceof Error ? error.message : 'Echo 启动初始化失败',
+          playbackNotice: friendlyOperationError(error, 'Echo 启动初始化失败，请重新载入。'),
         })
       } finally {
         if (alive) dispatch({ bootReady: true })
@@ -192,7 +260,7 @@ function App() {
     return () => {
       alive = false
     }
-  }, [dispatch, echo])
+  }, [dispatch, echo, setSettings])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -203,7 +271,11 @@ function App() {
 
   useEffect(() => {
     return echo.scene.onChanged((next) => {
-      dispatch({ currentScene: next })
+      dispatch((current) => {
+        if (!next) return { currentScene: null }
+        if (current.voiceContinuous) return {}
+        return scenePlaybackStatePatch(next)
+      })
     })
   }, [dispatch, echo])
 
@@ -227,11 +299,8 @@ function App() {
     handledImportTaskIdsRef.current.add(importTask.id)
     refreshProfile().catch((error) => logAppAsyncError('refresh profile after import', error))
     refreshQueue().catch((error) => logAppAsyncError('refresh queue after import', error))
-    if (settings.meta.onboardingStep === 'playlist' || !settings.meta.onboardingCompletedAt) {
-      const updates: SettingUpdatePatch[] = [
-        { path: 'meta.onboardingStep' as const, value: 'done' },
-        ...(!settings.meta.onboardingCompletedAt ? [{ path: 'meta.onboardingCompletedAt' as const, value: new Date().toISOString() }] : []),
-      ]
+    if (!settings.meta.onboardingCompletedAt) {
+      const updates: SettingUpdatePatch[] = onboardingPatchesAfterImport(settings)
       echo.settings.updateBatch(updates)
         .then(setSettings)
         .catch((error) => logAppAsyncError('mark onboarding import complete', error))
@@ -303,8 +372,16 @@ function App() {
 
   useEffect(() => {
     if (!bootReady || !settings) return
-    const firstRunDone = Boolean(settings.meta.firstRunWelcomeCompletedAt)
-    dispatch({ onboardingOpen: firstRunDone && !firstRunWelcomeOpen && !settings.meta.onboardingCompletedAt && !profile })
+    const onboardingDisplay = getOnboardingDisplayState(settings, Boolean(profile))
+    if (onboardingDisplay.firstRunWelcomeOpen) {
+      onboardingDeferredForSessionRef.current = false
+    }
+    dispatch({
+      firstRunWelcomeOpen: onboardingDisplay.firstRunWelcomeOpen,
+      onboardingOpen: onboardingDisplay.onboardingOpen
+        && !firstRunWelcomeOpen
+        && !onboardingDeferredForSessionRef.current,
+    })
   }, [bootReady, dispatch, settings, profile, firstRunWelcomeOpen])
 
   async function rememberCloseChoiceAs(behavior: NonNullable<Settings['ui']['closeBehavior']>) {
@@ -350,64 +427,136 @@ function App() {
     try {
       const next = await echo.settings.update('meta.firstRunWelcomeCompletedAt', new Date().toISOString())
       setSettings(next)
-      dispatch({ firstRunWelcomeOpen: false, onboardingOpen: !next.meta.onboardingCompletedAt && !profile })
+      const onboardingComplete = isOnboardingComplete(next, Boolean(profile))
+      dispatch({ firstRunWelcomeOpen: false, onboardingOpen: !onboardingComplete })
     } catch (error) { logAppAsyncError('completeFirstRunWelcome', error) }
   }
 
   async function startOnboardingApi() {
+    onboardingDeferredForSessionRef.current = true
     try {
-      const next = await echo.settings.update('meta.onboardingCompletedAt', new Date().toISOString())
-      setSettings(next)
+      if (settings?.meta.onboardingStep !== 'api') {
+        const next = await echo.settings.update('meta.onboardingStep', 'api')
+        setSettings(next)
+      }
+    } catch (error) {
+      logAppAsyncError('mark onboarding api step', error)
+    } finally {
       dispatch((current) => ({ onboardingOpen: false, page: 'settings', settingsApiFocusToken: current.settingsApiFocusToken + 1 }))
-    } catch (error) { logAppAsyncError('startOnboardingApi', error) }
+    }
   }
 
   async function startOnboardingImport() {
+    onboardingDeferredForSessionRef.current = true
     try {
-      const next = await echo.settings.updateBatch([
-        { path: 'meta.onboardingStep', value: 'playlist' },
-        { path: 'meta.onboardingCompletedAt', value: new Date().toISOString() },
-      ])
-      setSettings(next)
+      if (settings?.meta.onboardingStep !== 'playlist') {
+        const next = await echo.settings.update('meta.onboardingStep', 'playlist')
+        setSettings(next)
+      }
+    } catch (error) {
+      logAppAsyncError('mark onboarding playlist step', error)
+    } finally {
       dispatch((current) => ({ onboardingOpen: false, page: 'settings', settingsImportFocusToken: current.settingsImportFocusToken + 1 }))
-    } catch (error) { logAppAsyncError('startOnboardingImport', error) }
+    }
+  }
+
+  async function advanceOnboardingAfterLlmReady() {
+    if (!settings || settings.meta.onboardingCompletedAt) return
+    const patches = onboardingPatchesAfterLlmReady(Boolean(profile))
+    const next = patches.length === 1
+      ? await echo.settings.update(patches[0].path, patches[0].value)
+      : await echo.settings.updateBatch(patches)
+    setSettings(next)
+    onboardingDeferredForSessionRef.current = true
+    dispatch((current) => profile
+      ? { onboardingOpen: false }
+      : {
+          onboardingOpen: false,
+          page: 'settings',
+          settingsImportFocusToken: current.settingsImportFocusToken + 1,
+        })
   }
 
   async function skipOnboarding() {
     try {
-      const next = await echo.settings.update('meta.onboardingCompletedAt', new Date().toISOString())
+      const next = await echo.settings.updateBatch([
+        { path: 'meta.onboardingStep', value: 'done' },
+        { path: 'meta.onboardingCompletedAt', value: new Date().toISOString() },
+      ])
       setSettings(next)
       dispatch({ onboardingOpen: false })
     } catch (error) { logAppAsyncError('skipOnboarding', error) }
   }
 
   function setVoiceContinuous(value: boolean) {
-    dispatch({ voiceContinuous: value })
-    localStorage.setItem('echo:voiceContinuous', value ? '1' : '0')
+    voiceContinuousRef.current = value
+    if (value) {
+      clearSceneContinuationRetry()
+      if (currentScene) {
+        echo.scene.end().catch((error) => logAppAsyncError('end scene for voice continuous', error))
+      }
+    }
+    dispatch(voiceContinuousStatePatch(value))
+  }
+
+  function clearSceneContinuationRetry(resetAttempts = true) {
+    if (sceneRetryTimerRef.current !== null) {
+      window.clearTimeout(sceneRetryTimerRef.current)
+      sceneRetryTimerRef.current = null
+    }
+    if (resetAttempts) sceneRetryAttemptsRef.current = 0
+  }
+
+  function scheduleSceneContinuationRetry(scene: ActiveScene) {
+    if (sceneRetryTimerRef.current !== null) return
+    const attempt = sceneRetryAttemptsRef.current
+    const delay = SCENE_CONTINUATION_RETRY_DELAYS_MS[attempt]
+    if (delay === undefined) {
+      sceneRetryAttemptsRef.current = 0
+      showPlaybackNotice('这个场景先停一下。你再点一次，我重新帮你找。')
+      return
+    }
+    sceneRetryAttemptsRef.current += 1
+    sceneRetryTimerRef.current = window.setTimeout(() => {
+      sceneRetryTimerRef.current = null
+      if (voiceContinuousRef.current) return
+      continueScene(scene, true).catch((error) => {
+        logAppAsyncError('retry scene continuation', error)
+      })
+    }, delay)
   }
 
   async function playScene(key: SceneKey) {
+    clearSceneContinuationRetry()
+    voiceContinuousRef.current = false
+    dispatch({ voiceContinuous: false })
     const result = await echo.scene.play(key, { appendChatMessage: true, targetCount: 1 })
     if (result.tracks.length > 0 || result.message) {
-      dispatch({ currentScene: result.scene })
+      dispatch(scenePlaybackStatePatch(result.scene))
       setPlaybackState(result.state)
       await refreshQueue()
     }
     return result
   }
 
-  async function continueScene(scene: ActiveScene) {
+  async function continueScene(scene: ActiveScene, fromRetry = false) {
+    if (voiceContinuousRef.current) return
+    if (!fromRetry) clearSceneContinuationRetry()
     const current = await echo.scene.getCurrent()
     if (!current || current.id !== scene.id || current.key !== scene.key) return
     const result = await echo.scene.play(current.key, { appendChatMessage: true, continueSession: true, targetCount: 1 })
     if (result.tracks.length > 0 || result.message) {
-      dispatch({ currentScene: result.scene })
+      clearSceneContinuationRetry()
+      dispatch(scenePlaybackStatePatch(result.scene))
       setPlaybackState(result.state)
       await refreshQueue()
+      return
     }
+    scheduleSceneContinuationRetry(current)
   }
 
   async function endScene() {
+    clearSceneContinuationRetry()
     await echo.scene.end()
     dispatch({ currentScene: null })
   }
@@ -427,7 +576,7 @@ function App() {
       logAppAsyncError('closeWindow', error)
       dispatch({
         closeDialogOpen: true,
-        playbackNotice: error instanceof Error ? error.message : '关闭窗口失败，请重试。',
+        playbackNotice: friendlyOperationError(error, '关闭窗口失败，请重试。'),
       })
     }
   }
@@ -515,9 +664,9 @@ function App() {
         )}
         <section className="shell-body">
           {/*
-            主 tab(chat/yinyi/voice/queue) 用 display 切换、保持挂载，
+            主 tab 和设置页用 display 切换、保持挂载，
             避免每次切回去都重新 loadRecent / fetch history、闪一下空白。
-            详情页(profile/settings) 仍然按需挂载，进入即拉数据。
+            画像与关于页按需挂载。
           */}
           <div className="shell-page" style={{ display: page === 'chat' ? 'flex' : 'none' }}>
             <ChatPage
@@ -582,7 +731,7 @@ function App() {
               refreshProfile={refreshProfile}
             />
           )}
-          {page === 'settings' && (
+          <div className="shell-page" style={{ display: page === 'settings' ? 'flex' : 'none' }}>
             <SettingsPage
               {...commonProps}
               echo={echo}
@@ -595,8 +744,10 @@ function App() {
               importFocusToken={settingsImportFocusToken}
               apiFocusToken={settingsApiFocusToken}
               importTask={importTask}
+              onOnboardingLlmReady={advanceOnboardingAfterLlmReady}
+              onDataReset={handleDataReset}
             />
-          )}
+          </div>
           {page === 'about' && (
             <AboutEchoPage {...commonProps} />
           )}
@@ -609,10 +760,10 @@ function App() {
             refreshQueue={refreshQueue}
             autoPlayNext={settings?.playback.autoPlayNext ?? true}
             currentScene={currentScene}
-            voiceContinuous={voiceContinuous}
+            voiceContinuous={isVoiceContinuousActive(page, voiceContinuous)}
             onSceneTrackEnded={(scene) => {
               continueScene(scene).catch((error) => {
-                showPlaybackNotice(error instanceof Error ? error.message : '场景续播失败')
+                showPlaybackNotice(friendlyOperationError(error, '这个场景暂时没找到下一首，已经停下来了。'))
               })
             }}
             onVoiceTrackEnded={() => {
@@ -666,7 +817,7 @@ function App() {
                 <>
                   <h2 id="onboarding-title">先让我认识你的歌</h2>
                   <p>
-                    导入一份歌单后，我会先读懂你的口味、常听情绪和安全区。后面推荐、风信、画像和主动关心都会从这里长出来。
+                    导入一份歌单后，我会先读懂你的口味、常听情绪和反复回来的声音。后面推荐、风信、画像和主动关心都会从这里长出来。
                   </p>
                   <button className="btn onboarding-primary" type="button" onClick={() => { void startOnboardingImport() }}>
                     开始导入歌单

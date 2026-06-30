@@ -40,3 +40,15 @@ export function getRandomYinyi(): YinyiEntry | null {
   const row = getDb().prepare('SELECT * FROM yinyi WHERE user_id = current_user_id() ORDER BY RANDOM() LIMIT 1').get() as Parameters<typeof toEntry>[0] | undefined
   return row ? toEntry(row) : null
 }
+
+export function removeLegacyAbsentYinyi(): number {
+  const result = getDb()
+    .prepare(`
+      DELETE FROM yinyi
+      WHERE user_id = current_user_id()
+        AND json_valid(meta_json)
+        AND json_extract(meta_json, '$.status') = 'absent'
+    `)
+    .run()
+  return result.changes
+}

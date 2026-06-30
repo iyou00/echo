@@ -1,10 +1,12 @@
 import { dialog } from 'electron'
+import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
+import path from 'node:path'
 import JSZip from 'jszip'
 import { getDb, resetDatabase } from '../db'
 import { getSettings, saveSettings, updateSetting, updateSettingsBatch, type SettingUpdatePatch } from '../db/settings'
 import { parseJson } from '../db/json'
-import { clearImportedTracksCache, importPlaylist as savePlaylist, type PlaylistPayload } from '../db/playlists'
+import { clearImportedTracksCache, getAllImportedTracks, importPlaylist as savePlaylist, type PlaylistPayload } from '../db/playlists'
 import { buildInitialProfile } from './taste'
 import { buildSemanticsForTracks } from './semantics'
 import { clearImportTaskSnapshot, hasRunningImportTask, runImportTask } from './importTasks'
@@ -124,30 +126,36 @@ export async function importPlaylistFromDialog(): Promise<ImportPlaylistResult> 
   }
 
   try {
-    const fileContent = await fs.readFile(result.filePaths[0], 'utf8')
+    const selectedPath = path.resolve(result.filePaths[0])
+    const fileContent = await fs.readFile(selectedPath, 'utf8')
     const payload = normalizePlaylist(JSON.parse(fileContent))
+    const sourceId = createHash('sha256').update(selectedPath.toLowerCase()).digest('hex').slice(0, 20)
+    payload.source = `file:${sourceId}`
     if (payload.tracks.length === 0) {
       return { imported: false, count: 0, name: payload.name, message: '没有识别到有效歌曲。每首歌至少需要 title 和 artist。' }
     }
-    return await runImportTask('playlist-file', payload.name, async (report) => {
+    return await runImportTask('playlist-file', payload.name, async (report, signal) => {
       savePlaylist(payload)
-      const semantics = await buildSemanticsForTracks(payload.tracks, report)
+      await buildSemanticsForTracks(payload.tracks, report, { signal })
       report({ phase: 'profile', current: 0, total: 1 })
-      const profile = await buildInitialProfile(payload.tracks)
+      const profile = await buildInitialProfile(getAllImportedTracks())
       report({ phase: 'done', current: 1, total: 1 })
       return {
         imported: true,
         count: payload.tracks.length,
         name: payload.name,
         profile,
-        message: `已导入 ${payload.tracks.length} 首，新增语义标签 ${semantics.tagged} 首`,
+        message: `已导入 ${payload.tracks.length} 首`,
       }
     })
   } catch (error) {
+    console.error('[settings] playlist import failed', error)
     return {
       imported: false,
       count: 0,
-      message: error instanceof Error ? error.message : '导入失败，JSON 格式可能有问题',
+      message: error instanceof SyntaxError
+        ? '这个文件的 JSON 格式有问题，请检查后再导入。'
+        : '这次导入没有完成，请稍后再试。',
     }
   }
 }

@@ -8,6 +8,18 @@ export { currentUserId, currentUserSql, DEFAULT_USER_ID } from './userContext'
 let db: Database.Database | null = null
 const registeredFunctionDatabases = new WeakSet<Database.Database>()
 
+function initialSettingsJson(now = new Date()): string {
+  return JSON.stringify({
+    meta: {
+      schemaVersion: 1,
+      firstUsedAt: now.toISOString(),
+      lastViewedYinyiAt: '',
+      onboardingStep: 'api',
+      lastPrunedAt: '',
+    },
+  })
+}
+
 function registerDbFunctions(database: Database.Database): void {
   if (registeredFunctionDatabases.has(database)) return
   database.function('current_user_id', { deterministic: true }, currentUserId)
@@ -311,14 +323,17 @@ export function initializeDatabase(database = getDb()): void {
     );
 
     INSERT OR IGNORE INTO users (id, name) VALUES (current_user_id(), '你');
-    INSERT OR IGNORE INTO settings (id, data_json) VALUES (1, '{}');
     INSERT OR IGNORE INTO netease_auth (id, cookie_encrypted, profile_json) VALUES (1, '', '{}');
   `)
+  database
+    .prepare('INSERT OR IGNORE INTO settings (id, data_json) VALUES (1, ?)')
+    .run(initialSettingsJson())
   runMigrations(database)
 }
 
 export function resetDatabase(): void {
   const database = getDb()
+  const resetSettingsJson = initialSettingsJson()
   database.pragma('foreign_keys = OFF')
   try {
     database.transaction(() => {
@@ -345,8 +360,10 @@ export function resetDatabase(): void {
         DELETE FROM events;
         DELETE FROM taste_profile;
         UPDATE netease_auth SET cookie_encrypted = '', profile_json = '{}', updated_at = CURRENT_TIMESTAMP WHERE id = 1;
-        UPDATE settings SET data_json = '{}', updated_at = CURRENT_TIMESTAMP WHERE id = 1;
       `)
+      database
+        .prepare('UPDATE settings SET data_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1')
+        .run(resetSettingsJson)
     })()
   } finally {
     database.pragma('foreign_keys = ON')

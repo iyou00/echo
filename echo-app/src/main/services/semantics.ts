@@ -2,6 +2,7 @@ import type { ImportProgressPayload, SemanticSummary, Track, TrackSemantic } fro
 import { getAllImportedTracks } from '../db/playlists'
 import { getSemanticSummary as readSemanticSummary, splitMissingSemantics, upsertTrackSemantic } from '../db/semantics'
 import { completeChat, LlmError } from '../llm/client'
+import { safePromptJson } from '../llm/promptData'
 import { getSettings } from '../db/settings'
 import { reportStandaloneImportProgress, runImportTask } from './importTasks'
 
@@ -131,9 +132,17 @@ energy/confidence 是 0-1 数字。tempo 是 slow/medium/fast。familiarity 对�
       },
       {
         role: 'user',
-        content: tracks.map((track, index) => `${index + 1}. ${track.title} - ${track.artist}${track.album ? ` / ${track.album}` : ''}${track.year ? ` / ${track.year}` : ''}`).join('\n'),
+        content: safePromptJson({
+          tracks: tracks.map((track, index) => ({
+            index: index + 1,
+            title: track.title,
+            artist: track.artist,
+            album: track.album,
+            year: track.year,
+          })),
+        }),
       },
-    ], { temperature: 0.2, signal, maxTokens: 500 })
+    ], { temperature: 0.2, signal, maxTokens: Math.min(5000, Math.max(900, tracks.length * 180)) })
     assertSemanticsActive(signal)
     const parsed = parseJsonArray(response)
     if (!parsed || parsed.length !== tracks.length) return fallbacks
@@ -185,7 +194,7 @@ export async function buildSemanticsForTracks(
 }
 
 export function buildForImportedTracks(): Promise<{ tagged: number; skipped: number }> {
-  return runImportTask('semantic-analysis', '已导入歌曲', (report) => buildSemanticsForTracks(getAllImportedTracks(), report))
+  return runImportTask('semantic-analysis', '已导入歌曲', (report, signal) => buildSemanticsForTracks(getAllImportedTracks(), report, { signal }))
 }
 
 export function getSummary(): SemanticSummary {

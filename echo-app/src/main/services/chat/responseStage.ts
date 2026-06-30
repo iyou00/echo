@@ -26,6 +26,7 @@ import type { ReplyFn } from './sendPipelineTypes'
 import { clearPendingDirectSongState } from './pendingIntents'
 import { selectTracksForChatResponse } from './trackSelection'
 import { trackLabel } from './trackFeedback'
+import { boundTrackClaimContent, enforceAssistantTrackBinding } from './pipelineContract'
 
 function mentionedTrackCount(content: string, tracks: Track[]): number {
   const normalized = content.toLowerCase().replace(/\s+/g, '')
@@ -41,12 +42,21 @@ function boundMusicActionContent(content: string, tracks: Track[]): string {
   if (!first) return content
   const requiredMentionCount = Math.min(tracks.length, 3)
   if (mentionedTrackCount(content, tracks) >= requiredMentionCount) return content
-  if (tracks.length > 1) {
-    const names = tracks.slice(0, 3).map((track) => trackLabel(track)).join('、')
-    return `行，我先挑这几首：${names}。先从第一首开始。`
-  }
+  if (tracks.length > 1) return boundTrackClaimContent(tracks)
   const reason = first.reason || first.echoNote
   return `行，先放${trackLabel(first)}。${reason ? ` ${reason}` : '先听开头。'}`
+}
+
+export const responseStageTestHelpers = {
+  enforceTrackClaimContract: enforceAssistantTrackBinding,
+}
+
+function hasPlayableUrl(track: Track): boolean {
+  return typeof track.playUrl === 'string' && track.playUrl.trim().length > 0
+}
+
+function expectsMusicAction(intent: CandidateStageReady['recommendationIntent'], candidates: Track[]): boolean {
+  return hasMusicActionIntent(intent) || candidates.length > 0
 }
 
 export interface RecommendationResponseStageInput {
@@ -89,19 +99,24 @@ export async function runRecommendationResponseStage(input: RecommendationRespon
   } = candidate
 
   const tracks: Track[] = []
+  const effectiveCandidates = excludeCurrentTrack
+    ? excludeCurrentPlaybackTrack(guardedCandidates, currentPlaybackTrack)
+    : guardedCandidates
+  const playableCandidates = effectiveCandidates.filter(hasPlayableUrl)
+  const musicActionExpected = expectsMusicAction(recommendationIntent, playableCandidates)
   const started = Date.now()
   let content = ''
   let followUpQuestion: TasteQuestion | null = null
 
   try {
     runtimeReport?.({ phase: 'stream', current: 4, total: 5, message: '生成聊天回复' })
-    generateDynamicTasteQuestions(trimmed, guardedCandidates)
-    followUpQuestion = pendingReply.action !== 'none' ? null : pickTasteFollowUpQuestion(trimmed, guardedCandidates)
+    generateDynamicTasteQuestions(trimmed, playableCandidates)
+    followUpQuestion = pendingReply.action !== 'none' ? null : pickTasteFollowUpQuestion(trimmed, playableCandidates)
     content = sanitizeAssistantOutput(await streamChatReply({
       userText: trimmed,
       settings,
       active,
-      candidates: guardedCandidates,
+      candidates: playableCandidates,
       authRequired,
       followUpQuestion,
       emitChunk,
@@ -109,21 +124,17 @@ export async function runRecommendationResponseStage(input: RecommendationRespon
 
     tracks.push(...await selectTracksForChatResponse({
       content,
-      candidates: guardedCandidates,
+      candidates: playableCandidates,
       targetCount,
       explicit: countExplicit,
       authRequired,
       entityConstraint,
       signal,
     }))
-    if (excludeCurrentTrack) {
-      const selected = excludeCurrentPlaybackTrack(tracks, currentPlaybackTrack)
-      tracks.splice(0, tracks.length, ...selected)
+    if (musicActionExpected && tracks.length === 0 && playableCandidates.length > 0) {
+      tracks.push(...playableCandidates.slice(0, targetCount))
     }
-    if (hasMusicActionIntent(recommendationIntent) && tracks.length === 0 && guardedCandidates.length > 0) {
-      tracks.push(...guardedCandidates.slice(0, targetCount))
-    }
-    if (hasMusicActionIntent(recommendationIntent) && tracks.length > 0) {
+    if (musicActionExpected && tracks.length > 0) {
       content = boundMusicActionContent(content, tracks)
     }
 
@@ -137,8 +148,8 @@ export async function runRecommendationResponseStage(input: RecommendationRespon
     if (signal.aborted) throw error
     followUpQuestion = null
     recordChatStreamError(error)
-    if (guardedCandidates.length > 0) {
-      tracks.push(...guardedCandidates.slice(0, targetCount))
+    if (playableCandidates.length > 0) {
+      tracks.push(...playableCandidates.slice(0, targetCount))
       content = fallbackRecommendationContent(tracks, OVER_LIMIT_RECOMMENDATION_LINE, requested.overLimit)
     } else {
       content = friendlyError(error)
@@ -147,6 +158,7 @@ export async function runRecommendationResponseStage(input: RecommendationRespon
   }
 
   const finalTracks = attachSceneToTracks(tracks)
+  content = enforceAssistantTrackBinding(content, finalTracks, musicActionExpected)
   if (finalTracks.length > 0) {
     clearPendingDirectSongState()
     rememberChatMusicSession({
@@ -157,7 +169,7 @@ export async function runRecommendationResponseStage(input: RecommendationRespon
       seedTitle: recommendationIntent.seedTitle,
       affirmationAction: inferSessionAffirmationAction(content),
     })
-  } else if (hasMusicActionIntent(recommendationIntent)) {
+  } else if (musicActionExpected) {
     clearChatMusicSession()
   } else {
     armChatMusicSessionAffirmation(inferSessionAffirmationAction(content))
@@ -168,6 +180,7 @@ export async function runRecommendationResponseStage(input: RecommendationRespon
     durationMs: Date.now() - started,
     hints: authRequired ? { neteaseAuthRequired: true } : undefined,
     persistTracks: true,
+    expectsMusicAction: musicActionExpected,
   })
   recordFollowUpQuestionAsked(followUpQuestion, result.message.id)
   return result

@@ -29,6 +29,18 @@ function num(value: unknown, fallback = 0): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value))
+}
+
+function explicitFeedbackStrength(kind: string, payload: Record<string, unknown>): number {
+  const strength = num(payload.strength, Number.NaN)
+  if (kind === 'like_track') return clamp(Number.isFinite(strength) ? strength : 0.08, 0.08, 0.12)
+  if (kind === 'like_artist' || kind === 'like_genre') return clamp(Number.isFinite(strength) ? strength : 0.04, 0.03, 0.06)
+  if (kind === 'reinforce_vibe') return clamp(Number.isFinite(strength) ? strength : 0.055, 0.045, 0.075)
+  return clamp(Number.isFinite(strength) ? strength : 0.04, 0.025, 0.06)
+}
+
 function withPolicy(
   input: MemoryPolicyInput,
   apply: boolean,
@@ -69,13 +81,16 @@ export function decideMemorySignal(input: MemoryPolicyInput): MemoryPolicyDecisi
   }
 
   if (input.source === 'explicit_feedback') {
-    const positive = input.kind === 'like_artist' || input.kind === 'like_genre' || input.kind === 'reinforce_vibe'
+    const positive = input.kind === 'like_artist'
+      || input.kind === 'like_track'
+      || input.kind === 'like_genre'
+      || input.kind === 'reinforce_vibe'
     return withPolicy(
       input,
       true,
-      { strength: positive ? Math.max(num(input.payload.strength, 0), 0.08) : 0.04 },
+      { strength: explicitFeedbackStrength(input.kind, input.payload) },
       positive ? 'explicit_like' : 'explicit_miss',
-      positive ? '用户明确要求多来一点。' : '用户明确反馈方向不合适。',
+      positive ? '用户明确要求多来一点，按信号范围克制写入。' : '用户明确反馈方向不合适。',
     )
   }
 
@@ -114,10 +129,10 @@ export function decideMemorySignal(input: MemoryPolicyInput): MemoryPolicyDecisi
   if (input.kind === 'unfavorited') {
     return withPolicy(
       input,
-      false,
-      { strength: 0 },
+      true,
+      { strength: 0.09 },
       'unfavorited',
-      '取消收藏撤销显式偏好，保留历史事实。',
+      '取消收藏撤销收藏带来的显式偏好，保留历史事实。',
     )
   }
 
@@ -148,6 +163,7 @@ export function memoryPolicySummary(): string {
   return [
     'Memory Policy v1:',
     '- 收藏、循环、明确反馈是强信号。',
+    '- 明确喜欢单曲优先记到具体歌曲，歌手、风格、氛围只做克制扩展。',
     '- 完整听完是弱正向信号，重复后增强。',
     '- 单次跳过只记录事实，重复跳过后进入画像。',
     '- 聊天表达是弱信号，需要后续行为确认。',

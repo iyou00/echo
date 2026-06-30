@@ -28,6 +28,8 @@ export async function send(text: string, sender?: WebContents): Promise<SendChat
     sourceName: text.slice(0, 64),
     cancellable: true,
     uniqueKey: 'chat-send',
+    isFailureResult: (result) => result.hints?.runtimeFailure === true,
+    messageForResult: (result) => result.hints?.runtimeFailure ? '絮语处理失败。' : undefined,
   })
 }
 

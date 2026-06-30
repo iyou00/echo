@@ -54,7 +54,7 @@ const defaultSettings: Settings = {
     schemaVersion: 1,
     firstUsedAt: new Date().toISOString(),
     lastViewedYinyiAt: '',
-    onboardingStep: 'playlist',
+    onboardingStep: 'api',
     lastPrunedAt: '',
   },
 }
@@ -188,11 +188,14 @@ function validateSettingValue(path: SettingPath, value: unknown): unknown {
       return version
     }
     case 'meta.onboardingStep':
-      return assertOneOf(value, path, ['playlist', 'done'])
+      return assertOneOf(value, path, ['api', 'playlist', 'done'])
   }
 }
 
 function mergeDefaults(value: Partial<Settings>): Settings {
+  const firstUsedAt = typeof value.meta?.firstUsedAt === 'string' && value.meta.firstUsedAt.trim()
+    ? value.meta.firstUsedAt
+    : new Date().toISOString()
   return {
     ...defaultSettings,
     ...value,
@@ -205,7 +208,7 @@ function mergeDefaults(value: Partial<Settings>): Settings {
     window: { ...defaultSettings.window, ...(value.window ?? {}) },
     user: { ...defaultSettings.user, ...(value.user ?? {}) },
     tts: { ...defaultSettings.tts, ...(value.tts ?? {}) },
-    meta: { ...defaultSettings.meta, ...(value.meta ?? {}) },
+    meta: { ...defaultSettings.meta, ...(value.meta ?? {}), firstUsedAt },
   }
 }
 

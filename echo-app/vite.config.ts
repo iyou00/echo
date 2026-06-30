@@ -24,7 +24,7 @@ export default defineConfig({
         },
       },
       preload: {
-        input: path.join(__dirname, 'electron/preload.ts'),
+        input: 'electron/preload.ts',
       },
     }),
     renderer(),

@@ -37,6 +37,16 @@ function localIsoDate(date: Date): string {
   return `${year}-${month}-${day}`
 }
 
+function idleStartupCatchupResult(now = new Date()): SchedulerCatchupResult {
+  return {
+    ok: true,
+    job: 'yinyi_daily',
+    date: localIsoDate(now),
+    status: 'skipped',
+    message: '没有需要补偿的任务。',
+  }
+}
+
 function technicalMessage(error: unknown): string {
   if (error instanceof Error) return error.message
   return typeof error === 'string' ? error : ''
@@ -50,7 +60,7 @@ export function registerScheduler(): void {
   rescheduleYinyi()
   rescheduleCarePings()
   rescheduleTasteProfile()
-  recordSchedulerHealth('scheduler', 'ok', '已恢复。')
+  recordSchedulerHealth('scheduler', 'ok', '运行正常。')
 }
 
 export function rescheduleYinyi(): void {
@@ -91,6 +101,12 @@ export function stopScheduler(): void {
   tastePortraitTask = null
 }
 
+export function selectStartupCatchupPrimary(results: SchedulerCatchupResult[], now = new Date()): SchedulerCatchupResult {
+  return results.find((result) => result.status === 'failed')
+    ?? results.find((result) => result.status === 'completed')
+    ?? idleStartupCatchupResult(now)
+}
+
 export async function runStartupCatchup(): Promise<SchedulerCatchupReport> {
   const results: SchedulerCatchupResult[] = []
   results.push(await runYinyiCatchup())
@@ -105,7 +121,7 @@ export async function runStartupCatchup(): Promise<SchedulerCatchupReport> {
     }]
   })
   results.push(...tasteResults)
-  const primary = results[0] ?? { ok: true, job: 'yinyi_daily' as const, date: todayIso(), status: 'skipped' as const, message: '没有需要补偿的任务。' }
+  const primary = selectStartupCatchupPrimary(results)
   return {
     ok: results.every((result) => result.ok || result.status === 'skipped'),
     primary,

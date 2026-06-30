@@ -6,6 +6,9 @@ import {
   type IntentOverride,
   type RecommendationProgressPatch,
 } from '../../services/recommendation'
+import { listFavoriteTracks } from '../../db/favorites'
+import { getAllImportedTracks } from '../../db/playlists'
+import { loadRecentRecommendedTracks } from '../../db/tracks'
 import {
   resolveMusicEntitiesFromText,
   verifyMusicEntitiesWithNetease,
@@ -13,6 +16,7 @@ import {
   type MusicEntityResolution,
 } from './entityResolver'
 import { currentMusicCorrectionConstraintForQuery } from './correctionMemory'
+import { artistMatchesConstraint, titleMatchesConstraint } from './verifier'
 export { similarTrackSearchQuery } from './query'
 
 export type MusicSearchMode =
@@ -44,9 +48,13 @@ export interface MusicSearchRequest {
   candidatePoolSize?: number
   /** @deprecated use candidatePoolSize */
   candidateCount?: number
+  respectCooldown?: boolean
   targetCount?: number
   ignoreScene?: boolean
   intentOverride?: IntentOverride | null
+  authoritativeIntentEntities?: boolean
+  authoritativeIntentSemantics?: boolean
+  similarityReference?: Track
   signal?: AbortSignal
   onProgress?: (patch: RecommendationProgressPatch) => void
   onEntitiesResolved?: (resolution: MusicEntityResolution) => void
@@ -92,10 +100,10 @@ function withResolvedEntities(
 ): IntentOverride | undefined {
   const next = withTargetCount(override, targetCount) ?? {}
   const correction = currentMusicCorrectionConstraintForQuery(query)
-  if (entities.artistQuery && (entities.verificationStatus === 'verified' || !next.artistQuery)) {
+  if (!next.clearArtistQuery && entities.artistQuery && (entities.verificationStatus === 'verified' || !next.artistQuery)) {
     next.artistQuery = entities.artistQuery
   }
-  if (entities.seedTitle && (entities.verificationStatus === 'verified' || !next.seedTitle)) {
+  if (!next.clearSeedTitle && entities.seedTitle && (entities.verificationStatus === 'verified' || !next.seedTitle)) {
     next.seedTitle = entities.seedTitle
   }
   if (correction?.artistQuery) next.artistQuery = correction.artistQuery
@@ -107,6 +115,58 @@ function withResolvedEntities(
     next.intentConfidence = entities.confidence
   }
   return Object.keys(next).length > 0 ? next : undefined
+}
+
+function withoutEntityTargets(override: IntentOverride | null | undefined): IntentOverride | undefined {
+  if (!override) return undefined
+  const next = { ...override }
+  delete next.artistQuery
+  delete next.seedTitle
+  return Object.keys(next).length > 0 ? next : undefined
+}
+
+function similarityReferenceFromEntities(entities: MusicEntityResolution): Track | undefined {
+  const title = entities.verifiedTrackTitle
+  const id = entities.verifiedTrackId
+  if (!title || !id) return undefined
+  return {
+    id,
+    neteaseId: id,
+    title,
+    artist: entities.verifiedArtistName ?? entities.artistQuery ?? '未知艺人',
+    source: 'netease',
+  }
+}
+
+function localSimilarityReferenceFromEntities(entities: MusicEntityResolution): Track | undefined {
+  if (!entities.seedTitle) return undefined
+  const pool = [
+    ...listFavoriteTracks({ limit: 80 }),
+    ...loadRecentRecommendedTracks(120),
+    ...getAllImportedTracks(),
+  ]
+  return pool.find((track) => {
+    const titleOk = titleMatchesConstraint(track.title, entities.seedTitle, false)
+    const artistOk = entities.artistQuery
+      ? artistMatchesConstraint(track.artist, entities.artistQuery)
+      : true
+    return titleOk && artistOk
+  })
+}
+
+function selectSimilarityReference(
+  entities: MusicEntityResolution,
+  contextualReference?: Track,
+): Track | undefined {
+  const explicitTrack = similarityReferenceFromEntities(entities)
+  if (entities.seedTitle) return explicitTrack ?? localSimilarityReferenceFromEntities(entities)
+  if (entities.artistQuery) return undefined
+  return contextualReference
+}
+
+function selectSimilarityArtistQuery(entities: MusicEntityResolution): string | undefined {
+  if (entities.seedTitle) return undefined
+  return entities.verifiedArtistName ?? entities.artistQuery
 }
 
 function emptyEntityResolution(targetCount?: number): MusicEntityResolution {
@@ -129,15 +189,21 @@ function shouldResolveEntities(mode: MusicSearchMode): boolean {
 function resolutionWithIntentOverride(
   resolution: MusicEntityResolution,
   override: IntentOverride | null | undefined,
+  preferOverrideEntities = false,
 ): MusicEntityResolution {
-  if (!override?.artistQuery && !override?.seedTitle) return resolution
-  const entities: MusicEntity[] = [...resolution.entities]
-  let artistQuery = resolution.artistQuery
-  let seedTitle = resolution.seedTitle
+  if (!override?.artistQuery && !override?.seedTitle && !override?.clearArtistQuery && !override?.clearSeedTitle) return resolution
+  const entities: MusicEntity[] = resolution.entities.filter((entity) => (
+    !(override.clearArtistQuery && entity.kind === 'artist')
+    && !(override.clearSeedTitle && entity.kind === 'title')
+    && !(preferOverrideEntities && override.artistQuery && entity.kind === 'artist')
+    && !(preferOverrideEntities && override.seedTitle && entity.kind === 'title')
+  ))
+  let artistQuery = override.clearArtistQuery ? undefined : resolution.artistQuery
+  let seedTitle = override.clearSeedTitle ? undefined : resolution.seedTitle
   let added = false
   const confidence = Math.max(0.72, Math.min(0.96, override.intentConfidence ?? resolution.confidence ?? 0.72))
 
-  if (override.artistQuery && !artistQuery) {
+  if (override.artistQuery && (preferOverrideEntities || !artistQuery)) {
     artistQuery = override.artistQuery
     entities.push({
       kind: 'artist',
@@ -148,7 +214,7 @@ function resolutionWithIntentOverride(
     })
     added = true
   }
-  if (override.seedTitle && !seedTitle) {
+  if (override.seedTitle && (preferOverrideEntities || !seedTitle)) {
     seedTitle = override.seedTitle
     entities.push({
       kind: 'title',
@@ -160,16 +226,27 @@ function resolutionWithIntentOverride(
     added = true
   }
 
-  if (!added) return resolution
+  if (!added && artistQuery === resolution.artistQuery && seedTitle === resolution.seedTitle) return resolution
   return {
     ...resolution,
     artistQuery,
     seedTitle,
+    verifiedArtistId: override.clearArtistQuery ? undefined : resolution.verifiedArtistId,
+    verifiedArtistName: override.clearArtistQuery ? undefined : resolution.verifiedArtistName,
+    verifiedTrackId: override.clearSeedTitle ? undefined : resolution.verifiedTrackId,
+    verifiedTrackTitle: override.clearSeedTitle ? undefined : resolution.verifiedTrackTitle,
     entities,
-    ambiguity: seedTitle && !artistQuery ? 'missing_artist' : resolution.ambiguity,
+    ambiguity: seedTitle && !artistQuery ? 'missing_artist' : 'none',
     confidence: Math.max(resolution.confidence, confidence),
     source: resolution.source === 'rules' ? 'llm' : resolution.source,
   }
+}
+
+export const musicSearchTestHelpers = {
+  localSimilarityReferenceFromEntities,
+  resolutionWithIntentOverride,
+  selectSimilarityReference,
+  selectSimilarityArtistQuery,
 }
 
 export function shouldInferMusicSearchIntent(mode: MusicSearchMode): boolean {
@@ -217,7 +294,11 @@ export async function searchMusic(request: MusicSearchRequest): Promise<Track[]>
   const modeDefaultCandidatePoolSize = defaultCandidatePoolSize(request.mode, request.targetCount)
   const resolveEntities = shouldResolveEntities(request.mode)
   const ruleEntities = resolveEntities
-    ? resolutionWithIntentOverride(resolveMusicEntitiesFromText(query), request.intentOverride)
+    ? resolutionWithIntentOverride(
+      resolveMusicEntitiesFromText(query),
+      request.intentOverride,
+      request.mode === 'similar-to-track' || request.authoritativeIntentEntities === true,
+    )
     : emptyEntityResolution(request.targetCount)
   let verifiedEntities = ruleEntities
   if (resolveEntities) {
@@ -231,16 +312,36 @@ export async function searchMusic(request: MusicSearchRequest): Promise<Track[]>
   }
   assertMusicSearchActive(request.signal)
   request.onEntitiesResolved?.(verifiedEntities)
+  const resolvedOverride = resolveEntities
+    ? withResolvedEntities(request.intentOverride, verifiedEntities, query, request.targetCount)
+    : withTargetCount(request.intentOverride, request.targetCount)
+  const similarityReference = request.mode === 'similar-to-track'
+    ? selectSimilarityReference(verifiedEntities, request.similarityReference)
+    : undefined
+  const similarityArtistQuery = request.mode === 'similar-to-track'
+    ? selectSimilarityArtistQuery(verifiedEntities)
+    : undefined
+  const similarityArtistId = request.mode === 'similar-to-track' && !verifiedEntities.seedTitle
+    ? verifiedEntities.verifiedArtistId
+    : undefined
+  if (request.mode === 'similar-to-track' && verifiedEntities.seedTitle && !similarityReference) {
+    const failure = inferSearchFailure(verifiedEntities, [])
+    if (failure) request.onSearchFailure?.(failure)
+    return []
+  }
   const tracks = await recommendFromNetease(
     query,
-    resolveEntities
-      ? withResolvedEntities(request.intentOverride, verifiedEntities, query, request.targetCount)
-      : withTargetCount(request.intentOverride, request.targetCount),
+    request.mode === 'similar-to-track' ? withoutEntityTargets(resolvedOverride) : resolvedOverride,
     {
       signal: request.signal,
       candidatePoolSize: request.candidatePoolSize ?? request.candidateCount ?? modeDefaultCandidatePoolSize,
+      respectCooldown: request.respectCooldown,
       ignoreScene: request.ignoreScene ?? defaultIgnoreScene(request.mode),
-      disableEntityInference: !resolveEntities,
+      disableEntityInference: request.mode === 'similar-to-track' || !resolveEntities,
+      similarityReference,
+      similarityArtistQuery,
+      similarityArtistId,
+      preserveIntentSemantics: request.authoritativeIntentSemantics,
       onProgress: request.onProgress,
     },
   )

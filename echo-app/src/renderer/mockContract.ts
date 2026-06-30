@@ -10,7 +10,7 @@ export const ECHO_API_CONTRACT: ContractShape = {
   health: ['get', 'check'],
   scheduler: ['runCatchup'],
   chat: ['send', 'loadRecent', 'cancel', 'onChunk', 'onMessageInjected'],
-  taste: ['getProfile', 'getMemoryAudit', 'regeneratePortrait', 'applySignal', 'correctMemory', 'answerQuestion'],
+  taste: ['getProfile', 'getMemoryAudit', 'refreshStructuredProfile', 'regeneratePortrait', 'applySignal', 'correctMemory', 'answerQuestion'],
   yinyi: ['generate', 'getByDate', 'getRange', 'getRandom', 'onGenerated'],
   queue: ['get', 'history', 'clearHistoryDates', 'markStatus'],
   favorites: ['list', 'count', 'listKeys', 'toggle', 'isFavorite', 'onChanged'],
@@ -27,7 +27,7 @@ export const ECHO_API_CONTRACT: ContractShape = {
   weather: ['get'],
   listening: ['generateSegment'],
   carePings: ['test', 'muteToday', 'schedule'],
-  netease: ['getLoginState', 'createQrLogin', 'checkQrLogin', 'logout', 'listPlaylists', 'importPlaylist'],
+  netease: ['getLoginState', 'createQrLogin', 'checkQrLogin', 'sendCaptcha', 'loginWithCaptcha', 'importCookie', 'logout', 'listPlaylists', 'importPlaylist'],
 }
 
 export function assertEchoApiContract(api: EchoApi, label = 'EchoApi'): void {
@@ -104,6 +104,13 @@ function assertTasteProfileEnvelope(value: unknown): asserts value is { profile:
   }
 }
 
+function assertTasteProfileValue(value: unknown, label: string): asserts value is TasteProfile | null {
+  if (value === null) return
+  if (!isRecord(value) || !Array.isArray(value.genres) || !Array.isArray(value.artists) || !Array.isArray(value.moods) || !Array.isArray(value.signature_tracks)) {
+    throw new Error(`${label} shape mismatch`)
+  }
+}
+
 type ReadContractCheck = {
   label: string
   read(api: EchoApi): Promise<unknown>
@@ -130,6 +137,11 @@ const READ_CONTRACT_CHECKS: ReadContractCheck[] = [
     },
   },
   { label: 'taste.getProfile', read: (api) => api.taste.getProfile(), validate: assertTasteProfileEnvelope },
+  {
+    label: 'taste.refreshStructuredProfile',
+    read: (api) => api.taste.refreshStructuredProfile(),
+    validate: (value) => assertTasteProfileValue(value, 'taste.refreshStructuredProfile'),
+  },
   {
     label: 'runtime.getRecentTasks',
     read: (api) => api.runtime.getRecentTasks(),

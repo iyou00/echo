@@ -27,6 +27,9 @@ type ApiResponse = {
 
 export interface RecommendationRecallContext {
   profile?: TasteProfile | null
+  similarityReference?: Track
+  similarityArtistQuery?: string
+  similarityArtistId?: string
 }
 
 const NET_CALL_TIMEOUT_MS = 6000
@@ -77,6 +80,24 @@ function extractArtistIds(response: ApiResponse): string[] {
     .map((artist) => String(asObject(artist).id ?? ''))
     .filter(Boolean)
     .slice(0, 3)
+}
+
+function extractSimilarArtistIds(response: ApiResponse, excludedId?: string): string[] {
+  const body = asObject(response.body)
+  const result = asObject(body.result)
+  const data = asObject(body.data)
+  return unique([
+    ...asArray(body.artists),
+    ...asArray(result.artists),
+    ...asArray(data.artists),
+  ]
+    .map((artist) => String(asObject(artist).id ?? ''))
+    .filter((id) => Boolean(id) && id !== excludedId))
+    .slice(0, 6)
+}
+
+export const recommendationRecallTestHelpers = {
+  extractSimilarArtistIds,
 }
 
 function extractPlaylistIds(response: ApiResponse): string[] {
@@ -172,6 +193,7 @@ function keywordFromIntent(intent: RecommendationIntent, determinism: Recommenda
   }
   const parts = [
     sceneKeyword(intent, determinism, context),
+    context.similarityArtistQuery ?? '',
     intent.artistQuery ?? '',
     intent.language === '粤语' ? '粤语' : intent.language === '英语' ? '欧美' : intent.language === '韩语' ? 'Kpop' : '',
     intent.moods.includes('放松') || intent.tempo === 'slow' ? '慢歌' : '',
@@ -308,9 +330,51 @@ function profileArtistQueries(intent: RecommendationIntent, context: Recommendat
     .filter((track) => intent.moods.some((mood) => track.semantic.moods.includes(mood)) || intent.scenes.some((scene) => track.semantic.scenes.includes(scene)))
     .map((track) => track.artist)
   const profileArtists = profile?.artists.slice(0, 6).map((artist) => artist.name) ?? []
-  return unique([intent.artistQuery ?? '', ...semanticArtists, ...profileArtists].filter(Boolean))
+  return unique([
+    context.similarityReference?.artist ?? '',
+    intent.artistQuery ?? '',
+    ...semanticArtists,
+    ...profileArtists,
+  ].filter(Boolean))
     .filter((artist) => allowsArtistFromCorrection(artist, intent, constraints))
     .slice(0, 5)
+}
+
+async function fetchSimilarArtistCandidates(
+  cookie: string,
+  context: RecommendationRecallContext,
+  signal?: AbortSignal,
+): Promise<Track[]> {
+  if (!context.similarityArtistQuery) return []
+  let referenceArtistId = context.similarityArtistId
+  if (!referenceArtistId) {
+    const search = await timed(
+      netease.cloudsearch({ keywords: context.similarityArtistQuery, type: 100, limit: 3, offset: 0, cookie }),
+      3000,
+      null as ApiResponse | null,
+    )
+    assertRecallActive(signal)
+    referenceArtistId = search ? extractArtistIds(search)[0] : undefined
+  }
+  if (!referenceArtistId) return []
+  const similar = await timed(
+    netease.simi_artist({ id: referenceArtistId, cookie }),
+    3000,
+    null as ApiResponse | null,
+  )
+  assertRecallActive(signal)
+  if (!similar) return []
+  const relatedIds = extractSimilarArtistIds(similar, referenceArtistId)
+  const topSongCalls = relatedIds.map(async (id) => {
+    const topSongs = await timed(
+      netease.artist_top_song({ id, cookie }),
+      3500,
+      null as ApiResponse | null,
+    )
+    assertRecallActive(signal)
+    return topSongs ? extractTracks(topSongs, 'artist') : []
+  })
+  return uniqueTracks((await Promise.all(topSongCalls)).flat())
 }
 
 async function fetchArtistCandidates(intent: RecommendationIntent, cookie: string, context: RecommendationRecallContext, signal?: AbortSignal): Promise<Track[]> {
@@ -393,6 +457,7 @@ async function fetchCandidatesInternal(intent: RecommendationIntent, signal?: Ab
     netCall(netease.cloudsearch({ keywords: keyword, type: 1, limit: 30, offset: searchOffset, cookie }), 'search'),
     netCall(netease.personalized_newsong({ limit: 20, cookie }), 'new_song'),
     timed(fetchArtistCandidates(intent, cookie, context, signal), NET_CALL_TIMEOUT_MS + 2000, [] as Track[]),
+    timed(fetchSimilarArtistCandidates(cookie, context, signal), NET_CALL_TIMEOUT_MS + 2000, [] as Track[]),
     timed(fetchPlaylistCandidates(intent, cookie, determinism, context, signal), NET_CALL_TIMEOUT_MS + 2000, [] as Track[]),
   ]
 
@@ -401,7 +466,8 @@ async function fetchCandidatesInternal(intent: RecommendationIntent, signal?: Ab
     calls.push(netCall(netease.style_song({ tagId, size: 20, cursor: 0, cookie }), 'style'))
   }
 
-  for (const seed of importedSeedTracks(intent)) {
+  const similaritySeeds = context.similarityReference ? [context.similarityReference] : importedSeedTracks(intent)
+  for (const seed of similaritySeeds) {
     const id = seed.neteaseId ?? seed.id
     if (id) calls.push(netCall(netease.simi_song({ id, limit: 20, offset: 0, cookie }), 'similar'))
   }

@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { EchoApi, PlaybackState, Track } from '../../types/ipc'
 import type { AppPageProps } from '../appState'
 import { getVoiceLongAbsence, markVoiceSeen, pickVoiceIdleGreeting } from '../../data/voice-idle-greetings'
-import { pageLabels } from '../labels'
 import { sameTrack, trackIdentity } from '../../shared/trackIdentity'
+import { friendlyOperationError } from '../../shared/runtimeRecovery'
+import { shouldAcceptVoiceContinuousTrigger, shouldTriggerNextVoiceSegment } from './voiceContinuous'
 
 interface VoicePageProps extends AppPageProps {
   echo: EchoApi
@@ -65,6 +66,15 @@ function isSameTrack(left: Track | null | undefined, right: Track | null | undef
   return sameTrack(left, right)
 }
 
+function voiceFriendlyError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  if (/取消|cancell?ed|aborted/i.test(message)) return '好，我先停一下。'
+  if (/API.?key|鉴权|401|403|配置/i.test(message)) return '我这会儿没连上模型，去设置里看一眼。'
+  if (/网易云|登录|cookie/i.test(message)) return '音乐这边掉线了，重新登录网易云后再试。'
+  if (/超时|网络|fetch|ECONN|ENOTFOUND|服务端/i.test(message)) return '刚才连接有点慢，我先停一下。'
+  return '我刚才没说出来，稍后再试一次。'
+}
+
 async function fadeVolume(
   echo: EchoApi,
   from: number,
@@ -101,6 +111,7 @@ export function VoicePage({
   const rafRef = useRef<number | null>(null)
   const musicTimerRef = useRef<number | null>(null)
   const restoreVolumeRef = useRef(100)
+  const volumeRestoreArmedRef = useRef(false)
   const musicStartedRef = useRef(false)
   const trackRef = useRef<Track | null>(null)
   const fadeRunRef = useRef(0)
@@ -111,6 +122,7 @@ export function VoicePage({
   const speakRef = useRef<(automatic?: boolean) => Promise<void>>()
   const speakingLockRef = useRef(false)
   const autoFailureCountRef = useRef(0)
+  const lastContinuousTriggerAtRef = useRef(0)
   const lastAutoStartTokenRef = useRef(0)
   const prevAudioUrlRef = useRef('')
   const [status, setStatus] = useState<VoiceStatus>('idle')
@@ -137,6 +149,18 @@ export function VoicePage({
     setAudioUrl(url)
   }
 
+  const restorePlaybackVolume = useCallback(async () => {
+    if (!volumeRestoreArmedRef.current) return
+    volumeRestoreArmedRef.current = false
+    try {
+      const next = await echo.playback.setVolume(restoreVolumeRef.current)
+      setPlaybackState(next)
+    } catch (error) {
+      volumeRestoreArmedRef.current = true
+      throw error
+    }
+  }, [echo, setPlaybackState])
+
   useEffect(() => {
     playbackStateRef.current = playbackState
   }, [playbackState])
@@ -144,6 +168,13 @@ export function VoicePage({
   useEffect(() => {
     statusRef.current = status
   }, [status])
+
+  function triggerContinuousSegment(): void {
+    const now = Date.now()
+    if (!shouldAcceptVoiceContinuousTrigger(lastContinuousTriggerAtRef.current, now)) return
+    lastContinuousTriggerAtRef.current = now
+    speakRef.current?.(true).catch(() => undefined)
+  }
 
   useEffect(() => {
     if (!isActive) return undefined
@@ -170,10 +201,15 @@ export function VoicePage({
 
     // 连续回声：检测背景音乐播完（track 变了或变成 null）→ 触发下一段（仅回声页面）
     if (isActive && voiceContinuous && (statusRef.current === 'done' || statusRef.current === 'text-only-done') && musicStartedRef.current) {
-      const baselineKey = voiceBaselinePlaybackKeyRef.current
-      const stillSameTrack = (baselineKey && current && trackIdentity(current) === baselineKey) || current?.sourceContext === 'voice'
-      if (!stillSameTrack) {
-        speakRef.current?.(true).catch(() => undefined)
+      if (shouldTriggerNextVoiceSegment({
+        isActive,
+        voiceContinuous,
+        status: statusRef.current,
+        musicStarted: musicStartedRef.current,
+        baselinePlaybackKey: voiceBaselinePlaybackKeyRef.current,
+        current,
+      })) {
+        triggerContinuousSegment()
         return
       }
     }
@@ -199,8 +235,8 @@ export function VoicePage({
     setProgress(0)
     setNotice('')
     setStatus('idle')
-    echo.playback.setVolume(restoreVolumeRef.current).then(setPlaybackState).catch((error) => console.warn('[Voice] restore volume failed (playback change)', error))
-  }, [echo, isActive, playbackState, setPlaybackState, setVoiceContinuous, voiceContinuous])
+    restorePlaybackVolume().catch((error) => console.warn('[Voice] restore volume failed (playback change)', error))
+  }, [echo, isActive, playbackState, restorePlaybackVolume, setVoiceContinuous, voiceContinuous])
 
   useEffect(() => () => {
     fadeRunRef.current += 1
@@ -209,8 +245,8 @@ export function VoicePage({
     clearCurrentAudioUrl()
     audioRef.current?.pause()
     audioContextRef.current?.close().catch(() => undefined)
-    echo.playback.setVolume(restoreVolumeRef.current).then(setPlaybackState).catch((error) => console.warn('[Voice] restore volume failed (unmount)', error))
-  }, [echo, setPlaybackState])
+    restorePlaybackVolume().catch((error) => console.warn('[Voice] restore volume failed (unmount)', error))
+  }, [echo, restorePlaybackVolume])
 
   function stopTtsWave(reset = false) {
     if (rafRef.current) {
@@ -262,13 +298,14 @@ export function VoicePage({
 
   async function startBackgroundMusic(nextTrack: Track | null) {
     if (!nextTrack || musicStartedRef.current) return
-    musicStartedRef.current = true
     if (isSameTrack(playbackState.current, nextTrack)) {
       const next = await echo.playback.setVolume(30)
       setPlaybackState(next)
+      musicStartedRef.current = true
     } else {
       const next = await echo.playback.play(nextTrack, { initialVolume: 30 })
       setPlaybackState(next)
+      musicStartedRef.current = true
       await refreshQueue()
     }
   }
@@ -286,10 +323,11 @@ export function VoicePage({
     setProgress(1)
     setStatus('done')
     const currentVolume = await echo.playback.getVolume().catch(() => 30)
-    if (fadeRunRef.current !== runId) return
+      if (fadeRunRef.current !== runId) return
     fadeVolumeRef.current = true
     try {
       await fadeVolume(echo, currentVolume, restoreVolumeRef.current, 1500, setPlaybackState, () => fadeRunRef.current !== runId)
+      if (fadeRunRef.current === runId) volumeRestoreArmedRef.current = false
     } finally {
       fadeVolumeRef.current = false
     }
@@ -311,16 +349,18 @@ export function VoicePage({
       setProgress(0)
       clearCurrentAudioUrl()
       restoreVolumeRef.current = await echo.playback.getVolume()
+      volumeRestoreArmedRef.current = true
 
       const segment = await echo.listening.generateSegment({ continuation: automatic || continuation })
       autoFailureCountRef.current = 0
       setText(segment.text)
       trackRef.current = segment.track
       if (!segment.audioUrl) {
-        setNotice(segment.error ?? '我现在说不出话来,但你能看到我说什么。')
+        setNotice(friendlyOperationError(segment.error, '我现在说不出话来，但文字还在。'))
         if (segment.track) {
           const next = await echo.playback.play(segment.track)
           setPlaybackState(next)
+          musicStartedRef.current = true
           await refreshQueue()
         }
         setProgress(1)
@@ -344,7 +384,7 @@ export function VoicePage({
           return
         }
       }
-      setNotice(error instanceof Error ? error.message : `${pageLabels.voice}生成失败`)
+      setNotice(voiceFriendlyError(error))
       setStatus('error')
     } finally {
       speakingLockRef.current = false
@@ -360,7 +400,7 @@ export function VoicePage({
     // 即使当前 speak() 正在执行（generating/speaking），也要先把 token 标记为已处理。
     // 否则等 status 变回 done 时 effect 会因 status 依赖重入，误判为"未处理"而重复触发 speak()。
     if (statusRef.current === 'generating' || statusRef.current === 'speaking') return
-    speakRef.current?.(true).catch(() => undefined)
+    triggerContinuousSegment()
   }, [autoStartToken, status])
 
   // 连续回声兜底：仅在背景音乐从未启动时（比如没有推荐到歌），2 秒后自动触发下一段
@@ -371,8 +411,15 @@ export function VoicePage({
     if (status !== 'done' && status !== 'text-only-done') return
     const timer = window.setTimeout(() => {
       if (statusRef.current !== 'done' && statusRef.current !== 'text-only-done') return
-      if (musicStartedRef.current) return
-      speakRef.current?.(true).catch(() => undefined)
+      if (!shouldTriggerNextVoiceSegment({
+        isActive,
+        voiceContinuous,
+        status: statusRef.current,
+        musicStarted: musicStartedRef.current,
+        baselinePlaybackKey: voiceBaselinePlaybackKeyRef.current,
+        current: playbackStateRef.current.current,
+      })) return
+      triggerContinuousSegment()
     }, 2000)
     return () => window.clearTimeout(timer)
   }, [isActive, status, voiceContinuous])
@@ -384,7 +431,7 @@ export function VoicePage({
     if (musicTimerRef.current) window.clearTimeout(musicTimerRef.current)
     stopTtsWave(true)
     audioRef.current?.pause()
-    echo.playback.setVolume(restoreVolumeRef.current).then(setPlaybackState).catch((error) => console.warn('[Voice] restore volume failed (backToChat)', error))
+    restorePlaybackVolume().catch((error) => console.warn('[Voice] restore volume failed (backToChat)', error))
     navigate('chat')
   }
 

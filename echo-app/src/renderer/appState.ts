@@ -33,6 +33,20 @@ export interface AppState {
 
 export type AppStateAction = Partial<AppState> | ((state: AppState) => Partial<AppState>)
 
+export function isVoiceContinuousActive(_page: PageKey, voiceContinuous: boolean): boolean {
+  return voiceContinuous
+}
+
+export function voiceContinuousStatePatch(value: boolean): Partial<AppState> {
+  return value
+    ? { voiceContinuous: true, currentScene: null }
+    : { voiceContinuous: false }
+}
+
+export function scenePlaybackStatePatch(scene: ActiveScene): Partial<AppState> {
+  return { currentScene: scene, voiceContinuous: false }
+}
+
 function appStateReducer(state: AppState, action: AppStateAction): AppState {
   return { ...state, ...(typeof action === 'function' ? action(state) : action) }
 }
@@ -51,7 +65,7 @@ function initialAppState(): AppState {
     careMuteToast: false,
     careMuteCountdown: 5,
     voiceAutoStartToken: 0,
-    voiceContinuous: localStorage.getItem('echo:voiceContinuous') === '1',
+    voiceContinuous: false,
     closeDialogOpen: false,
     rememberCloseChoice: false,
     latestYinyiDate: '',

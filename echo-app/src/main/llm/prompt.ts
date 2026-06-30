@@ -1,18 +1,20 @@
 import type { LlmMessage } from './client'
+import { escapePromptData, safePromptJson } from './promptData'
 import type { TasteQuestion, Track } from '../../types/ipc'
-import { loadTodayConversations } from '../db/conversations'
+import { loadConversationsForDate, loadTodayConversations } from '../db/conversations'
 import { loadActiveEvents } from '../db/events'
 import { getTasteProfile } from '../db/taste'
-import { loadTodayTrackEvents } from '../db/tracks'
+import { isExternalListeningSource, isMeaningfulSkippedReason, isMeaningfulTrackEvent, loadMeaningfulTrackEventsForDate } from '../db/tracks'
 import { getYinyiRange } from '../db/yinyi'
 import { getSettings } from '../db/settings'
 import { readRootFile } from '../utils/paths'
 import { getMostRecentSeal } from '../services/daySeal'
 import { buildTodayMusicSessionSummary } from '../services/musicSession'
 import { buildCurrentSceneContext, buildTodaySceneContext } from '../services/scene'
-import { buildMemoryEvidencePrompt } from '../services/memoryEvidence'
+import { buildMemoryEvidencePrompt, buildOperationalTasteSummary } from '../services/memoryEvidence'
 import { buildSoulPolicyPrompt } from '../skills/soul/policy'
 import { memoryPolicySummary } from '../skills/memory/policy'
+import type { TodayTrackEvent } from '../db/tracks'
 
 export interface ChatContextOptions {
   recommendationCandidates?: Track[]
@@ -21,27 +23,36 @@ export interface ChatContextOptions {
 }
 
 function formatCandidates(tracks: Track[]): string {
-  return tracks
-    .map((track, index) => {
-      const meta = [track.recommendSource, track.reason].filter(Boolean).join(' · ')
-      const album = track.album ? ` / ${track.album}` : ''
-      return `${index + 1}. 《${track.title}》 - ${track.artist}${album}${meta ? ` · ${meta}` : ''}`
-    })
-    .join('\n')
+  return safePromptJson(tracks.map((track, index) => ({
+    index: index + 1,
+    title: track.title,
+    artist: track.artist,
+    album: track.album,
+    recommendSource: track.recommendSource,
+    reason: track.reason,
+  })))
 }
 
 function tasteProfileSummary(profile: ReturnType<typeof getTasteProfile>): string {
-  return profile?.echo_portrait || profile?.work_summary?.trim() || ''
+  return buildOperationalTasteSummary(profile)
 }
 
-function tasteWorkNotesBlock(profile: ReturnType<typeof getTasteProfile>): string {
-  const notes = profile?.work_summary?.trim()
-  if (!notes || notes === profile?.echo_portrait?.trim()) return ''
-  return `
+export function yinyiRecommendationEvidence(events: TodayTrackEvent[]): TodayTrackEvent[] {
+  return yinyiPositiveListeningEvidence(events).filter((track) => track.source === 'recommended_by_echo' && isMeaningfulTrackEvent(track))
+}
 
-<taste_work_notes>
-${notes}
-</taste_work_notes>`
+function isPositiveYinyiPromptTrackEvent(track: Pick<TodayTrackEvent, 'source' | 'queueStatus'>): boolean {
+  if (track.queueStatus === 'skipped' || track.queueStatus === 'pending') return false
+  if (track.queueStatus === 'playing' || track.queueStatus === 'completed') return true
+  return isExternalListeningSource(track.source)
+}
+
+export function yinyiPositiveListeningEvidence(events: TodayTrackEvent[]): TodayTrackEvent[] {
+  return events.filter(isPositiveYinyiPromptTrackEvent)
+}
+
+export function yinyiDismissedTrackEvidence(events: TodayTrackEvent[]): TodayTrackEvent[] {
+  return events.filter((track) => track.queueStatus === 'skipped' && isMeaningfulSkippedReason(track.queueStatusReason))
 }
 
 export function buildChatContext(userText: string, options: ChatContextOptions = {}): LlmMessage[] {
@@ -58,6 +69,7 @@ export function buildChatContext(userText: string, options: ChatContextOptions =
   const candidates = options.recommendationCandidates ?? []
   const musicSession = buildTodayMusicSessionSummary()
   const sceneContext = buildCurrentSceneContext()
+  const activeEvents = loadActiveEvents(8)
   const candidatesBlock = candidates.length > 0
     ? `
 
@@ -65,6 +77,19 @@ export function buildChatContext(userText: string, options: ChatContextOptions =
 ${formatCandidates(candidates)}
 </recommendation_candidates>`
     : ''
+  const candidateContractBlock = candidates.length > 0
+    ? `
+
+<music_candidate_contract>
+本轮有 recommendation_candidates。涉及具体推荐、点歌、开始播放、换歌时，只能点名候选里的歌名和艺人。
+如果你想描述一首歌为什么适合，只能描述最终候选卡片里的歌曲。
+</music_candidate_contract>`
+    : `
+
+<music_candidate_contract>
+本轮没有 recommendation_candidates。可以回应用户状态、聊音乐方向、询问是否让 Echo 找歌。
+涉及具体推荐、点歌、开始播放、换歌时，先不要点名具体歌名或艺人+歌名组合。
+</music_candidate_contract>`
   const authBlock = options.neteaseAuthRequired
     ? `
 
@@ -76,7 +101,7 @@ ${formatCandidates(candidates)}
     ? `
 
 <taste_curiosity>
-你最近在想：${options.followUpQuestion.content}
+${safePromptJson({ question: options.followUpQuestion.content })}
 </taste_curiosity>`
     : ''
 
@@ -88,8 +113,8 @@ ${formatCandidates(candidates)}
 ${system}
 
 <taste_profile_summary>
-${tasteProfileSummary(profile) || '用户还没有导入歌单，Echo 对 Ta 的品味只有很少线索。'}
-</taste_profile_summary>${tasteWorkNotesBlock(profile)}
+${escapePromptData(tasteProfileSummary(profile) || '暂无可直接执行的口味摘要。按 memory_evidence 里的结构化证据和纠正记录判断。')}
+</taste_profile_summary>
 
 <memory_policy>
 ${memoryPolicySummary()}
@@ -99,15 +124,32 @@ ${buildMemoryEvidencePrompt(profile)}
 
 <current_context>
 - 当前时间:${(() => { const n = new Date(); const w = ['周日','周一','周二','周三','周四','周五','周六']; return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')} ${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')} ${w[n.getDay()]}` })()}
-</current_context>${candidatesBlock}${authBlock}${curiosityBlock}
+</current_context>${candidatesBlock}${candidateContractBlock}${authBlock}${curiosityBlock}
+<active_events>
+${safePromptJson(activeEvents.map((event) => ({
+  content: event.content,
+  kind: event.kind,
+  scope: event.kind === 'context' ? 'today_context' : 'active_event',
+  weight: event.weight ?? null,
+  confidence: event.confidence ?? null,
+  startedAt: event.startedAt ?? null,
+  createdAt: event.createdAt ?? null,
+})))}
+</active_events>
+<active_events_contract>
+kind=context 表示今天仍在持续的短期状态,只能写成“今天/这会儿/刚才”的轻量观察,不能写成稳定人格、长期偏好或反复模式。
+</active_events_contract>
 <today_music_session>
-${musicSession}
+${escapePromptData(musicSession)}
 </today_music_session>
 ${sceneContext}
 ${recentSeal ? `
 <recent_day_seal>
-${recentSeal}
-</recent_day_seal>` : ''}`,
+${escapePromptData(recentSeal)}
+</recent_day_seal>
+<recent_day_seal_contract>
+recent_day_seal 是历史日记材料,只用于理解当天余味和避免重复表达; 与 user_corrections 冲突时,以 user_corrections 为准。
+</recent_day_seal_contract>` : ''}`,
     },
   ]
 
@@ -121,11 +163,14 @@ ${recentSeal}
 export function buildYinyiContext(date: string, weatherSummary?: string): LlmMessage[] {
   const prompt = extractYinyiSystemPrompt(readRootFile('prompts/yinyi-writer-v5.md') || readRootFile('prompts/yinyi-writer-v4.md'))
   const profile = getTasteProfile()
-  const history = loadTodayConversations(20)
-  const tracks = loadTodayTrackEvents(60)
-  const recommendations = tracks.filter((track) => track.source === 'recommended_by_echo')
-  const activeEvents = loadActiveEvents(8)
-  const todaySceneContext = buildTodaySceneContext()
+  const isToday = date === new Date().toLocaleDateString('sv-SE')
+  const history = loadConversationsForDate(date, 20)
+  const tracks = loadMeaningfulTrackEventsForDate(date, 60)
+  const positiveTracks = yinyiPositiveListeningEvidence(tracks)
+  const dismissedTracks = yinyiDismissedTrackEvidence(tracks)
+  const recommendations = yinyiRecommendationEvidence(tracks)
+  const activeEvents = isToday ? loadActiveEvents(8) : []
+  const todaySceneContext = isToday ? buildTodaySceneContext() : ''
   const recentYinyi = getYinyiRange(7).filter((entry) => entry.date !== date)
   const settings = getSettings()
   const firstUsedAt = new Date(settings.meta.firstUsedAt)
@@ -137,43 +182,77 @@ export function buildYinyiContext(date: string, weatherSummary?: string): LlmMes
     { role: 'system', content: `${buildSoulPolicyPrompt('yinyi')}\n\n${prompt}` },
     {
       role: 'user',
-      content: `<date>${date}</date>
-<weather>${weatherSummary ?? '未知'}</weather>
+      content: `<date>${escapePromptData(date)}</date>
+<weather>${escapePromptData(weatherSummary ?? '未知')}</weather>
 
 <today_listening>
-${tracks.length > 0 ? tracks.map((track) => {
+${safePromptJson(positiveTracks.map((track) => {
   const time = new Date(track.listenedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
-  const status = track.queueStatus ? ` · ${track.queueStatus}` : ''
-  const note = track.echoNote ? ` · ${track.echoNote}` : ''
-  return `- ${time} ${track.artist} / ${track.title}${track.album ? ` · ${track.album}` : ''}${track.source ? ` · ${track.source}` : ''}${status}${note}`
-}).join('\n') : '(暂无)'}
+  return {
+    time,
+    artist: track.artist,
+    title: track.title,
+    album: track.album,
+    source: track.source,
+    queueStatus: track.queueStatus,
+    echoNote: track.echoNote,
+  }
+}))}
 </today_listening>
 
+<dismissed_tracks>
+${safePromptJson(dismissedTracks.map((track) => {
+  const time = new Date(track.listenedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
+  return {
+    time,
+    artist: track.artist,
+    title: track.title,
+    queueStatusReason: track.queueStatusReason,
+  }
+}))}
+</dismissed_tracks>
+
 <today_conversations>
-${history.length > 0 ? history.map((item) => {
+${safePromptJson(history.map((item) => {
   const time = item.createdAt ? new Date(item.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }) : ''
-  return `${item.role}${time ? ` (${time})` : ''}: ${item.content}`
-}).join('\n') : '(暂无)'}
+  return {
+    role: item.role,
+    time,
+    content: item.content,
+  }
+}))}
 </today_conversations>
 
 <today_recommendations>
-${recommendations.length > 0 ? recommendations.map((track) => {
-  const source = track.recommendSource ? ` · ${track.recommendSource}` : ''
-  const reason = track.reason ? ` · ${track.reason}` : ''
-  const status = track.queueStatus ? ` · ${track.queueStatus}` : ''
-  return `- ${track.artist} / ${track.title}${source}${reason}${status}`
-}).join('\n') : '(暂无)'}
+${safePromptJson(recommendations.map((track) => ({
+  artist: track.artist,
+  title: track.title,
+  recommendSource: track.recommendSource,
+  reason: track.reason,
+  queueStatus: track.queueStatus,
+})))}
 </today_recommendations>
 
 <active_events>
-${activeEvents.length > 0 ? activeEvents.map((event) => `- ${event.content} (kind:${event.kind}, weight:${event.weight ?? '-'}, started:${event.startedAt ?? '-'})`).join('\n') : '(暂无)'}
+${safePromptJson(activeEvents.map((event) => ({
+  content: event.content,
+  kind: event.kind,
+  scope: event.kind === 'context' ? 'today_context' : 'active_event',
+  weight: event.weight ?? null,
+  confidence: event.confidence ?? null,
+  startedAt: event.startedAt ?? null,
+  createdAt: event.createdAt ?? null,
+})))}
 </active_events>
+<active_events_contract>
+kind=context 表示今天仍在持续的短期状态,只能写成“今天/这会儿/刚才”的轻量观察,不能写成稳定人格、长期偏好或反复模式。
+</active_events_contract>
 
 ${todaySceneContext}
 
 <taste_profile_summary>
-${tasteProfileSummary(profile) || '还没有完整画像。'}
-</taste_profile_summary>${tasteWorkNotesBlock(profile)}
+${escapePromptData(tasteProfileSummary(profile) || '暂无可直接写入风信的口味摘要。按 memory_evidence 里的结构化证据和纠正记录判断。')}
+</taste_profile_summary>
 
 <memory_policy>
 ${memoryPolicySummary()}
@@ -182,13 +261,20 @@ ${memoryPolicySummary()}
 ${buildMemoryEvidencePrompt(profile)}
 
 <recent_yinyi>
-${recentYinyi.length > 0 ? recentYinyi.map((entry) => {
+${safePromptJson(recentYinyi.map((entry) => {
   const raw = entry.content.split(/[。！？\n]/).filter(Boolean).slice(0, 2).join('。')
   const firstSentences = raw.length > 200 ? raw.slice(0, 200) : raw
   const wc = entry.content.replace(/\s+/g, '').length
-  return `${entry.date}: (${wc}字) ${firstSentences}...`
-}).join('\n') : '(暂无)'}
+  return {
+    date: entry.date,
+    wordCount: wc,
+    preview: firstSentences,
+  }
+}))}
 </recent_yinyi>
+<recent_yinyi_contract>
+recent_yinyi 是历史风信预览,只用于保持连续感和避免重复表达; 与 user_corrections 冲突时,以 user_corrections 为准。
+</recent_yinyi_contract>
 
 <meta>
 - 你已经陪 Ta ${daysSinceFirstUse} 天了
@@ -201,6 +287,7 @@ ${recentYinyi.length > 0 ? recentYinyi.map((entry) => {
 如果今日素材很少,写短一点。
 记忆只用于校准判断边界,不要复述“我记得你纠正过我”。
 把单日行为写成今天的状态,把多日重复和明确反馈写成稳定倾向。
+active_events 里的 context 只当作今日短期状态,不要扩写成“你一直/你总是/你其实”。
 </output_contract>`,
     },
   ]

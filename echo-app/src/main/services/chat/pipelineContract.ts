@@ -32,6 +32,85 @@ export function assertAssistantReplyInputContract(content: string, tracks: Track
   }
 }
 
+export function containsUnboundTrackClaim(content: string): boolean {
+  const concreteTitleClaim = /《[^》]{1,40}》/.test(content)
+    && /(?:放|听|推荐|挑|选|这首|先从|开始|试试)/.test(content)
+  const playbackCommitment = /(?:^|[，。！？；\s])(?:行|好|可以|那就|这就|我来|给你|先|就|直接|不如)?[，\s]*(?:先)?(?:放|播放|推荐|挑|选|接上|试试|听听|听一下|先听|开始听)/.test(content)
+  const implicitTrackClaim = /(?:这首|这一首).{0,50}(?:先听|正好|适合|开始放|试试看)/.test(content)
+  const descriptiveTrackClaim = /(?:这首|这歌|这首歌|这一首).{0,80}(?:前奏|副歌|编曲|旋律|歌词|鼓点|冲击力|感觉|气质|听听看|先听|开头)/.test(content)
+  const unquotedTitleClaim = /(?:^|[，。！？；\s])[A-Za-z0-9][A-Za-z0-9'’.-]*(?:\s+[A-Za-z0-9][A-Za-z0-9'’.-]*){1,8}.{0,12}(?:先听|听一下|试试|开始放|放着听)/.test(content)
+  return concreteTitleClaim || playbackCommitment || implicitTrackClaim || descriptiveTrackClaim || unquotedTitleClaim
+}
+
+function compactTrackText(value: string): string {
+  return value.toLowerCase().replace(/[\s《》“”"'‘’.,，。!！?？:：\-_/]/g, '')
+}
+
+function trackClaimMatches(track: Track, claim: string): boolean {
+  const normalizedClaim = compactTrackText(claim)
+  const normalizedTitle = compactTrackText(track.title)
+  const normalizedArtist = compactTrackText(track.artist)
+  return Boolean(
+    normalizedClaim
+    && (
+      normalizedClaim === normalizedTitle
+      || (normalizedTitle.length >= 3 && normalizedTitle.includes(normalizedClaim))
+      || (normalizedClaim.length >= 3 && normalizedClaim.includes(normalizedTitle))
+      || (normalizedArtist && normalizedClaim.includes(normalizedArtist) && normalizedClaim.includes(normalizedTitle))
+    ),
+  )
+}
+
+export function quotedTrackClaims(content: string): string[] {
+  return Array.from(content.matchAll(/《([^》]{1,40})》/g))
+    .map((match) => (match[1] ?? '').trim())
+    .filter(Boolean)
+}
+
+function quotedClaimSentence(content: string, index: number, claimLength: number): string {
+  const left = content.slice(0, index).search(/[^。！？；.!?;]*$/)
+  const start = left >= 0 ? left : 0
+  const tail = content.slice(index + claimLength)
+  const right = tail.search(/[。！？；.!?;]/)
+  const end = right >= 0 ? index + claimLength + right : content.length
+  return content.slice(start, end)
+}
+
+function quotedClaimLooksPlayable(content: string, index: number, rawClaim: string): boolean {
+  const sentence = quotedClaimSentence(content, index, rawClaim.length + 2)
+  const hasPlaybackVerb = /(?:放|播放|推荐|挑|选|接上|试试|听听|听一下|先听|开头|开始|换成|来一首|找一首|可以接|先从|不合适再换)/.test(sentence)
+  const hasMusicDescription = /(?:前奏|副歌|编曲|旋律|歌词|鼓点|冲击力|感觉|气质|节奏|音色|人声)/.test(sentence)
+  return hasPlaybackVerb || (hasMusicDescription && /(?:这首|这歌|这一首|先听|听听)/.test(sentence))
+}
+
+export function containsUnboundQuotedTrackClaim(content: string, tracks: Track[]): boolean {
+  const claims = Array.from(content.matchAll(/《([^》]{1,40})》/g))
+    .map((match) => ({
+      claim: (match[1] ?? '').trim(),
+      index: match.index ?? 0,
+    }))
+    .filter((item) => item.claim && quotedClaimLooksPlayable(content, item.index, item.claim))
+  if (claims.length === 0) return false
+  return claims.some(({ claim }) => !tracks.some((track) => trackClaimMatches(track, claim)))
+}
+
+export function boundTrackClaimContent(tracks: Track[]): string {
+  const first = tracks[0]
+  if (!first) return '我刚才没拿到能播放的版本，这次先不乱报歌名。你再让我挑一次，我直接把歌放出来。'
+  if (tracks.length === 1) return `行，先放${first.artist}的《${first.title}》。先听开头。`
+  const names = tracks.slice(0, 3).map((track) => `${track.artist}的《${track.title}》`).join('、')
+  return `行，我先挑这几首：${names}。先从第一首开始。`
+}
+
+export function enforceAssistantTrackBinding(content: string, tracks: Track[], expectsMusicAction = true): string {
+  if (tracks.length > 0) {
+    return containsUnboundQuotedTrackClaim(content, tracks) ? boundTrackClaimContent(tracks) : content
+  }
+  if (!containsUnboundTrackClaim(content)) return content
+  if (!expectsMusicAction && !/(?:放|播放|听听|先听|这首|这歌|《[^》]{1,40}》)/.test(content)) return content
+  return boundTrackClaimContent([])
+}
+
 export function assertSendChatResultContract(result: SendChatResult): SendChatResult {
   if (!result.message || result.message.role !== 'assistant') {
     throw new Error('chat pipeline contract failed: assistant message missing')

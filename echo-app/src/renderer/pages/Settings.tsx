@@ -1,13 +1,20 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
-import { Download, Upload } from 'lucide-react'
-import type { CareFrequency, EchoApi, ImportProgressPayload, ImportTaskSnapshot, Settings, Track } from '../../types/ipc'
+import { Download, Info, MessageCircle, Upload } from 'lucide-react'
+import type { CareFrequency, EchoApi, ImportProgressPayload, ImportTaskSnapshot, SemanticSummary, Settings, Track } from '../../types/ipc'
 import type { AppPageProps } from '../appState'
 import { EmptyState, Section } from '../components'
 import { RuntimeTaskList } from '../components/RuntimeTaskNotice'
-import { latestRunningRuntimeTask, useRuntimeTasks } from '../hooks/useRuntimeTasks'
+import { latestRunningRuntimeTask, runtimeTaskNeedsAttention, useRuntimeTasks } from '../hooks/useRuntimeTasks'
 import { pageLabels } from '../labels'
-import { serviceHealthLabel, serviceRecoveryHint } from '../../shared/runtimeRecovery'
+import { friendlyOperationError, serviceHealthLabel, serviceRecoveryHint } from '../../shared/runtimeRecovery'
 import { useSettingsPageState } from './settingsState'
+import { formatImportResultStatus, shouldAutoClearNeteaseImportStatus } from './settingsImportStatus'
+import {
+  refreshProfileAfterSemanticUpdateAction,
+  semanticBackfillResultStatus,
+  shouldRefreshProfileAfterSemanticBackfill,
+  shouldRefreshProfileForSemanticTask,
+} from './settingsSemanticRefresh'
 
 interface SettingsPageProps extends AppPageProps {
   echo: EchoApi
@@ -20,6 +27,8 @@ interface SettingsPageProps extends AppPageProps {
   importFocusToken?: number
   apiFocusToken?: number
   importTask: ImportTaskSnapshot | null
+  onOnboardingLlmReady?: () => Promise<void>
+  onDataReset?: (settings: Settings) => void
 }
 
 const providerPresets: Record<string, { label: string; baseUrl: string; keyHint: string; modelPlaceholder: string; docsUrl: string }> = {
@@ -76,6 +85,35 @@ function detectProvider(baseUrl: string): string {
 
 const defaultTtsBaseUrl = 'https://tts.wangwangit.com'
 const drawerExitMs = 360
+const semanticSummaryUnavailable = '语义统计暂时没有读出来。'
+const importResultStatusTtlMs = 8000
+
+function formatSemanticSummary(summary: SemanticSummary | null): string {
+  if (!summary) return '正在读取语义统计...'
+  if (summary.total <= 0) return '还没有歌曲语义记录'
+  const moodCount = summary.moods.length
+  return `已整理 ${summary.total} 首语义${moodCount > 0 ? ` · 情绪维度 ${moodCount} 类` : ''}`
+}
+
+function shouldShowServiceHealth(item: { service: string; status: string }): boolean {
+  if (!item.service.startsWith('scheduler')) return true
+  return item.status === 'degraded' || item.status === 'error'
+}
+
+function asyncStatusClass(state: string): 'ok' | 'err' | 'idle' {
+  if (state === 'ok') return 'ok'
+  if (state === 'err') return 'err'
+  return 'idle'
+}
+
+function qrStatusClass(message: string): 'err' | 'idle' {
+  return /失败|过期|异常|没有生成|失效/i.test(message) ? 'err' : 'idle'
+}
+
+function playlistStatusClass(message: string): 'err' | 'idle' {
+  return /失败|没有读出来|暂时没有读出来|登录.*失效/i.test(message) ? 'err' : 'idle'
+}
+
 const ttsVoices = [
   ['zh-CN-XiaochenNeural', '晓辰 · 知性'],
   ['zh-CN-XiaoxiaoNeural', '晓晓 · 温柔'],
@@ -113,6 +151,8 @@ export function SettingsPage({
   importFocusToken = 0,
   apiFocusToken = 0,
   importTask,
+  onOnboardingLlmReady,
+  onDataReset,
 }: SettingsPageProps) {
   const {
     patchSettingsPageState,
@@ -165,6 +205,10 @@ export function SettingsPage({
     setImportStatus,
     importState,
     setImportState,
+    profileStatus,
+    setProfileStatus,
+    profileState,
+    setProfileState,
     templateStatus,
     setTemplateStatus,
     templateState,
@@ -175,6 +219,10 @@ export function SettingsPage({
     setNeteaseQr,
     neteaseQrStatus,
     setNeteaseQrStatus,
+    neteaseLoginStatus,
+    setNeteaseLoginStatus,
+    neteaseLoginStatusState,
+    setNeteaseLoginStatusState,
     neteasePlaylists,
     setNeteasePlaylists,
     neteasePlaylistStatus,
@@ -199,6 +247,13 @@ export function SettingsPage({
   const [showNeteaseDrawer, setShowNeteaseDrawer] = useState(false)
   const [renderNeteaseDrawer, setRenderNeteaseDrawer] = useState(false)
   const [ttsEditingCustom, setTtsEditingCustom] = useState(false)
+  const [feedbackStatus, setFeedbackStatus] = useState('')
+  const [semanticSummary, setSemanticSummary] = useState<SemanticSummary | null>(null)
+  const [semanticSummaryStatus, setSemanticSummaryStatus] = useState('')
+  const [neteasePhone, setNeteasePhone] = useState('')
+  const [neteaseCaptcha, setNeteaseCaptcha] = useState('')
+  const [neteaseCaptchaCooldown, setNeteaseCaptchaCooldown] = useState(0)
+  const [neteaseCookieInput, setNeteaseCookieInput] = useState('')
 
   function switchProvider(key: string) {
     const preset = providerPresets[key]
@@ -220,12 +275,30 @@ export function SettingsPage({
   const drawerReturnFocusRef = useRef<HTMLElement | null>(null)
   const drawerOpenFrameRef = useRef<number | null>(null)
   const drawerCloseTimerRef = useRef<number | null>(null)
+  const semanticImportHandledRef = useRef<Set<string>>(new Set())
+  const semanticRuntimeHandledRef = useRef<Set<string>>(new Set())
+  const semanticBackfillPromiseRef = useRef<Promise<boolean> | null>(null)
+  const semanticProfileRefreshPromiseRef = useRef<Promise<boolean> | null>(null)
+  const mountedAtMsRef = useRef(Date.now())
   const runtimeTasks = useRuntimeTasks(echo)
 
   function commitSettings(next: Settings) {
     skipHydrateRef.current = true
     setSettings(next)
   }
+
+  const refreshSemanticSummary = useCallback(async (): Promise<SemanticSummary | null> => {
+    try {
+      const next = await echo.semantics.getSummary()
+      setSemanticSummary(next)
+      setSemanticSummaryStatus('')
+      return next
+    } catch (error) {
+      console.warn('[settings] semantic summary failed', error)
+      setSemanticSummaryStatus(semanticSummaryUnavailable)
+      return null
+    }
+  }, [echo])
 
   const restoreDrawerFocus = useCallback(() => {
     const target = drawerReturnFocusRef.current
@@ -258,6 +331,23 @@ export function SettingsPage({
       setShowNeteaseDrawer(true)
     })
   }, [])
+
+  const refreshNeteasePlaylistsAfterLogin = useCallback(async (loginMessage = '登录成功') => {
+    setNeteasePlaylistStatus('正在读取网易云歌单...')
+    try {
+      const playlists = await echo.netease.listPlaylists()
+      setNeteasePlaylists(playlists)
+      if (playlists.length > 0) {
+        setNeteasePlaylistStatus(`${loginMessage}，读到 ${playlists.length} 个歌单`)
+        openNeteaseDrawer()
+        return
+      }
+      setNeteasePlaylistStatus(`${loginMessage}，暂时没有读到歌单`)
+    } catch (error) {
+      setNeteasePlaylistStatus(`${loginMessage}，歌单暂时没有读出来。`)
+      console.warn('[settings] load netease playlists after login failed', error)
+    }
+  }, [echo, openNeteaseDrawer, setNeteasePlaylistStatus, setNeteasePlaylists])
 
   const closeNeteaseDrawer = useCallback(() => {
     setShowNeteaseDrawer(false)
@@ -321,6 +411,80 @@ export function SettingsPage({
       alive = false
     }
   }, [echo, setHealth])
+
+  useEffect(() => {
+    void refreshSemanticSummary()
+  }, [refreshSemanticSummary])
+
+  useEffect(() => {
+    if (importTask?.status !== 'succeeded') return
+    if (semanticImportHandledRef.current.has(importTask.id)) return
+    semanticImportHandledRef.current.add(importTask.id)
+    void refreshSemanticSummary()
+  }, [importTask, refreshSemanticSummary])
+
+  const refreshProfileAfterSemanticUpdate = useCallback(async (): Promise<boolean> => {
+    if (semanticProfileRefreshPromiseRef.current) return semanticProfileRefreshPromiseRef.current
+    const task = (async () => {
+      try {
+        return await refreshProfileAfterSemanticUpdateAction({
+          refreshStructuredProfile: () => echo.taste.refreshStructuredProfile(),
+          regeneratePortrait: () => echo.taste.regeneratePortrait(),
+          refreshProfile,
+          setProfileState,
+          setProfileStatus,
+          friendlyError: friendlyOperationError,
+        })
+      } finally {
+        semanticProfileRefreshPromiseRef.current = null
+      }
+    })()
+    semanticProfileRefreshPromiseRef.current = task
+    return task
+  }, [echo, refreshProfile, setProfileState, setProfileStatus])
+
+  useEffect(() => {
+    const completedSemanticTask = runtimeTasks.find((task) => shouldRefreshProfileForSemanticTask(task, mountedAtMsRef.current))
+    if (!completedSemanticTask || semanticRuntimeHandledRef.current.has(completedSemanticTask.id)) return
+    semanticRuntimeHandledRef.current.add(completedSemanticTask.id)
+    if (semanticBackfillPromiseRef.current) return
+    void refreshSemanticSummary()
+    void refreshProfileAfterSemanticUpdate()
+  }, [refreshProfileAfterSemanticUpdate, refreshSemanticSummary, runtimeTasks])
+
+  useEffect(() => {
+    if (importState !== 'ok' || !importStatus) return
+    const timer = window.setTimeout(() => {
+      setImportStatus('')
+      setImportState('idle')
+    }, importResultStatusTtlMs)
+    return () => window.clearTimeout(timer)
+  }, [importState, importStatus, setImportState, setImportStatus])
+
+  useEffect(() => {
+    if (profileState !== 'ok' || !profileStatus) return
+    const timer = window.setTimeout(() => {
+      setProfileStatus('')
+      setProfileState('idle')
+    }, importResultStatusTtlMs)
+    return () => window.clearTimeout(timer)
+  }, [profileState, profileStatus, setProfileState, setProfileStatus])
+
+  useEffect(() => {
+    if (!shouldAutoClearNeteaseImportStatus(neteasePlaylistStatus)) return
+    const timer = window.setTimeout(() => {
+      setNeteasePlaylistStatus('')
+    }, importResultStatusTtlMs)
+    return () => window.clearTimeout(timer)
+  }, [neteasePlaylistStatus, setNeteasePlaylistStatus])
+
+  useEffect(() => {
+    if (neteaseCaptchaCooldown <= 0) return undefined
+    const timer = window.setInterval(() => {
+      setNeteaseCaptchaCooldown((current) => Math.max(0, current - 1))
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [neteaseCaptchaCooldown])
 
   useEffect(() => {
     if (!importFocusToken) return
@@ -388,21 +552,24 @@ export function SettingsPage({
         if (result.status === 'authorized' && result.state) {
           setNeteaseState(result.state)
           setNeteaseQr(null)
+          setNeteaseLoginStatus('')
+          setNeteaseLoginStatusState('idle')
           window.clearInterval(timer)
+          await refreshNeteasePlaylistsAfterLogin(result.message)
         }
         if (result.status === 'expired' || result.status === 'failed') {
           setNeteaseQr(null)
           window.clearInterval(timer)
         }
       } catch (error) {
-        if (!stopped) setNeteaseQrStatus(error instanceof Error ? error.message : '登录检查失败')
+        if (!stopped) setNeteaseQrStatus(friendlyOperationError(error, '登录状态检查失败，请重新登录。'))
       }
     }, 1800)
     return () => {
       stopped = true
       window.clearInterval(timer)
     }
-  }, [echo, neteaseQr, setNeteaseQr, setNeteaseQrStatus, setNeteaseState])
+  }, [echo, neteaseQr, refreshNeteasePlaylistsAfterLogin, setNeteaseLoginStatus, setNeteaseLoginStatusState, setNeteaseQr, setNeteaseQrStatus, setNeteaseState])
 
   async function save(event?: FormEvent): Promise<boolean> {
     event?.preventDefault()
@@ -429,13 +596,46 @@ export function SettingsPage({
       setTestState('ok')
       return true
     } catch (error) {
-      const message = error instanceof Error ? error.message : '保存失败'
-      setModelStatus(message)
+      setModelStatus(friendlyOperationError(error, '设置没有保存，请检查后再试。'))
       setTestState('fail')
       setHealth(await echo.health.get().catch(() => health))
       return false
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function backfillSemanticsAfterModelReady(): Promise<boolean> {
+    if (semanticBackfillPromiseRef.current) return semanticBackfillPromiseRef.current
+    const task = (async () => {
+      setSemanticSummaryStatus('正在补齐歌曲语义...')
+      try {
+        const result = await echo.semantics.buildForImportedTracks()
+        await refreshSemanticSummary()
+        if (shouldRefreshProfileAfterSemanticBackfill(result)) {
+          await refreshProfileAfterSemanticUpdate()
+        } else {
+          setSemanticSummaryStatus(semanticBackfillResultStatus(result))
+        }
+        return true
+      } catch (error) {
+        console.warn('[settings] semantic backfill failed', error)
+        setSemanticSummaryStatus(friendlyOperationError(error, '语义补齐没有完成，稍后再试。'))
+        return false
+      } finally {
+        semanticBackfillPromiseRef.current = null
+      }
+    })()
+    semanticBackfillPromiseRef.current = task
+    return task
+  }
+
+  async function openFeedback() {
+    setFeedbackStatus('')
+    try {
+      await echo.app.openFeedback()
+    } catch {
+      setFeedbackStatus('暂时没打开，稍后再试。')
     }
   }
 
@@ -449,7 +649,7 @@ export function SettingsPage({
       setChatStatus('已保存')
     } catch (error) {
       setRestoreOnStart(previous)
-      setChatStatus(error instanceof Error ? error.message : '保存失败')
+      setChatStatus(friendlyOperationError(error, '设置没有保存，请稍后再试。'))
     }
   }
 
@@ -467,7 +667,7 @@ export function SettingsPage({
       setYinyiStatus('已保存')
     } catch (error) {
       setGenerateAt(previous)
-      setYinyiStatus(error instanceof Error ? error.message : '保存失败')
+      setYinyiStatus(friendlyOperationError(error, '生成时间没有保存，请稍后再试。'))
     }
   }
 
@@ -481,7 +681,7 @@ export function SettingsPage({
       setYinyiStatus('已保存')
     } catch (error) {
       setOpenWithRandom(previous)
-      setYinyiStatus(error instanceof Error ? error.message : '保存失败')
+      setYinyiStatus(friendlyOperationError(error, '设置没有保存，请稍后再试。'))
     }
   }
 
@@ -495,9 +695,17 @@ export function SettingsPage({
       setTestState(result.ok ? 'ok' : 'fail')
       setModelStatus(result.ok ? result.message || `连接正常 · ${result.latencyMs ?? '-'} ms` : result.message)
       setHealth(await echo.health.get())
+      if (result.ok) {
+        const backfilled = await backfillSemanticsAfterModelReady()
+        if (backfilled) {
+          await onOnboardingLlmReady?.().catch((error) => {
+            console.warn('[settings] onboarding progression failed', error)
+          })
+        }
+      }
     } catch (error) {
       setTestState('fail')
-      setModelStatus(error instanceof Error ? error.message : '连接失败')
+      setModelStatus(friendlyOperationError(error, '模型连接失败，请检查设置。'))
     } finally {
       setBusy(false)
     }
@@ -509,11 +717,12 @@ export function SettingsPage({
     setImportStatus('正在读取通用歌单 JSON、写入本地数据库，并生成你的初始画像...')
     try {
       const result = await echo.settings.importPlaylist()
+      const summary = result.imported ? await refreshSemanticSummary() : semanticSummary
       setImportState(result.imported ? 'ok' : result.count === 0 && result.message === '导入已取消' ? 'idle' : 'fail')
-      setImportStatus(result.imported ? `${result.message ?? `已导入 ${result.count} 首`} · ${result.name ?? '歌单'}` : result.message ?? '导入失败')
+      setImportStatus(formatImportResultStatus(result, summary))
     } catch (error) {
       setImportState('fail')
-      setImportStatus(error instanceof Error ? error.message : '导入失败')
+      setImportStatus(friendlyOperationError(error, '这次导入没有完成，请稍后再试。'))
     } finally {
       setBusy(false)
     }
@@ -528,7 +737,7 @@ export function SettingsPage({
       setTemplateStatus(result.message)
     } catch (error) {
       setTemplateState('fail')
-      setTemplateStatus(error instanceof Error ? error.message : '模板保存失败')
+      setTemplateStatus(friendlyOperationError(error, '模板没有保存，请稍后再试。'))
     }
   }
 
@@ -536,9 +745,9 @@ export function SettingsPage({
     if (progress.phase === 'semantics') {
       const total = Math.max(1, Math.ceil(progress.total / 25))
       const current = Math.min(total, Math.ceil(progress.current / 25))
-      return `语义标注 ${current}/${total} 批 · 已读 ${progress.current}/${progress.total} 首`
+      return `正在整理歌曲 ${current}/${total} 批 · ${progress.current}/${progress.total} 首`
     }
-    if (progress.phase === 'profile') return 'Echo 在写画像第一稿...'
+    if (progress.phase === 'profile') return '正在更新画像...'
     return '导入完成'
   }
 
@@ -552,16 +761,28 @@ export function SettingsPage({
   async function regenerateProfile() {
     if (profileRefreshRunning) return
     setBusy(true)
-    setImportState('importing')
-    setImportStatus('Echo 正在重新整理你的画像...')
+    setProfileState('importing')
+    setProfileStatus('Echo 正在重新整理你的画像...')
     try {
       await echo.taste.regeneratePortrait()
       await refreshProfile()
-      setImportState('ok')
-      setImportStatus('画像已重新生成')
+      setProfileState('ok')
+      setProfileStatus('画像已重新生成')
     } catch (error) {
-      setImportState('fail')
-      setImportStatus(error instanceof Error ? error.message : '画像重新生成失败')
+      try {
+        await refreshProfile()
+      } catch {
+        // Keep the original generation error as the visible status; profile refresh is a recovery attempt.
+      }
+      setProfileState('fail')
+      const message = error instanceof Error ? error.message : String(error)
+      setProfileStatus(
+        /API.?key|鉴权|401|403|配置/i.test(message)
+          ? '我这会儿连不上模型，检查一下 API 设置。'
+          : /超时|网络|fetch|ECONN|ENOTFOUND|服务端/i.test(message)
+            ? '刚才连接不太顺，稍后再试一次。'
+            : '我刚才没写顺，原来的画像还在。',
+      )
     } finally {
       setBusy(false)
     }
@@ -586,20 +807,30 @@ export function SettingsPage({
       await echo.settings.resetData()
       const next = await echo.settings.get()
       setSettings(next)
-      await Promise.all([refreshProfile(), refreshQueue()])
+      onDataReset?.(next)
+      await Promise.all([
+        refreshProfile().catch((error) => console.warn('[settings] refresh profile after reset failed', error)),
+        refreshQueue().catch((error) => console.warn('[settings] refresh queue after reset failed', error)),
+      ])
       setNeteaseState(await echo.netease.getLoginState().catch(() => ({ loggedIn: false, message: '网易云状态检查失败' })))
       setHealth(await echo.health.get().catch(() => []))
       patchSettingsPageState({
         neteaseQr: null,
         neteaseQrStatus: '',
+        neteaseLoginStatus: '',
+        neteaseLoginStatusState: 'idle',
         neteasePlaylists: [],
         neteasePlaylistStatus: '',
         importStatus: '',
+        profileStatus: '',
+        profileState: 'idle',
         dataStatus: '数据已清空',
         dataState: 'ok',
       })
+      setSemanticSummary(null)
+      setSemanticSummaryStatus('')
     } catch (error) {
-      setDataStatus(error instanceof Error ? error.message : '清空失败')
+      setDataStatus(friendlyOperationError(error, '数据清空失败，请重新打开 Echo 后再试。'))
       setDataState('err')
     } finally {
       setBusy(false)
@@ -630,7 +861,7 @@ export function SettingsPage({
       setVoiceSettingsStatus('已保存')
       return true
     } catch (error) {
-      setVoiceSettingsStatus(error instanceof Error ? error.message : '保存失败')
+      setVoiceSettingsStatus(friendlyOperationError(error, '语音设置没有保存，请稍后再试。'))
       return false
     }
   }
@@ -657,7 +888,7 @@ export function SettingsPage({
       setHealth(await echo.health.get().catch(() => health))
     } catch (error) {
       setTtsTestState('fail')
-      setTtsTestStatus(error instanceof Error ? error.message : '语音服务测试失败')
+      setTtsTestStatus(friendlyOperationError(error, '语音服务暂时没有接通。'))
     }
   }
 
@@ -668,7 +899,7 @@ export function SettingsPage({
       const result = await echo.carePings.test()
       setCareStatus(result.message)
     } catch (error) {
-      setCareStatus(error instanceof Error ? error.message : '测试通知失败')
+      setCareStatus(friendlyOperationError(error, '测试通知没有发出来。'))
     }
   }
 
@@ -682,7 +913,7 @@ export function SettingsPage({
       setCareStatus('已保存')
     } catch (error) {
       setCareEnabled(previous)
-      setCareStatus(error instanceof Error ? error.message : '保存失败')
+      setCareStatus(friendlyOperationError(error, '设置没有保存，请稍后再试。'))
     }
   }
 
@@ -696,20 +927,92 @@ export function SettingsPage({
       setCareStatus('已保存')
     } catch (error) {
       setCareFrequency(previous)
-      setCareStatus(error instanceof Error ? error.message : '保存失败')
+      setCareStatus(friendlyOperationError(error, '设置没有保存，请稍后再试。'))
     }
   }
 
   async function startNeteaseLogin() {
     setNeteaseBusy(true)
     setNeteaseQrStatus('正在生成二维码...')
+    setNeteaseLoginStatus('')
+    setNeteaseLoginStatusState('idle')
     try {
       const qr = await echo.netease.createQrLogin()
       setNeteaseQr(qr)
       setNeteaseQrStatus(qr.message)
     } catch (error) {
       setNeteaseQr(null)
-      setNeteaseQrStatus(error instanceof Error ? error.message : '二维码生成失败')
+      setNeteaseQrStatus(friendlyOperationError(error, '二维码没有生成，请稍后再试。'))
+    } finally {
+      setNeteaseBusy(false)
+    }
+  }
+
+  async function sendNeteaseCaptcha() {
+    setNeteaseBusy(true)
+    setNeteasePlaylistStatus('')
+    setNeteaseLoginStatus('正在发送验证码...')
+    setNeteaseLoginStatusState('working')
+    try {
+      const result = await echo.netease.sendCaptcha(neteasePhone)
+      setNeteaseLoginStatus(result.message)
+      setNeteaseLoginStatusState(result.ok ? 'ok' : 'err')
+      if (result.ok) setNeteaseCaptchaCooldown(60)
+    } catch (error) {
+      setNeteaseLoginStatus(friendlyOperationError(error, '验证码没有发出去，请稍后再试。'))
+      setNeteaseLoginStatusState('err')
+    } finally {
+      setNeteaseBusy(false)
+    }
+  }
+
+  async function loginNeteaseWithCaptcha() {
+    setNeteaseBusy(true)
+    setNeteaseLoginStatus('正在登录网易云...')
+    setNeteaseLoginStatusState('working')
+    try {
+      const state = await echo.netease.loginWithCaptcha(neteasePhone, neteaseCaptcha)
+      setNeteaseState(state)
+      if (state.loggedIn) {
+        setNeteaseQr(null)
+        setNeteaseQrStatus('')
+        setNeteaseCaptcha('')
+        setNeteaseLoginStatusState('ok')
+        await refreshNeteasePlaylistsAfterLogin(state.message)
+      } else {
+        setNeteaseLoginStatusState('err')
+      }
+      setNeteaseLoginStatus(state.message)
+      setHealth(await echo.health.get().catch(() => health))
+    } catch (error) {
+      setNeteaseLoginStatus(friendlyOperationError(error, '验证码登录失败，请稍后再试。'))
+      setNeteaseLoginStatusState('err')
+    } finally {
+      setNeteaseBusy(false)
+    }
+  }
+
+  async function importNeteaseCookie() {
+    setNeteaseBusy(true)
+    setNeteaseLoginStatus('正在验证 Cookie...')
+    setNeteaseLoginStatusState('working')
+    try {
+      const state = await echo.netease.importCookie(neteaseCookieInput)
+      setNeteaseState(state)
+      if (state.loggedIn) {
+        setNeteaseQr(null)
+        setNeteaseQrStatus('')
+        setNeteaseCookieInput('')
+        setNeteaseLoginStatusState('ok')
+        await refreshNeteasePlaylistsAfterLogin(state.message)
+      } else {
+        setNeteaseLoginStatusState('err')
+      }
+      setNeteaseLoginStatus(state.message)
+      setHealth(await echo.health.get().catch(() => health))
+    } catch (error) {
+      setNeteaseLoginStatus(friendlyOperationError(error, 'Cookie 登录失败，请检查 MUSIC_U。'))
+      setNeteaseLoginStatusState('err')
     } finally {
       setNeteaseBusy(false)
     }
@@ -721,7 +1024,7 @@ export function SettingsPage({
       setNeteaseState(await echo.netease.getLoginState())
       setHealth(await echo.health.get())
     } catch (error) {
-      setNeteaseState({ loggedIn: false, message: error instanceof Error ? error.message : '网易云状态检查失败' })
+      setNeteaseState({ loggedIn: false, message: friendlyOperationError(error, '网易云状态检查失败。') })
     } finally {
       setNeteaseBusy(false)
     }
@@ -735,11 +1038,13 @@ export function SettingsPage({
       patchSettingsPageState({
         neteaseQr: null,
         neteaseQrStatus: '',
+        neteaseLoginStatus: '',
+        neteaseLoginStatusState: 'idle',
         neteasePlaylists: [],
         neteasePlaylistStatus: '',
       })
     } catch (error) {
-      setNeteasePlaylistStatus(error instanceof Error ? error.message : '退出失败')
+      setNeteasePlaylistStatus(friendlyOperationError(error, '退出登录失败，请稍后再试。'))
     } finally {
       setNeteaseBusy(false)
     }
@@ -756,7 +1061,7 @@ export function SettingsPage({
         openNeteaseDrawer()
       }
     } catch (error) {
-      setNeteasePlaylistStatus(error instanceof Error ? error.message : '读取歌单失败')
+      setNeteasePlaylistStatus(friendlyOperationError(error, '歌单暂时没有读出来。'))
     } finally {
       setNeteaseBusy(false)
     }
@@ -780,9 +1085,10 @@ export function SettingsPage({
     setNeteasePlaylistStatus('正在导入网易云歌单，并重新生成画像...')
     try {
       const result = await echo.netease.importPlaylist(id)
-      setNeteasePlaylistStatus(result.imported ? `${result.message} · ${result.name ?? '歌单'}` : result.message ?? '导入失败')
+      const summary = result.imported ? await refreshSemanticSummary() : semanticSummary
+      setNeteasePlaylistStatus(formatImportResultStatus(result, summary))
     } catch (error) {
-      setNeteasePlaylistStatus(error instanceof Error ? error.message : '导入失败')
+      setNeteasePlaylistStatus(friendlyOperationError(error, '这次导入没有完成，请稍后再试。'))
     } finally {
       setImportingNeteaseId('')
     }
@@ -835,10 +1141,13 @@ export function SettingsPage({
   const profileRefreshTask = latestRunningRuntimeTask(runtimeTasks, ['taste-refresh'], { includeChildren: false })
   const carePingTask = latestRunningRuntimeTask(runtimeTasks, ['care-ping'], { includeChildren: false })
   const schedulerCatchupTask = latestRunningRuntimeTask(runtimeTasks, ['scheduler-catchup'], { includeChildren: false })
+  const semanticAnalysisTask = latestRunningRuntimeTask(runtimeTasks, ['semantic-analysis'], { includeChildren: false })
   const profileRefreshRunning = Boolean(profileRefreshTask)
   const carePingRunning = Boolean(carePingTask)
   const schedulerCatchupRunning = Boolean(schedulerCatchupTask)
   const anyRuntimeTaskRunning = runtimeTasks.some((task) => task.status === 'running')
+  const visibleRuntimeTasks = runtimeTasks.filter(runtimeTaskNeedsAttention)
+  const visibleHealth = health.filter(shouldShowServiceHealth)
   const activeImportTask = importTask?.status === 'running'
   const importProgress: ImportProgressPayload | null = activeImportTask && importTask && (importTask.phase === 'semantics' || importTask.phase === 'profile' || importTask.phase === 'done')
     ? {
@@ -848,9 +1157,21 @@ export function SettingsPage({
       startedAt: importTask.startedAt,
     }
     : null
+  const semanticProgress: ImportProgressPayload | null = semanticAnalysisTask
+    ? {
+      phase: 'semantics',
+      current: semanticAnalysisTask.current,
+      total: semanticAnalysisTask.total,
+      startedAt: semanticAnalysisTask.startedAt,
+    }
+    : null
+  const visibleImportProgress = importProgress ?? semanticProgress
   const globalImportStatus = activeImportTask
     ? importTask.sourceName ? `正在处理 ${importTask.sourceName}` : '导入任务正在进行'
-    : ''
+    : semanticAnalysisTask
+      ? '正在补齐歌曲语义'
+      : ''
+  const neteaseCaptchaSent = neteaseCaptchaCooldown > 0 || (neteaseLoginStatusState === 'ok' && /验证码|发送/.test(neteaseLoginStatus))
   return (
     <div className="phone-surface settings-page">
       {/* Tabs Header */}
@@ -880,28 +1201,28 @@ export function SettingsPage({
 
       <div className="scroll-panel">
         {/* Pinned Progress HUD */}
-        {(globalImportStatus || importProgress) && (
+        {(globalImportStatus || visibleImportProgress) && (
           <div className="import-progress-hud" aria-live="polite">
             <div className="hud-meta">
               <div className="hud-title">
                 <span className="hud-pulse" />
-                {importProgress ? '正在导入你的歌单...' : '歌单导入任务'}
+                {activeImportTask ? '正在导入你的歌单...' : semanticAnalysisTask ? '正在整理歌曲语义...' : '歌单导入任务'}
               </div>
-              {importProgress && (
+              {visibleImportProgress && (
                 <div className="hud-percent">
-                  {importProgressPercent(importProgress)}%
+                  {importProgressPercent(visibleImportProgress)}%
                 </div>
               )}
             </div>
-            {importProgress && (
+            {visibleImportProgress && (
               <div className="hud-bar-bg">
-                <div className="hud-bar-fill" style={{ width: `${importProgressPercent(importProgress)}%` }} />
+                <div className="hud-bar-fill" style={{ width: `${importProgressPercent(visibleImportProgress)}%` }} />
               </div>
             )}
             <div className="hud-status-text">
-              {importProgress ? importProgressLine(importProgress) : globalImportStatus}
+              {visibleImportProgress ? importProgressLine(visibleImportProgress) : globalImportStatus}
             </div>
-            {globalImportStatus && importProgress && (
+            {globalImportStatus && visibleImportProgress && (
               <div className="hud-status-text" style={{ opacity: 0.7, fontSize: '10px' }}>
                 {globalImportStatus}
               </div>
@@ -915,6 +1236,10 @@ export function SettingsPage({
             <div ref={importSectionRef} className="import-focus-anchor">
               <Section label="让 Echo 认识你的音乐">
                 <p className="import-intro">登录网易云后才能播放歌曲；导入歌单后 Echo 才懂你的口味。</p>
+                <div className={`semantic-summary ${semanticSummaryStatus ? 'warn' : ''}`}>
+                  <span className="status-dot" />
+                  {semanticSummaryStatus || formatSemanticSummary(semanticSummary)}
+                </div>
 
                 <div className="import-method">
                   <div className="import-method-title">网易云音乐</div>
@@ -944,7 +1269,7 @@ export function SettingsPage({
                       <div>
                         <div className="field-label">用网易云音乐 App 扫码</div>
                         <div className="field-hint">扫码后在手机上确认，这里会自动更新登录状态。</div>
-                        <div className="status-ind idle">
+                        <div className={`status-ind ${qrStatusClass(neteaseQrStatus)}`}>
                           <span className="status-dot" />
                           {neteaseQrStatus}
                         </div>
@@ -952,9 +1277,64 @@ export function SettingsPage({
                     </div>
                   )}
                   {!neteaseQr && neteaseQrStatus && (
-                    <div className="status-ind idle">
+                    <div className={`status-ind ${qrStatusClass(neteaseQrStatus)}`}>
                       <span className="status-dot" />
                       {neteaseQrStatus}
+                    </div>
+                  )}
+                  {!neteaseState.loggedIn && (
+                    <div style={{ display: 'grid', gap: '12px', marginTop: '14px' }}>
+                      <div className="field">
+                        <div className="field-label">短信验证码登录</div>
+                        <div className="field-hint">扫码被风控时用这个入口。验证码来自网易云官方短信。</div>
+                        <div className="netease-phone-field">
+                          <input
+                            className="input"
+                            value={neteasePhone}
+                            onChange={(event) => { setNeteasePhone(event.target.value); setNeteaseCaptchaCooldown(0) }}
+                            placeholder="手机号"
+                            inputMode="tel"
+                          />
+                          <button className="netease-code-btn" type="button" onClick={sendNeteaseCaptcha} disabled={neteaseBusy || !neteasePhone.trim() || neteaseCaptchaCooldown > 0}>
+                            {neteaseCaptchaSent ? '已发送' : neteaseLoginStatusState === 'working' ? '发送中' : '发验证码'}
+                          </button>
+                        </div>
+                        <div className="settings-row">
+                          <input
+                            className="input"
+                            value={neteaseCaptcha}
+                            onChange={(event) => setNeteaseCaptcha(event.target.value)}
+                            placeholder="验证码"
+                            inputMode="numeric"
+                          />
+                          <button className="btn" type="button" onClick={loginNeteaseWithCaptcha} disabled={neteaseBusy || !neteasePhone.trim() || !neteaseCaptcha.trim()}>
+                            登录
+                          </button>
+                        </div>
+                        {neteaseLoginStatus && (
+                          <div className={`status-ind ${asyncStatusClass(neteaseLoginStatusState)}`}>
+                            <span className="status-dot" />
+                            {neteaseLoginStatus}
+                          </div>
+                        )}
+                      </div>
+                      <div className="field">
+                        <div className="field-label">Cookie 兜底</div>
+                        <div className="field-hint">填完整 Cookie，或只填 MUSIC_U 的值。Echo 会加密保存在本地。</div>
+                        <textarea
+                          className="input"
+                          value={neteaseCookieInput}
+                          onChange={(event) => setNeteaseCookieInput(event.target.value)}
+                          placeholder="MUSIC_U=..."
+                          rows={3}
+                          style={{ resize: 'vertical' }}
+                        />
+                        <div className="settings-row">
+                          <button className="btn sec" type="button" onClick={importNeteaseCookie} disabled={neteaseBusy || !neteaseCookieInput.trim()}>
+                            使用 Cookie 登录
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   )}
                   {neteaseState.loggedIn && neteasePlaylists.length > 0 && (
@@ -970,7 +1350,7 @@ export function SettingsPage({
                     </div>
                   )}
                   {neteasePlaylistStatus && (
-                    <div className={`status-ind ${neteasePlaylistStatus.includes('失败') ? 'err' : 'idle'}`} style={{ marginTop: '10px' }}>
+                    <div className={`status-ind ${playlistStatusClass(neteasePlaylistStatus)}`} style={{ marginTop: '10px' }}>
                       <span className="status-dot" />
                       {neteasePlaylistStatus}
                     </div>
@@ -1012,9 +1392,15 @@ export function SettingsPage({
                     <small>基于已导入歌单重新初始化画像。</small>
                   </div>
                   <button className="btn warn" type="button" onClick={regenerateProfile} disabled={busy || activeImportTask || profileRefreshRunning || schedulerCatchupRunning}>
-                    {profileRefreshRunning ? '生成中...' : '重新生成'}
+                    {profileRefreshRunning || profileState === 'importing' ? '生成中...' : '重新生成'}
                   </button>
                 </div>
+                {profileStatus && (
+                  <div className={`status-ind ${profileState === 'ok' ? 'ok' : profileState === 'fail' ? 'err' : 'idle'}`}>
+                    <span className="status-dot" />
+                    {profileStatus}
+                  </div>
+                )}
               </Section>
             </div>
           )}
@@ -1308,9 +1694,9 @@ export function SettingsPage({
                 </Section>
               </div>
 
-              {runtimeTasks.length > 0 && (
+              {visibleRuntimeTasks.length > 0 && (
                 <Section label="运行任务">
-                  <RuntimeTaskList tasks={runtimeTasks} onCancel={(id) => { void cancelRuntimeTask(id) }} />
+                  <RuntimeTaskList tasks={visibleRuntimeTasks} onCancel={(id) => { void cancelRuntimeTask(id) }} />
                 </Section>
               )}
 
@@ -1322,7 +1708,7 @@ export function SettingsPage({
                   </button>
                 </div>
                 <div className="service-health-list">
-                  {health.map((item) => (
+                  {visibleHealth.map((item) => (
                     <div className={`service-health-item ${item.status}`} key={item.service}>
                       <div className="service-health-main">
                         <span className="service-health-dot" />
@@ -1361,13 +1747,20 @@ export function SettingsPage({
           )}
         </form>
 
-        <div className="about-link">
-          <button type="button" className="about-link-btn" onClick={() => navigate('about')}>
-            关于 Echo &nbsp;›
+        <div className="settings-support-links">
+          <button type="button" className="settings-support-link" onClick={() => { void openFeedback() }}>
+            <MessageCircle size={13} aria-hidden="true" />
+            反馈与建议
+          </button>
+          <span className="settings-support-separator" aria-hidden="true">·</span>
+          <button type="button" className="settings-support-link" onClick={() => navigate('about')}>
+            <Info size={13} aria-hidden="true" />
+            关于 Echo
           </button>
         </div>
+        {feedbackStatus && <div className="settings-support-status" role="status">{feedbackStatus}</div>}
 
-        <footer className="page-foot">E C H O · v 0 . 1 . 2</footer>
+        <footer className="page-foot">E C H O · v 0 . 1 . 3</footer>
       </div>
 
       {renderNeteaseDrawer && (

@@ -1,6 +1,6 @@
-import type { RuntimeErrorKind, RuntimeEvent, RuntimeTaskSnapshot, RuntimeTaskStatus } from '../../types/ipc'
+import type { RuntimeErrorKind, RuntimeEvent, RuntimeTaskSnapshot, RuntimeTaskStatus, RuntimeTaskVisibility } from '../../types/ipc'
 
-export type { RuntimeErrorKind, RuntimeEvent, RuntimeTaskSnapshot, RuntimeTaskStatus }
+export type { RuntimeErrorKind, RuntimeEvent, RuntimeTaskSnapshot, RuntimeTaskStatus, RuntimeTaskVisibility }
 
 export type RuntimeTaskKind =
   | 'chat-send'
@@ -26,6 +26,7 @@ export interface RuntimeTaskStartOptions {
   message?: string
   cancellable?: boolean
   uniqueKey?: string
+  visibility?: RuntimeTaskVisibility
 }
 
 export interface RuntimeTaskRecord {

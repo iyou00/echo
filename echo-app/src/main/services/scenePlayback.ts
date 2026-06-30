@@ -1,12 +1,15 @@
 import { BrowserWindow } from 'electron'
 import type { ActiveScene, ChatMessage, PlaybackState, SceneKey, ScenePlaybackOptions, Track } from '../../types/ipc'
 import { appendConversation } from '../db/conversations'
+import { loadActiveEvents, type ActiveEvent } from '../db/events'
 import { appendRecommendedTracks, loadListenedTrackWindows, loadRecentRecommendedTracks, skipTodayRecommendedTracks } from '../db/tracks'
 import { getDb } from '../db'
 import { getTasteProfile } from '../db/taste'
 import { getSettings } from '../db/settings'
 import { completeChat } from '../llm/client'
 import { stripKnownSystemBlocks } from '../llm/outputSanitize'
+import { safePromptJson } from '../llm/promptData'
+import { buildMemoryEvidencePrompt } from './memoryEvidence'
 import { primaryArtist, trackKey, uniqueTracks } from '../skills/music/identity'
 import { isMusicSearchAuthError, searchMusic } from '../skills/music/search'
 import { selectDiverseTracks } from '../skills/music/selection'
@@ -14,6 +17,7 @@ import { buildSoulPolicyPrompt } from '../skills/soul/policy'
 import { clearQueue, enqueue, getState, play } from './playback'
 import { markQueueStatus } from './queue'
 import { endCurrentScene, getCurrentScene, isSceneSessionCurrent, startScene } from './scene'
+import { hasExplicitMemorySource, hasMemorySourceLeak } from './memorySourceGuard'
 
 export interface ScenePlaybackResult {
   scene: ActiveScene
@@ -34,8 +38,32 @@ class SceneNoPlayableTrackError extends Error {
   }
 }
 
+function shouldPreserveSceneOnPlaybackFailure(options: ScenePlaybackOptions, error: unknown): boolean {
+  return Boolean(options.continueSession && error instanceof SceneNoPlayableTrackError)
+}
+
 function assertScenePlaybackActive(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException('任务已取消', 'AbortError')
+}
+
+function waitForSceneRetry(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('任务已取消', 'AbortError'))
+      return
+    }
+    const cleanup = () => signal?.removeEventListener('abort', onAbort)
+    const onAbort = () => {
+      clearTimeout(timer)
+      cleanup()
+      reject(new DOMException('任务已取消', 'AbortError'))
+    }
+    const timer = setTimeout(() => {
+      cleanup()
+      resolve()
+    }, ms)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 function attachScene(scene: ActiveScene, tracks: Track[]): Track[] {
@@ -69,14 +97,11 @@ function recentArtistSet(tracks: Track[]): Set<string> {
   return new Set(tracks.map((track) => primaryArtist(track.artist)).filter(Boolean))
 }
 
-function pickSceneTracks(candidates: Track[], targetCount: number): Track[] {
-  const recentRecommended = loadRecentRecommendedTracks(120)
-  const listenedWindows = loadListenedTrackWindows(24 * 7, 500, 48, 240)
-  const excluded = [...recentRecommended, ...listenedWindows.history]
+function pickSceneTracksFromPool(candidates: Track[], targetCount: number, excluded: Track[], avoidArtistTracks: Track[]): Track[] {
   const strict = selectDiverseTracks(candidates, {
     targetCount,
     maxPerArtist: 1,
-    avoidArtists: recentArtistSet([...recentRecommended.slice(0, 80), ...listenedWindows.recent]),
+    avoidArtists: recentArtistSet(avoidArtistTracks),
     excludeTracks: excluded,
     allowAvoidedArtistFallback: true,
   })
@@ -85,8 +110,24 @@ function pickSceneTracks(candidates: Track[], targetCount: number): Track[] {
   return selectDiverseTracks(candidates, {
     targetCount,
     maxPerArtist: 2,
+    excludeTracks: excluded,
     allowAvoidedArtistFallback: true,
   })
+}
+
+function pickSceneTracks(candidates: Track[], targetCount: number): Track[] {
+  const recentRecommended = loadRecentRecommendedTracks(120)
+  const listenedWindows = loadListenedTrackWindows(24 * 7, 500, 48, 240)
+  return pickSceneTracksFromPool(
+    candidates,
+    targetCount,
+    [...recentRecommended, ...listenedWindows.history],
+    [...recentRecommended.slice(0, 80), ...listenedWindows.recent],
+  )
+}
+
+function hasEnoughSceneTracks(candidates: Track[], targetCount: number): boolean {
+  return pickSceneTracks(candidates, targetCount).length >= targetCount
 }
 
 function sceneFallbackQueries(scene: ActiveScene): string[] {
@@ -118,6 +159,7 @@ async function searchSceneTracks(scene: ActiveScene, targetCount: number, runtim
       mode: 'scene',
       targetCount,
       candidatePoolSize: Math.max(72, targetCount * 24),
+      respectCooldown: true,
       signal: runtime.signal,
       onProgress: (patch) => runtime.report?.({
         ...patch,
@@ -134,7 +176,8 @@ async function searchSceneTracks(scene: ActiveScene, targetCount: number, runtim
     assertScenePlaybackActive(runtime.signal)
     if (tracks.length > 0) {
       candidates.push(...tracks)
-      if (uniqueTracks(candidates).length >= desiredPoolSize) break
+      const uniqueCandidates = uniqueTracks(candidates)
+      if (uniqueCandidates.length >= desiredPoolSize && hasEnoughSceneTracks(uniqueCandidates, targetCount)) break
     }
   }
   return uniqueTracks(candidates)
@@ -153,7 +196,7 @@ function getTimeLabel(): string {
 
 function getLastTrackContext(): string {
   const playbackState = getState()
-  const last = playbackState.history[playbackState.history.length - 1] ?? playbackState.current
+  const last = playbackState.history[0] ?? playbackState.current
   if (!last) return '无'
   const tags = last.semantic?.moods?.slice(0, 2)?.join('/') ?? ''
   return tags ? `《${last.title}》- ${last.artist}，${tags}` : `《${last.title}》- ${last.artist}`
@@ -186,37 +229,83 @@ const SCENE_LINE_SYSTEM = `${buildSoulPolicyPrompt('scene')}
 - 不要用"接住""安排""安排上"这类套话
 - 直接输出那句话，不要解释，不要多余内容`
 
+const SCENE_LINE_BANNED_PATTERN = /接住|安排|安排上|稳稳的|治愈的力量|完全理解你的心情|根据你的画像|根据你的轨迹|根据你的数据|用户|画像|轨迹|数据|算法|记忆策略|纠正过|标签|诊断|人格|你其实|你总是|你一直|太满|太猛|上头|燃爆|往里收/
+
+function compactSceneLine(value: string): string {
+  return value.replace(/\s+/g, '').trim().toLowerCase()
+}
+
+function bracketedSceneTitles(value: string): string[] {
+  return Array.from(value.matchAll(/《([^》]{1,80})》/g), (match) => match[1]?.trim() ?? '').filter(Boolean)
+}
+
+function isSceneLineUsable(line: string, first: Track): boolean {
+  const clean = compactSceneLine(line)
+  const expectedTitle = compactSceneLine(first.title)
+  const titles = bracketedSceneTitles(line)
+  if (clean.length < 8 || clean.length > 50) return false
+  if (!titles.some((title) => compactSceneLine(title) === expectedTitle)) return false
+  if (titles.some((title) => compactSceneLine(title) !== expectedTitle)) return false
+  if (SCENE_LINE_BANNED_PATTERN.test(line)) return false
+  if (hasMemorySourceLeak(line, { maxGap: 28, tail: '不喜欢|少推|别总|别老|纠正|画像|数据|轨迹|记忆' })) return false
+  if (hasExplicitMemorySource(line)) return false
+  return true
+}
+
+function buildSceneLineContext(
+  scene: ActiveScene,
+  first: Track,
+  profile: ReturnType<typeof getTasteProfile>,
+  current: { timeLabel?: string; lastTrackContext?: string; sceneTransition?: string; activeEvents?: ActiveEvent[] } = {},
+): string {
+  return [
+    safePromptJson({
+      timeLabel: current.timeLabel ?? getTimeLabel(),
+      lastTrackContext: current.lastTrackContext ?? getLastTrackContext(),
+      sceneTransition: current.sceneTransition ?? getSceneTransition(scene.key),
+      scene: {
+        key: scene.key,
+        label: scene.label,
+        line: scene.line,
+      },
+      firstTrack: {
+        title: first.title,
+        artist: first.artist,
+        album: first.album,
+      },
+      activeEvents: (current.activeEvents ?? loadActiveEvents(6)).map((event) => ({
+        content: event.content,
+        kind: event.kind,
+        scope: event.kind === 'context' ? 'today_context' : 'active_event',
+        weight: event.weight ?? null,
+        confidence: event.confidence ?? null,
+      })),
+      activeEventsContract: 'activeEvents 只表示今天仍在发生的短期状态,只能作为场景文案的当下语气线索,不能写成稳定人格、长期偏好或反复模式。',
+    }),
+    buildMemoryEvidencePrompt(profile),
+  ].filter(Boolean).join('\n')
+}
+
 async function generateSceneLine(scene: ActiveScene, first: Track, signal?: AbortSignal): Promise<string | null> {
   try {
     const settings = getSettings()
     if (!settings.llm.baseUrl || !settings.llm.apiKey || !settings.llm.model) return null
 
     const profile = getTasteProfile()
-    const portrait = profile?.echo_portrait?.trim()
-    const portraitLine = portrait ? `用户画像：${portrait.slice(0, 60)}` : ''
-
-    const lines = [
-      portraitLine,
-      `此刻：${getTimeLabel()}`,
-      `上一首：${getLastTrackContext()}`,
-      `场景切换：${getSceneTransition(scene.key)}`,
-      `场景：${scene.label}——${scene.line}`,
-      `第一首：《${first.title}》- ${first.artist}`,
-    ].filter(Boolean)
+    const context = buildSceneLineContext(scene, first, profile)
 
     const content = await completeChat(
       settings,
       [
         { role: 'system', content: SCENE_LINE_SYSTEM },
-        { role: 'user', content: lines.join('\n') },
+        { role: 'user', content: context },
       ],
-      { temperature: 0.7, signal, maxTokens: 300 },
+      { temperature: 0.7, signal, maxTokens: 80 },
     )
 
     const trimmed = stripKnownSystemBlocks(content).replace(/^[""「]|[""」]$/g, '').trim()
     if (!trimmed) return null
-    // 兜底截断：LLM 偶尔会啰嗦
-    if (trimmed.length > 50) return trimmed.slice(0, 50)
+    if (!isSceneLineUsable(trimmed, first)) return null
     return trimmed
   } catch {
     return null
@@ -225,7 +314,7 @@ async function generateSceneLine(scene: ActiveScene, first: Track, signal?: Abor
 
 const SCENE_CHAT_TEMPLATES: Record<string, { withTrack: (title: string) => string; noTrack: string }> = {
   focus:     { withTrack: (t) => `好，我把声音放低一点。先听《${t}》，后面几首也排好了。`, noTrack: '好，我先帮你找几首安静的。' },
-  sleepy:    { withTrack: (t) => `给你提一点精神。先听《${t}》，别一下子太猛。`, noTrack: '好，我先帮你找几首提神的。' },
+  sleepy:    { withTrack: (t) => `给你提一点精神。先听《${t}》，节奏别太冲。`, noTrack: '好，我先帮你找几首提神的。' },
   relax:     { withTrack: (t) => `松口气。先听《${t}》，慢慢来。`, noTrack: '好，我先帮你找几首轻松的。' },
   irritated: { withTrack: (t) => `先把外面的声音降下来。先听《${t}》，让脑子缓一缓。`, noTrack: '好，我先帮你找几首安静的。' },
   random:    { withTrack: (t) => `随便来一首？先听《${t}》，后面看心情。`, noTrack: '好，我先从你的口味里捞一首。' },
@@ -254,7 +343,20 @@ export async function startScenePlayback(key: SceneKey, options: ScenePlaybackOp
   try {
     runtime.report?.({ phase: 'recommend', current: 1, total: 4, message: scene.label })
     const targetCount = Math.max(1, Math.min(scene.targetCount, options.targetCount ?? scene.targetCount))
-    const recommended = await searchSceneTracks(scene, targetCount, runtime)
+    let recommended: Track[] = []
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      recommended = await searchSceneTracks(scene, targetCount, runtime)
+      if (recommended.length > 0) break
+      if (attempt < 2) {
+        runtime.report?.({
+          phase: 'recommend-retry',
+          current: 1,
+          total: 4,
+          message: `重新找歌 ${attempt + 1}/2`,
+        })
+        await waitForSceneRetry(attempt === 0 ? 800 : 1800, runtime.signal)
+      }
+    }
     assertScenePlaybackActive(runtime.signal)
     if (isSuperseded(scene)) {
       return { scene, tracks: [], state: getState() }
@@ -281,7 +383,7 @@ export async function startScenePlayback(key: SceneKey, options: ScenePlaybackOp
     clearQueue()
     skipTodayRecommendedTracks()
     appendRecommendedTracks(tracks)
-    markQueueStatus(first, 'playing')
+    markQueueStatus(first, 'playing', 'playback_started')
 
     if (isSuperseded(scene)) {
       return { scene, tracks: [], state: getState() }
@@ -318,10 +420,22 @@ export async function startScenePlayback(key: SceneKey, options: ScenePlaybackOp
     if (message) broadcastChatMessage(message)
     return { scene, tracks, state, message }
   } catch (error) {
-    if (options.continueSession && error instanceof SceneNoPlayableTrackError) {
+    if (shouldPreserveSceneOnPlaybackFailure(options, error) && isSceneSessionCurrent(scene.id)) {
+      runtime.report?.({ phase: 'idle', current: 4, total: 4, message: `${scene.label}还在，下一轮再找。` })
       return { scene, tracks: [], state: getState() }
     }
     if (isSceneSessionCurrent(scene.id)) endCurrentScene()
     throw error
   }
+}
+
+export const scenePlaybackTestHelpers = {
+  shouldPreserveSceneOnPlaybackFailure,
+  createNoPlayableTrackError: () => new SceneNoPlayableTrackError(),
+  pickSceneTracksFromPool,
+  hasEnoughSceneTracksFromPool: (candidates: Track[], targetCount: number, excluded: Track[], avoidArtistTracks: Track[]) => (
+    pickSceneTracksFromPool(candidates, targetCount, excluded, avoidArtistTracks).length >= targetCount
+  ),
+  isSceneLineUsable,
+  buildSceneLineContext,
 }

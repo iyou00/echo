@@ -73,7 +73,7 @@ const SURFACE_POLICIES: Record<SoulPolicySurface, string[]> = {
   portrait: [
     '画像是 Echo 阶段性理解用户音乐关系的产物。重点写 Ta 怎么使用音乐、最近有什么变化、哪里仍然需要继续认识。',
     'portrait 给用户看,要像熟悉的人写的一段观察; summary 给后续推荐使用,信息密度优先。',
-    '画像必须保留不确定感,使用具体歌曲、时间、次数或行为作为锚点。',
+    '画像必须保留不确定感。具体歌曲、时间、次数和行为只作为内部证据,portrait 表达给用户时写成状态、变化和仍需确认的地方。',
     'Suggested questions 来自 Echo 的真实好奇,问题要短、口语、可回答。',
   ],
   care: [

@@ -18,9 +18,15 @@ export const yinyiGenerateAgent: EchoAgent<YinyiGenerateAgentInput, YinyiGenerat
       phase: 'done',
       current: 1,
       total: 1,
-      message: entry.meta?.status === 'failed' ? '风信生成失败。' : '风信已生成。',
+      message: entry.meta?.status === 'failed'
+        ? '风信生成失败。'
+        : entry.meta?.status === 'absent'
+          ? '今天还没有足够内容写风信。'
+          : '风信已生成。',
     })
-    recordSchedulerHealth('yinyi', entry.meta?.status === 'failed' ? 'degraded' : 'ok', entry.meta?.status === 'failed' ? '生成失败。' : '已生成。', entry.meta?.error)
+    if (entry.meta?.status !== 'absent') {
+      recordSchedulerHealth('yinyi', entry.meta?.status === 'failed' ? 'degraded' : 'ok', entry.meta?.status === 'failed' ? '生成失败。' : '已生成。', entry.meta?.error)
+    }
     return entry
   },
 }

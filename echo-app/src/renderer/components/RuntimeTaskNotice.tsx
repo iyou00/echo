@@ -43,7 +43,7 @@ export function runtimeStatusLabel(task: RuntimeTaskSnapshot): string {
 }
 
 export function runtimeTaskMessage(task: RuntimeTaskSnapshot): string {
-  if (task.status === 'failed') return runtimeErrorMessage(task.errorKind, task.error ?? task.message ?? '任务失败')
+  if (task.status === 'failed') return runtimeErrorMessage(task.errorKind, '这次没有完成，稍后再试。')
   if (task.status === 'canceled') return task.message ?? '任务已取消'
   return task.message ?? task.phase
 }
@@ -84,9 +84,6 @@ export function RuntimeTaskNotice({ task, title, onCancel }: RuntimeTaskNoticePr
       <div className="runtime-task-bar">
         <span style={{ width: `${runtimeProgressPercent(task)}%` }} />
       </div>
-      {task.errorKind && task.status === 'failed' && (
-        <div className="runtime-task-error">错误类型: {task.errorKind}</div>
-      )}
       {task.status === 'running' && task.cancellable && onCancel && (
         <button className="btn sec runtime-task-cancel" type="button" onClick={() => onCancel(task.id)}>
           取消
@@ -114,9 +111,6 @@ export function RuntimeTaskList({ tasks, limit = 6, onCancel }: RuntimeTaskListP
           <div className="runtime-task-bar">
             <span style={{ width: `${runtimeProgressPercent(task)}%` }} />
           </div>
-          {task.errorKind && task.status === 'failed' && (
-            <div className="runtime-task-error">错误类型: {task.errorKind}</div>
-          )}
           {task.status === 'running' && task.cancellable && onCancel && (
             <button className="btn sec runtime-task-cancel" type="button" onClick={() => onCancel(task.id)}>
               取消

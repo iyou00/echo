@@ -4,7 +4,8 @@ import type { RuntimeErrorKind, RuntimeTaskRecord, RuntimeTaskSnapshot, RuntimeT
 import { emitRuntimeTaskChanged } from './eventBus'
 
 const running = new Map<string, RuntimeTaskRecord>()
-const recent: RuntimeTaskSnapshot[] = []
+const recentUser: RuntimeTaskSnapshot[] = []
+const recentInternal: RuntimeTaskSnapshot[] = []
 let taskSequence = 0
 
 function nowIso(): string {
@@ -25,13 +26,13 @@ function sortSnapshotsByUpdatedAt(snapshots: RuntimeTaskSnapshot[]): RuntimeTask
 }
 
 function remember(snapshot: RuntimeTaskSnapshot): void {
-  recent.unshift(clone(snapshot))
-  recent.splice(RUNTIME_TASK_RECENT_LIMIT)
+  const target = snapshot.visibility === 'internal' ? recentInternal : recentUser
+  target.unshift(clone(snapshot))
+  target.splice(RUNTIME_TASK_RECENT_LIMIT)
 }
 
 function markCanceling(record: RuntimeTaskRecord): void {
   if (record.controller.signal.aborted && record.snapshot.phase === 'canceling') return
-  record.controller.abort()
   record.snapshot = {
     ...record.snapshot,
     phase: 'canceling',
@@ -39,6 +40,7 @@ function markCanceling(record: RuntimeTaskRecord): void {
     updatedAt: nowIso(),
   }
   emitRuntimeTaskChanged(record.snapshot)
+  record.controller.abort()
 }
 
 function descendantRecords(parentTaskId: string, visited = new Set<string>()): RuntimeTaskRecord[] {
@@ -68,6 +70,7 @@ export function startTask(options: RuntimeTaskStartOptions): RuntimeTaskRecord {
     sourceName: options.sourceName,
     message: options.message,
     cancellable: options.cancellable ?? true,
+    visibility: options.visibility ?? 'user',
   }
   const record: RuntimeTaskRecord = {
     snapshot,
@@ -144,7 +147,10 @@ export function cancelTasksByKind(kind: string): number {
 }
 
 export function getTask(id: string): RuntimeTaskSnapshot | null {
-  const snapshot = running.get(id)?.snapshot ?? recent.find((task) => task.id === id) ?? null
+  const snapshot = running.get(id)?.snapshot
+    ?? recentUser.find((task) => task.id === id)
+    ?? recentInternal.find((task) => task.id === id)
+    ?? null
   return snapshot ? clone(snapshot) : null
 }
 
@@ -153,15 +159,22 @@ export function getRunningTaskByUniqueKey(uniqueKey: string): RuntimeTaskSnapsho
   return record ? clone(record.snapshot) : null
 }
 
-export function getRecentTasks(): RuntimeTaskSnapshot[] {
-  return sortSnapshotsByUpdatedAt([
-    ...Array.from(running.values()).map((record) => clone(record.snapshot)),
-    ...recent.map(clone),
-  ]).slice(0, RUNTIME_TASK_RECENT_LIMIT)
+export function getRecentTasks(visibility?: RuntimeTaskSnapshot['visibility']): RuntimeTaskSnapshot[] {
+  const runningTasks = Array.from(running.values())
+    .map((record) => clone(record.snapshot))
+    .filter((snapshot) => !visibility || snapshot.visibility === visibility)
+  const completedTasks = visibility === 'user'
+    ? recentUser.map(clone)
+    : visibility === 'internal'
+      ? recentInternal.map(clone)
+      : [...recentUser.map(clone), ...recentInternal.map(clone)]
+  const limit = visibility ? RUNTIME_TASK_RECENT_LIMIT : RUNTIME_TASK_RECENT_LIMIT * 2
+  return sortSnapshotsByUpdatedAt([...runningTasks, ...completedTasks]).slice(0, limit)
 }
 
 export function clearRuntimeTasks(): void {
   for (const record of Array.from(running.values())) record.controller.abort()
   running.clear()
-  recent.length = 0
+  recentUser.length = 0
+  recentInternal.length = 0
 }

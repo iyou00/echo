@@ -108,3 +108,28 @@ export function toggleFavoriteTrack(track: Track): { favorited: boolean; favorit
   const favorited = write()
   return { favorited, favorites: listFavoriteTracks() }
 }
+
+export function saveFavoriteTrack(track: Track): { favorited: true; changed: boolean; favorites: Track[] } {
+  const key = favoriteTrackKey(track)
+  const saved: Track = { ...track, favorited: true }
+  const write = getDb().transaction(() => {
+    const existing = getDb()
+      .prepare('SELECT 1 FROM favorite_tracks WHERE user_id = current_user_id() AND track_key = ? LIMIT 1')
+      .get(key)
+    getDb()
+      .prepare(
+        `INSERT INTO favorite_tracks (user_id, track_key, title, artist, album, source, track_json)
+         VALUES (current_user_id(), ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(user_id, track_key) DO UPDATE SET
+           title = excluded.title,
+           artist = excluded.artist,
+           album = excluded.album,
+           source = excluded.source,
+           track_json = excluded.track_json`,
+      )
+      .run(key, track.title, track.artist, track.album ?? '', track.source ?? '', JSON.stringify(saved))
+    return !existing
+  })
+  const changed = write()
+  return { favorited: true, changed, favorites: listFavoriteTracks() }
+}

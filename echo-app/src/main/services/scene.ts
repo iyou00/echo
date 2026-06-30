@@ -23,7 +23,7 @@ export const sceneDefinitions: SceneDefinition[] = [
     key: 'sleepy',
     label: '有点困',
     shortLabel: '有点困',
-    line: '把精神提一下,别一下子太猛。',
+    line: '把精神提一下，节奏别太冲。',
     prompt: '有点犯困,帮我找几首提神但别太炸的歌。',
     targetCount: 5,
     moods: ['清醒', '轻快'],

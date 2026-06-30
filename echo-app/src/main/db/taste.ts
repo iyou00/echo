@@ -1,6 +1,7 @@
 import type { TasteProfile, TasteQuestion } from '../../types/ipc'
 import { getDb } from './index'
 import { parseJson } from './json'
+import { clearRecommendationCache } from './recommendationCache'
 
 export function getTasteProfile(): TasteProfile | null {
   const row = getDb().prepare('SELECT profile_json, summary FROM taste_profile WHERE user_id = current_user_id()').get() as { profile_json: string; summary?: string } | undefined
@@ -22,6 +23,7 @@ export function saveTasteProfile(profile: TasteProfile, summary = ''): TasteProf
        ON CONFLICT(user_id) DO UPDATE SET profile_json = excluded.profile_json, summary = excluded.summary, updated_at = CURRENT_TIMESTAMP`,
     )
     .run(JSON.stringify(next), effectiveSummary || profile.echo_portrait)
+  clearRecommendationCache()
   return next
 }
 

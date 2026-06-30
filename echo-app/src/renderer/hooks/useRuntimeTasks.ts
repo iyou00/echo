@@ -44,6 +44,10 @@ export function sortRuntimeTasksForDisplay(tasks: RuntimeTaskSnapshot[]): Runtim
   return [...tasks].sort(compareRuntimeTasks)
 }
 
+export function runtimeTaskNeedsAttention(task: RuntimeTaskSnapshot): boolean {
+  return task.status === 'running' || task.status === 'failed'
+}
+
 function groupRank(group: RuntimeTaskGroup): number {
   return Math.min(statusRank(group.task), ...group.children.map(statusRank))
 }
@@ -106,10 +110,14 @@ export function useRuntimeTasks(echo: EchoApi): RuntimeTaskSnapshot[] {
     const off = echo.runtime.onTaskChanged((snapshot) => {
       setTasks((current) => mergeRuntimeTask(current, snapshot))
     })
+    const offSettings = echo.settings.onChanged((payload) => {
+      if (payload.path === '*' && payload.value === null) setTasks([])
+    })
 
     return () => {
       alive = false
       off()
+      offSettings()
     }
   }, [echo])
 

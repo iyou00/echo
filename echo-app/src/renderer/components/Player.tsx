@@ -1,8 +1,9 @@
-import { KeyboardEvent, MouseEvent, PointerEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { KeyboardEvent, MouseEvent, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Pause, Play } from 'lucide-react'
 import type { ActiveScene, EchoApi, PlaybackState, PlaybackStatus, Track } from '../../types/ipc'
 import { WaveBars } from '../components'
 import { pageLabels } from '../labels'
+import { decidePlaybackCompletionAction } from './playerCompletion'
 
 interface PlayerProps {
   echo: EchoApi
@@ -54,6 +55,17 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
   const canPlayPrevious = state.history.length > 0
   const canPlayNext = state.queue.length > 0
 
+  const handleAudioPlayFailure = useCallback(async (message: string) => {
+    setLocalPlaying(false)
+    setPlaybackError(message)
+    try {
+      const next = await echo.playback.pause()
+      setState(next)
+    } catch {
+      // Keep the local error visible even if the main process is unavailable.
+    }
+  }, [echo, setState])
+
   function isNearEnd(audio: HTMLAudioElement | null) {
     if (!audio || !current) return false
     const mediaDuration = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : displayDuration
@@ -63,16 +75,15 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
 
   async function completePlayback() {
     if (completingRef.current) return
-    const shouldContinueVoice = Boolean(voiceContinuous)
-    const shouldContinueScene = Boolean(!shouldContinueVoice && currentScene && current && (
-      current.sceneSessionId === currentScene.id || (!current.sceneSessionId && current.sceneKey === currentScene.key)
-    ))
+    const completionAction = decidePlaybackCompletionAction({ voiceContinuous, currentScene, current, autoPlayNext })
+    const shouldContinueVoice = completionAction === 'voice_continue'
+    const shouldContinueScene = completionAction === 'scene_continue'
     completingRef.current = true
     endingRef.current = true
     setLocalPlaying(false)
     try {
       await sendHeartbeat(true, 'playing')
-      const next = shouldContinueVoice || shouldContinueScene ? await echo.playback.finishCurrent() : autoPlayNext ? await echo.playback.next() : await echo.playback.finishCurrent()
+      const next = completionAction === 'auto_next' ? await echo.playback.next() : await echo.playback.finishCurrent()
       setState(next)
       await refreshQueue()
       if (shouldContinueVoice) onVoiceTrackEnded?.()
@@ -97,9 +108,11 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
       const oldPos = audio.currentTime
       audio.src = payload.url
       audio.currentTime = oldPos
-      audio.play().catch(() => undefined)
+      audio.play().catch(() => {
+        void handleAudioPlayFailure('播放恢复失败，请点一下播放重试。')
+      })
     })
-  }, [currentId, echo])
+  }, [currentId, echo, handleAudioPlayFailure])
 
   useEffect(() => {
     completingRef.current = false
@@ -131,10 +144,12 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
     }
 
     if (state.status === 'loading' || state.status === 'playing') {
-      audio.play().catch(() => undefined)
+      audio.play().catch(() => {
+        void handleAudioPlayFailure('播放没有启动，请点一下播放重试。')
+      })
     }
     if (state.status === 'paused') audio.pause()
-  }, [current, currentId, state.status])
+  }, [current, currentId, handleAudioPlayFailure, state.status])
 
   useEffect(() => {
     const audio = audioRef.current
@@ -181,8 +196,14 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
 
   async function togglePlayback() {
     if (!current?.playUrl) return
-    const next = state.status === 'playing' || localPlaying ? await echo.playback.pause() : await echo.playback.resume()
+    const shouldPause = state.status === 'playing' || localPlaying
+    const next = shouldPause ? await echo.playback.pause() : await echo.playback.resume()
     setState(next)
+    if (!shouldPause) {
+      await audioRef.current?.play().catch(() => {
+        void handleAudioPlayFailure('播放没有启动，请点一下播放重试。')
+      })
+    }
   }
 
   async function playPrevious() {
@@ -300,6 +321,8 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
         ref={audioRef}
         onPlay={() => {
           setLocalPlaying(true)
+          setPlaybackError(null)
+          retryCountRef.current = 0
           echo.playback.heartbeat({
             position: Math.floor((audioRef.current?.currentTime ?? 0) * 1000),
             duration: Math.floor((audioRef.current?.duration || displayDuration) * 1000),

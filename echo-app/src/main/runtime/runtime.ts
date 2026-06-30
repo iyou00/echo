@@ -7,6 +7,7 @@ import { emitRuntimeEvent } from './eventBus'
 import {
   cancelTask,
   cancelTasksByKind,
+  clearRuntimeTasks,
   failTask,
   finishTask,
   getRecentTasks,
@@ -26,7 +27,12 @@ const runtimeTaskScope = new AsyncLocalStorage<string>()
 
 export async function runTask<T>(options: RunTaskOptions<T>, runner: (context: AgentRunContext) => Promise<T>): Promise<T> {
   const parentTaskId = options.parentTaskId ?? runtimeTaskScope.getStore()
-  const record = startTask({ ...options, parentTaskId })
+  const parentVisibility = parentTaskId ? getTask(parentTaskId)?.visibility : undefined
+  const record = startTask({
+    ...options,
+    parentTaskId,
+    visibility: options.visibility ?? parentVisibility ?? 'user',
+  })
   const context: AgentRunContext = {
     taskId: record.snapshot.id,
     signal: record.controller.signal,
@@ -36,7 +42,13 @@ export async function runTask<T>(options: RunTaskOptions<T>, runner: (context: A
     },
     emit: (channel, payload) => {
       assertRuntimeActive(record.controller.signal)
-      emitRuntimeEvent({ taskId: record.snapshot.id, kind: record.snapshot.kind, channel, payload })
+      emitRuntimeEvent({
+        taskId: record.snapshot.id,
+        kind: record.snapshot.kind,
+        channel,
+        payload,
+        visibility: record.snapshot.visibility,
+      })
     },
   }
 
@@ -54,6 +66,8 @@ export async function runTask<T>(options: RunTaskOptions<T>, runner: (context: A
       if (options.isFailureResult?.(result)) {
         finishTask(record.snapshot.id, 'failed', {
           ...successPatch,
+          phase: 'failed',
+          current: record.snapshot.current,
           error: resultMessage ?? '任务失败',
           errorKind: 'unknown',
         })
@@ -87,7 +101,7 @@ export function runAgent<Input, Output>(
 }
 
 export function emitEvent(kind: string, channel: string, payload: unknown, taskId?: string): void {
-  emitRuntimeEvent({ kind, channel, payload, taskId })
+  emitRuntimeEvent({ kind, channel, payload, taskId, visibility: taskId ? getTask(taskId)?.visibility ?? 'user' : 'user' })
 }
 
 export function withRuntimeHealth<T>(service: Parameters<typeof recordHealth>[0], run: () => Promise<T>): Promise<T> {
@@ -106,6 +120,6 @@ export function getCurrentRuntimeTaskId(): string | undefined {
   return runtimeTaskScope.getStore()
 }
 
-export { cancelTask, cancelTasksByKind, getRecentTasks, getRunningTaskByUniqueKey, getTask, updateTask }
+export { cancelTask, cancelTasksByKind, clearRuntimeTasks, getRecentTasks, getRunningTaskByUniqueKey, getTask, updateTask }
 export { RuntimeCanceledError, getRuntimeErrorKind }
 export type { RuntimeTaskSnapshot }

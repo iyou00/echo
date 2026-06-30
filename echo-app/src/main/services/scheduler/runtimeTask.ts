@@ -27,6 +27,7 @@ export function runSchedulerResultTask<T extends SchedulerRuntimeResult>(
     sourceName: input.sourceName,
     uniqueKey: input.uniqueKey,
     cancellable: false,
+    visibility: 'internal',
     isFailureResult: (result) => result.status === 'failed',
     messageForResult: (result) => result.message,
   }, async (context) => {

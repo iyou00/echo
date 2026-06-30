@@ -1,6 +1,6 @@
 import type { YinyiEntry } from '../../types/ipc'
-import { loadRecentConversations } from '../db/conversations'
-import { loadRecentTracks } from '../db/tracks'
+import { loadUserConversationsForDate } from '../db/conversations'
+import { isExternalListeningSource, loadMeaningfulTrackEventsForDate, type TodayTrackEvent } from '../db/tracks'
 import { getRandomYinyi, getYinyiByDate, getYinyiRange, upsertYinyi } from '../db/yinyi'
 import { getSettings } from '../db/settings'
 import { buildYinyiContext } from '../llm/prompt'
@@ -8,6 +8,7 @@ import { completeChat, LlmError } from '../llm/client'
 import { stripKnownSystemBlocks } from '../llm/outputSanitize'
 import { recordHealth } from './health'
 import { getWeather } from '../weather/client'
+import { hasMemorySourceLeak } from './memorySourceGuard'
 
 function todayIso(): string {
   const date = new Date()
@@ -15,6 +16,16 @@ function todayIso(): string {
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
+}
+
+function isValidIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const parsed = new Date(`${value}T12:00:00`)
+  if (Number.isNaN(parsed.getTime())) return false
+  const year = parsed.getFullYear()
+  const month = String(parsed.getMonth() + 1).padStart(2, '0')
+  const day = String(parsed.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}` === value
 }
 
 export interface GenerateYinyiOptions {
@@ -45,14 +56,18 @@ function cleanYinyiContent(content: string): string {
   return sliced.slice(0, stop > 180 ? stop + 1 : 380).trim()
 }
 
+const BANNED_YINYI_TEXT_PATTERN = /我给你接上|给你安排|安排上|让你稳稳的|接住你|把情绪接住|把空气撑住|太满|太猛|上头|燃爆|往里收|音乐是治愈的力量|完全理解你的心情/
+
 function hasYinyiQuality(content: string): boolean {
   const hasFirstPerson = content.includes('我')
   const hasUserMention = content.includes('你')
   const noAIRollup = !/(总共|一共).{0,4}\d+\s*(首|次|条)/.test(content)
   const noAI = !/(总的来说|由此可见|有什么可以|为您|用户)/.test(content)
-  const noOverread = !/(从你这几天|从你的轨迹|从画像|你的轮廓|说明你|你其实|你总是|你一直|潜意识|人格|诊断|标签|算法|数据)/.test(content)
+  const noOverread = !/(从你这几天|从你这段时间|从你的轨迹|从画像|你的轮廓|说明你|你其实|你总是|你一直|潜意识|人格|诊断|标签|算法|数据)/.test(content)
   const noMemoryLeak = !/(记忆策略|memory|纠正过|用户纠正|画像证据|信号审计)/i.test(content)
-  return hasFirstPerson && hasUserMention && noAIRollup && noAI && noOverread && noMemoryLeak
+  const noMemorySourceLeak = !hasMemorySourceLeak(content)
+  const noBannedPhrasing = !BANNED_YINYI_TEXT_PATTERN.test(content)
+  return hasFirstPerson && hasUserMention && noAIRollup && noAI && noOverread && noMemoryLeak && noMemorySourceLeak && noBannedPhrasing
 }
 
 function yinyiQualityRetryInstruction(): string {
@@ -88,15 +103,45 @@ function compactLine(value: string, max = 42): string {
   return clean.length > max ? `${clean.slice(0, max)}...` : clean
 }
 
-function fallbackYinyiEntry(date: string, messages: ReturnType<typeof loadRecentConversations>, tracks: ReturnType<typeof loadRecentTracks>, error: string): YinyiEntry {
-  const lastUserMessage = [...messages].reverse().find((item) => item.role === 'user')?.content
-  const firstTrack = tracks[0]
-  const secondTrack = tracks.find((track) => track.title !== firstTrack?.title || track.artist !== firstTrack?.artist)
+function isPositiveYinyiTrackEvent(track: Pick<TodayTrackEvent, 'source' | 'queueStatus'>): boolean {
+  if (track.queueStatus === 'skipped' || track.queueStatus === 'pending') return false
+  if (track.queueStatus === 'playing' || track.queueStatus === 'completed') return true
+  return isExternalListeningSource(track.source)
+}
+
+function pickPositiveYinyiTracks(tracks: TodayTrackEvent[]): TodayTrackEvent[] {
+  return tracks.filter(isPositiveYinyiTrackEvent)
+}
+
+function pickDismissedYinyiTracks(tracks: TodayTrackEvent[]): TodayTrackEvent[] {
+  return tracks.filter((track) => track.queueStatus === 'skipped')
+}
+
+function yinyiMetaTrack(track: TodayTrackEvent) {
+  return {
+    title: track.title,
+    artist: track.artist,
+    album: track.album,
+    source: track.source,
+    queueStatus: track.queueStatus,
+    queueStatusReason: track.queueStatusReason,
+  }
+}
+
+function fallbackYinyiEntry(date: string, messages: ReturnType<typeof loadUserConversationsForDate>, tracks: ReturnType<typeof loadMeaningfulTrackEventsForDate>, error: string): YinyiEntry {
+  const lastUserMessage = messages.at(-1)?.content
+  const positiveTracks = pickPositiveYinyiTracks(tracks)
+  const dismissedTracks = pickDismissedYinyiTracks(tracks)
+  const firstTrack = positiveTracks[0]
+  const secondTrack = positiveTracks.find((track) => track.title !== firstTrack?.title || track.artist !== firstTrack?.artist)
+  const hasDismissedTracks = tracks.length > 0 && positiveTracks.length === 0
   const opening = lastUserMessage
     ? `今天先写短一点。你最后留在我这里的一句是“${compactLine(lastUserMessage)}”,像把一天的声音轻轻按住了一下。`
     : '今天先写短一点。你留下的声音不多,我就按最近这一点余温往下写。'
   const musicLine = firstTrack
     ? `耳边还放着${firstTrack.artist}的《${firstTrack.title}》${secondTrack ? `,后面又接过${secondTrack.artist}的《${secondTrack.title}》` : ''}。我喜欢这种不急着解释的时刻,歌先在旁边放着。`
+    : hasDismissedTracks
+      ? '今天有几首歌来过又被你放下。我会把它们记作路过；有些声音只是擦肩，擦肩也算今天的一部分。'
     : '今天没有新的歌落下来,但空白也算一种记录。它说明有些时候你只是路过,没有非要把什么说完整。'
 
   return {
@@ -105,7 +150,8 @@ function fallbackYinyiEntry(date: string, messages: ReturnType<typeof loadRecent
     style: 'dialogue',
     meta: {
       status: 'ok',
-      tracks: tracks.slice(0, 5),
+      tracks: positiveTracks.slice(0, 5).map(yinyiMetaTrack),
+      dismissed_tracks: dismissedTracks.slice(0, 5).map(yinyiMetaTrack),
       word_count: countWords(`${opening}${musicLine}`),
       conversations_count: messages.length,
       fallback: true,
@@ -120,18 +166,28 @@ function shouldUseFallback(error: unknown): boolean {
 }
 
 export async function generateYinyi(date = todayIso(), options: GenerateYinyiOptions = {}): Promise<YinyiEntry> {
+  if (!isValidIsoDate(date)) {
+    throw new Error('风信日期无效')
+  }
+  if (date > todayIso()) {
+    throw new Error('未来的风信还没有发生')
+  }
   assertYinyiActive(options.signal)
-  const recentMessages = loadRecentConversations(20)
-  const recentTracks = loadRecentTracks(20)
+  const recentMessages = loadUserConversationsForDate(date, 20)
+  const recentTracks = loadMeaningfulTrackEventsForDate(date, 20)
+  const positiveTracks = pickPositiveYinyiTracks(recentTracks)
+  const dismissedTracks = pickDismissedYinyiTracks(recentTracks)
 
   if (recentMessages.length === 0 && recentTracks.length === 0) {
-    return upsertYinyi(absentEntry(date))
+    return absentEntry(date)
   }
 
   const settings = getSettings()
   const started = Date.now()
   try {
-    const weather = await getWeather(settings.user.city, { signal: options.signal })
+    const weather = date === todayIso()
+      ? await getWeather(settings.user.city, { signal: options.signal })
+      : null
     assertYinyiActive(options.signal)
     const messages = buildYinyiContext(date, weather?.summary)
     let content = cleanYinyiContent(await completeChat(settings, messages, { temperature: 0.85, signal: options.signal, maxTokens: 800 }))
@@ -167,7 +223,8 @@ export async function generateYinyi(date = todayIso(), options: GenerateYinyiOpt
       style: 'dialogue',
       meta: {
         status: 'ok',
-        tracks: recentTracks.slice(0, 5),
+        tracks: positiveTracks.slice(0, 5).map(yinyiMetaTrack),
+        dismissed_tracks: dismissedTracks.slice(0, 5).map(yinyiMetaTrack),
         word_count: countWords(content),
         conversations_count: recentMessages.length,
         duration_ms: Date.now() - started,
@@ -197,4 +254,12 @@ export function getRange(limit = 30): YinyiEntry[] {
 
 export function getRandom(): YinyiEntry | null {
   return getRandomYinyi()
+}
+
+export const yinyiTestHelpers = {
+  cleanYinyiContent,
+  hasYinyiQuality,
+  fallbackYinyiEntry,
+  pickPositiveYinyiTracks,
+  pickDismissedYinyiTracks,
 }

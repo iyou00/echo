@@ -14,6 +14,8 @@ export interface TrackFeedback {
   skipCount: number
   loopCount: number
   favoriteCount: number
+  explicitLikeCount: number
+  explicitMissCount: number
   lastCompletion?: number
   updatedAt?: string
   score: number
@@ -31,15 +33,82 @@ export function feedbackTrackKey(track: Track): string {
   return trackIdentity(track)
 }
 
-function weightedScore(row: { play_count: number; skip_count: number; loop_count: number; favorite_count: number; last_completion?: number | null }): number {
+interface TrackFeedbackRow {
+  track_key: string
+  play_count: number
+  skip_count: number
+  loop_count: number
+  favorite_count: number
+  explicit_like_count?: number | null
+  explicit_miss_count?: number | null
+  last_completion?: number | null
+  track_json: string
+  updated_at?: string
+}
+
+const TRACK_FEEDBACK_SELECT = `
+  tf.track_key,
+  tf.play_count,
+  tf.skip_count,
+  tf.loop_count,
+  tf.favorite_count,
+  tf.last_completion,
+  tf.track_json,
+  tf.updated_at,
+  COALESCE((
+    SELECT COUNT(*)
+    FROM track_feedback_events tfe
+    WHERE tfe.user_id = tf.user_id
+      AND tfe.track_key = tf.track_key
+      AND tfe.action = 'more_like_this'
+  ), 0) AS explicit_like_count,
+  COALESCE((
+    SELECT COUNT(*)
+    FROM track_feedback_events tfe
+    WHERE tfe.user_id = tf.user_id
+      AND tfe.track_key = tf.track_key
+      AND tfe.action = 'not_right'
+  ), 0) AS explicit_miss_count
+`
+
+function explicitScore(likes?: number | null, misses?: number | null): number {
+  return Number(likes ?? 0) * 3 - Number(misses ?? 0) * 4
+}
+
+function weightedScore(row: {
+  play_count: number
+  skip_count: number
+  loop_count: number
+  favorite_count: number
+  explicit_like_count?: number | null
+  explicit_miss_count?: number | null
+  last_completion?: number | null
+}): number {
   const completion = typeof row.last_completion === 'number' ? row.last_completion : 0
   return Number((
     row.play_count * 1.1 +
     row.loop_count * 2.2 +
     row.favorite_count * 2.5 +
+    explicitScore(row.explicit_like_count, row.explicit_miss_count) +
     completion * 0.8 -
     row.skip_count * 1.6
   ).toFixed(2))
+}
+
+function trackFeedbackFromRow(row: TrackFeedbackRow): TrackFeedback {
+  return {
+    trackKey: row.track_key,
+    track: parseJson<Track>(row.track_json, { title: '', artist: '' }, 'track_feedback.track_json'),
+    playCount: row.play_count,
+    skipCount: row.skip_count,
+    loopCount: row.loop_count,
+    favoriteCount: row.favorite_count,
+    explicitLikeCount: Number(row.explicit_like_count ?? 0),
+    explicitMissCount: Number(row.explicit_miss_count ?? 0),
+    lastCompletion: typeof row.last_completion === 'number' ? row.last_completion : undefined,
+    updatedAt: row.updated_at,
+    score: weightedScore(row),
+  }
 }
 
 function explicitFeedbackFromRow(row: { track_key: string; action: ExplicitTrackFeedbackAction; context?: string; track_json: string; created_at?: string }): ExplicitTrackFeedback {
@@ -100,9 +169,6 @@ export function recordExplicitTrackFeedback(action: ExplicitTrackFeedbackAction,
       `)
       .run(key, action, context ?? '', track.title, track.artist, track.album ?? '', track.source ?? '', JSON.stringify(track))
 
-    const feedbackAction = action === 'more_like_this' ? 'played' : 'skipped'
-    const completionRate = action === 'more_like_this' ? 1 : 0
-
     db
       .prepare(`
         INSERT INTO track_feedback (user_id, track_key, title, artist, album, source, track_json)
@@ -112,26 +178,10 @@ export function recordExplicitTrackFeedback(action: ExplicitTrackFeedbackAction,
           artist = excluded.artist,
           album = excluded.album,
           source = excluded.source,
-          track_json = excluded.track_json
+          track_json = excluded.track_json,
+          updated_at = CURRENT_TIMESTAMP
       `)
       .run(key, track.title, track.artist, track.album ?? '', track.source ?? '', JSON.stringify(track))
-
-    const fields: Record<TrackFeedbackAction, string> = {
-      played: 'play_count = play_count + 1',
-      skipped: 'skip_count = skip_count + 1',
-      looped: 'loop_count = loop_count + 1',
-      favorited: 'favorite_count = 1',
-      unfavorited: 'favorite_count = 0',
-    }
-    db
-      .prepare(`
-        UPDATE track_feedback
-        SET ${fields[feedbackAction]},
-            last_completion = COALESCE(?, last_completion),
-            updated_at = CURRENT_TIMESTAMP
-        WHERE user_id = current_user_id() AND track_key = ?
-      `)
-      .run(completionRate, key)
   })()
   clearRecommendationCache()
 }
@@ -173,75 +223,78 @@ export function getExplicitFeedbackScore(track: Track): number {
       WHERE user_id = current_user_id() AND track_key = ?
     `)
     .get(feedbackTrackKey(track)) as { likes?: number | null; misses?: number | null } | undefined
-  return Number(row?.likes ?? 0) * 3 - Number(row?.misses ?? 0) * 4
+  return explicitScore(row?.likes, row?.misses)
 }
 
 export function getTrackFeedback(track: Track): TrackFeedback | null {
   const row = getDb()
     .prepare(`
-      SELECT track_key, play_count, skip_count, loop_count, favorite_count, last_completion, track_json, updated_at
-      FROM track_feedback
-      WHERE user_id = current_user_id() AND track_key = ?
+      SELECT ${TRACK_FEEDBACK_SELECT}
+      FROM track_feedback tf
+      WHERE tf.user_id = current_user_id() AND tf.track_key = ?
     `)
-    .get(feedbackTrackKey(track)) as {
-      track_key: string
-      play_count: number
-      skip_count: number
-      loop_count: number
-      favorite_count: number
-      last_completion?: number | null
-      track_json: string
-      updated_at?: string
-    } | undefined
+    .get(feedbackTrackKey(track)) as TrackFeedbackRow | undefined
   if (!row) return null
-  return {
-    trackKey: row.track_key,
-    track: parseJson<Track>(row.track_json, { title: '', artist: '' }, 'track_feedback.track_json'),
-    playCount: row.play_count,
-    skipCount: row.skip_count,
-    loopCount: row.loop_count,
-    favoriteCount: row.favorite_count,
-    lastCompletion: typeof row.last_completion === 'number' ? row.last_completion : undefined,
-    updatedAt: row.updated_at,
-    score: weightedScore(row),
-  }
+  return trackFeedbackFromRow(row)
 }
 
 export function getFeedbackScore(track: Track): number {
-  return (getTrackFeedback(track)?.score ?? 0) + getExplicitFeedbackScore(track)
+  return getTrackFeedback(track)?.score ?? getExplicitFeedbackScore(track)
 }
 
 export function listTrackFeedback(limit = 300): TrackFeedback[] {
   const rows = getDb()
     .prepare(`
-      SELECT track_key, play_count, skip_count, loop_count, favorite_count, last_completion, track_json, updated_at
-      FROM track_feedback
-      WHERE user_id = current_user_id()
-      ORDER BY updated_at DESC, id DESC
+      SELECT ${TRACK_FEEDBACK_SELECT}
+      FROM track_feedback tf
+      WHERE tf.user_id = current_user_id()
+      ORDER BY tf.updated_at DESC, tf.id DESC
       LIMIT ?
     `)
-    .all(limit) as Array<{
-      track_key: string
-      play_count: number
-      skip_count: number
-      loop_count: number
-      favorite_count: number
-      last_completion?: number | null
-      track_json: string
-      updated_at?: string
-    }>
+    .all(limit) as TrackFeedbackRow[]
 
-  return rows.map((row) => ({
-    trackKey: row.track_key,
-    track: parseJson<Track>(row.track_json, { title: '', artist: '' }, 'track_feedback.track_json'),
-    playCount: row.play_count,
-    skipCount: row.skip_count,
-    loopCount: row.loop_count,
-    favoriteCount: row.favorite_count,
-    lastCompletion: typeof row.last_completion === 'number' ? row.last_completion : undefined,
-    updatedAt: row.updated_at,
-    score: weightedScore(row),
-  }))
+  return rows.map(trackFeedbackFromRow)
+}
+
+function uniqueFeedbackRows(rows: TrackFeedbackRow[]): TrackFeedbackRow[] {
+  const seen = new Set<string>()
+  return rows.filter((row) => {
+    if (seen.has(row.track_key)) return false
+    seen.add(row.track_key)
+    return true
+  })
+}
+
+export function listProfileTrackFeedback(recentLimit = 300, stableLimit = 300): TrackFeedback[] {
+  const safeRecentLimit = Math.max(1, Math.min(2000, Math.floor(Number.isFinite(recentLimit) ? recentLimit : 300)))
+  const safeStableLimit = Math.max(1, Math.min(2000, Math.floor(Number.isFinite(stableLimit) ? stableLimit : 300)))
+  const db = getDb()
+  const recentRows = db
+    .prepare(`
+      SELECT ${TRACK_FEEDBACK_SELECT}
+      FROM track_feedback tf
+      WHERE tf.user_id = current_user_id()
+      ORDER BY tf.updated_at DESC, tf.id DESC
+      LIMIT ?
+    `)
+    .all(safeRecentLimit) as TrackFeedbackRow[]
+  const stableRows = db
+    .prepare(`
+      SELECT ${TRACK_FEEDBACK_SELECT}
+      FROM track_feedback tf
+      WHERE tf.user_id = current_user_id()
+      ORDER BY
+        tf.favorite_count DESC,
+        explicit_like_count DESC,
+        tf.loop_count DESC,
+        tf.play_count DESC,
+        tf.updated_at DESC,
+        tf.id DESC
+      LIMIT ?
+    `)
+    .all(safeStableLimit) as TrackFeedbackRow[]
+
+  return uniqueFeedbackRows([...recentRows, ...stableRows]).map(trackFeedbackFromRow)
 }
 
 export function listTrackFeedbackUpdatedSince(days: number, limit = 300): TrackFeedback[] {
@@ -249,43 +302,31 @@ export function listTrackFeedbackUpdatedSince(days: number, limit = 300): TrackF
   const safeLimit = Math.max(1, Math.min(5000, Math.floor(Number.isFinite(limit) ? limit : 300)))
   const rows = getDb()
     .prepare(`
-      SELECT track_key, play_count, skip_count, loop_count, favorite_count, last_completion, track_json, updated_at
-      FROM track_feedback
-      WHERE user_id = current_user_id()
-        AND updated_at >= datetime('now', ?)
-      ORDER BY updated_at DESC, id DESC
+      SELECT ${TRACK_FEEDBACK_SELECT}
+      FROM track_feedback tf
+      WHERE tf.user_id = current_user_id()
+        AND tf.updated_at >= datetime('now', ?)
+      ORDER BY tf.updated_at DESC, tf.id DESC
       LIMIT ?
     `)
-    .all(`-${safeDays} days`, safeLimit) as Array<{
-      track_key: string
-      play_count: number
-      skip_count: number
-      loop_count: number
-      favorite_count: number
-      last_completion?: number | null
-      track_json: string
-      updated_at?: string
-    }>
+    .all(`-${safeDays} days`, safeLimit) as TrackFeedbackRow[]
 
-  return rows.map((row) => ({
-    trackKey: row.track_key,
-    track: parseJson<Track>(row.track_json, { title: '', artist: '' }, 'track_feedback.track_json'),
-    playCount: row.play_count,
-    skipCount: row.skip_count,
-    loopCount: row.loop_count,
-    favoriteCount: row.favorite_count,
-    lastCompletion: typeof row.last_completion === 'number' ? row.last_completion : undefined,
-    updatedAt: row.updated_at,
-    score: weightedScore(row),
-  }))
+  return rows.map(trackFeedbackFromRow)
 }
 
 export function getFeedbackSignalCount(): number {
   const row = getDb()
     .prepare(`
-      SELECT COALESCE(SUM(play_count + skip_count + loop_count + favorite_count), 0) AS total
-      FROM track_feedback
-      WHERE user_id = current_user_id()
+      SELECT
+        (
+          SELECT COALESCE(SUM(play_count + skip_count + loop_count + favorite_count), 0)
+          FROM track_feedback
+          WHERE user_id = current_user_id()
+        ) + (
+          SELECT COUNT(*)
+          FROM track_feedback_events
+          WHERE user_id = current_user_id()
+        ) AS total
     `)
     .get() as { total: number } | undefined
   return Number(row?.total ?? 0)

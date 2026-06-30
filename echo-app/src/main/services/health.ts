@@ -35,6 +35,15 @@ const schedulerHealthLabels: Record<SchedulerHealthArea, string> = {
   'care-ping': '主动关心',
 }
 
+const schedulerHealthServices: Record<SchedulerHealthArea, ServiceHealthKind> = {
+  scheduler: 'scheduler',
+  catchup: 'scheduler-catchup',
+  yinyi: 'scheduler-yinyi',
+  'taste-structured': 'scheduler-taste-structured',
+  'taste-portrait': 'scheduler-taste-portrait',
+  'care-ping': 'scheduler-care-ping',
+}
+
 export function schedulerHealthMessage(area: SchedulerHealthArea, message: string): string {
   return `${schedulerHealthLabels[area]}：${message}`
 }
@@ -45,7 +54,7 @@ export function recordSchedulerHealth(
   message: string,
   technical = '',
 ): ServiceHealth {
-  return recordHealth('scheduler', status, schedulerHealthMessage(area, message), technical)
+  return recordHealth(schedulerHealthServices[area], status, schedulerHealthMessage(area, message), technical)
 }
 
 function technicalMessage(error: unknown): string {
@@ -77,7 +86,7 @@ async function checkNetease(): Promise<void> {
     recordHealth(
       'netease',
       state.loggedIn ? 'ok' : 'degraded',
-      state.loggedIn ? `网易云已登录：${state.nickname ?? '网易云用户'}` : '网易云登录可能过期了。重新扫码后我再拿播放链接。',
+      state.loggedIn ? `网易云已登录：${state.nickname ?? '网易云用户'}` : '网易云登录可能过期了。重新登录后我再拿播放链接。',
     )
   } catch (error) {
     recordHealth('netease', 'error', '网易云状态检查失败。', technicalMessage(error))
@@ -85,12 +94,16 @@ async function checkNetease(): Promise<void> {
 }
 
 async function checkTts(): Promise<void> {
-  const result = await synthesize('Echo')
-  if (result.ok) {
-    recordHealth('tts', 'ok', '语音服务正常。')
-    return
+  try {
+    const result = await synthesize('Echo')
+    if (result.ok) {
+      recordHealth('tts', 'ok', '语音服务正常。')
+      return
+    }
+    recordHealth('tts', 'degraded', 'Echo 现在说不出声音，文字会保留。', result.error?.message ?? '')
+  } catch (error) {
+    recordHealth('tts', 'degraded', 'Echo 现在说不出声音，文字会保留。', technicalMessage(error))
   }
-  recordHealth('tts', 'degraded', 'Echo 现在说不出声音，文字会保留。', result.error?.message ?? '')
 }
 
 async function checkWeather(): Promise<void> {
@@ -99,12 +112,16 @@ async function checkWeather(): Promise<void> {
     recordHealth('weather', 'degraded', '还没设置城市。我会跳过天气开场。')
     return
   }
-  const weather = await getWeather(settings.user.city)
-  recordHealth(
-    'weather',
-    weather ? 'ok' : 'degraded',
-    weather ? `天气可用：${weather.summary}` : '天气暂时拿不到，我会跳过天气开场。',
-  )
+  try {
+    const weather = await getWeather(settings.user.city)
+    recordHealth(
+      'weather',
+      weather ? 'ok' : 'degraded',
+      weather ? `天气可用：${weather.summary}` : '天气暂时拿不到，我会跳过天气开场。',
+    )
+  } catch (error) {
+    recordHealth('weather', 'degraded', '天气暂时拿不到，我会跳过天气开场。', technicalMessage(error))
+  }
 }
 
 export async function checkServiceHealth(): Promise<ServiceHealth[]> {
@@ -113,7 +130,7 @@ export async function checkServiceHealth(): Promise<ServiceHealth[]> {
     checkNetease(),
     checkTts(),
     checkWeather(),
-    Promise.resolve(recordSchedulerHealth('scheduler', 'ok', '已恢复。')),
+    Promise.resolve(recordSchedulerHealth('scheduler', 'ok', '运行正常。')),
     Promise.resolve(checkSecureStorage()),
   ])
   return listHealth()

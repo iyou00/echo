@@ -6,8 +6,9 @@ import { currentMusicCorrectionConstraintForQuery } from '../../skills/music/cor
 import type { MusicEntityResolution } from '../../skills/music/entityResolver'
 import { constraintFromResolution, filterTracksByMusicEntity, mergeMusicEntityConstraints, type MusicEntityConstraint } from '../../skills/music/verifier'
 import { parseRequestedTrackCount } from '../recommendation'
+import { mergeIntent } from '../recommendation/intent'
 import type { PendingQuestionReplyCapture } from '../tasteQuestionScheduler'
-import { classifyChatIntent, refineChatIntentWithLlm, type ChatIntent } from './intent'
+import { classifyFallbackChatIntent, type ChatIntent } from './intent'
 import { fetchRecommendationCandidates, type ChatActiveTask } from './recommendationCandidates'
 import {
   directSongChoiceContent,
@@ -27,7 +28,12 @@ function shouldExcludeCurrentPlaybackTrack(
 ): boolean {
   if (!currentTrack) return false
   if (pendingReply.action === 'extend_recommendation') return true
-  return intent.kind === 'feedback_current_track' && intent.feedbackAction === 'more_like_this'
+  return intent.kind === 'feedback_current_track'
+    && (
+      intent.feedbackAction === 'more_like_this'
+      || intent.feedbackAction === 'not_right'
+      || intent.feedbackAction === 'skip'
+    )
 }
 
 export function excludeCurrentPlaybackTrack(tracks: Track[], currentTrack: Track | null | undefined): Track[] {
@@ -46,6 +52,34 @@ function shouldExplainSearchFailure(failure: MusicSearchFailure | undefined): bo
   return failure.reason !== 'auth_required' && failure.reason !== 'search_failed'
 }
 
+function compactQueryText(value: string): string {
+  return value.toLowerCase().replace(/[\s《》“”"'‘’.,，。!！?？:：\-_/]/g, '')
+}
+
+function queryMentionsEntity(query: string, entity: string | undefined): boolean {
+  if (!entity) return false
+  const normalizedQuery = compactQueryText(query)
+  const normalizedEntity = compactQueryText(entity)
+  return Boolean(normalizedEntity && normalizedQuery.includes(normalizedEntity))
+}
+
+export function effectiveMusicSearchQuery(query: string, intent: ChatIntent): string {
+  if (!hasMusicActionIntent(intent)) return query
+  const mentionsArtist = queryMentionsEntity(query, intent.artistQuery)
+  const mentionsTitle = queryMentionsEntity(query, intent.seedTitle)
+  if (intent.artistQuery && intent.seedTitle && (!mentionsArtist || !mentionsTitle)) {
+    return `我要听${intent.artistQuery}的《${intent.seedTitle}》`
+  }
+  if (intent.artistQuery && !mentionsArtist) {
+    const count = Math.max(1, Math.min(5, Math.floor(intent.targetCount || 1)))
+    return count > 1 ? `推荐${count}首${intent.artistQuery}的歌` : `推荐一首${intent.artistQuery}的歌`
+  }
+  if (intent.seedTitle && !mentionsTitle) {
+    return `我要听《${intent.seedTitle}》`
+  }
+  return query
+}
+
 function failureEntityPatch(failure: MusicSearchFailure | undefined, entity: MusicEntityResolution | undefined): {
   artistQuery?: string
   seedTitle?: string
@@ -61,17 +95,18 @@ function failureEntityPatch(failure: MusicSearchFailure | undefined, entity: Mus
 }
 
 export function hasMusicActionIntent(intent: ChatIntent): boolean {
-  return intent.wantsMusic && (
-    intent.kind === 'direct_song'
-    || intent.kind === 'artist_request'
-    || intent.kind === 'mood_request'
-    || intent.kind === 'scene_request'
-    || intent.kind === 'similar_to_track'
-  )
+  if (!intent.wantsMusic) return false
+  if (intent.kind === 'weather' || intent.kind === 'identity' || intent.kind === 'out_of_scope') return false
+  if (intent.kind === 'feedback_current_track') {
+    return intent.feedbackAction === 'more_like_this'
+      || intent.feedbackAction === 'not_right'
+      || intent.feedbackAction === 'skip'
+  }
+  return true
 }
 
 function noMusicCandidateContent(intent: ChatIntent, authRequired: boolean, failure?: MusicSearchFailure): string {
-  if (authRequired) return '现在还没接上网易云。去设置里扫码登录后，我就能继续给你挑歌。'
+  if (authRequired) return '现在还没接上网易云。去设置里登录网易云后，我就能继续给你挑歌。'
   if (failure?.reason === 'search_failed') return '这次音乐服务没拿到可播放结果。你换个歌手、语种或感觉，我再试一次。'
   if (intent.artistQuery) return `我知道你想听${intent.artistQuery}，但这次没拿到可播放的结果。你换个关键词，我再找。`
   if (intent.seedTitle) return `我知道你想听《${intent.seedTitle}》，但这次没拿到可播放的结果。你把歌手或版本补一下，我再找。`
@@ -105,8 +140,36 @@ export interface CandidateStageReady {
   entityConstraint?: MusicEntityConstraint
 }
 
+function classifyDerivedRecommendationIntent(
+  query: string,
+  input: CandidateStageInput,
+): ChatIntent {
+  const base = classifyFallbackChatIntent(query, { currentTrack: input.currentPlaybackTrack })
+  const override = input.initialChatIntent.llmIntentOverride
+  if (!override) return base
+  const semanticOverride = { ...override }
+  delete semanticOverride.artistQuery
+  delete semanticOverride.seedTitle
+  delete semanticOverride.clearArtistQuery
+  delete semanticOverride.clearSeedTitle
+  const recommendationIntent = mergeIntent(base.recommendationIntent, semanticOverride)
+  return {
+    ...base,
+    recommendationIntent,
+    llmIntentOverride: semanticOverride,
+    seedTitle: recommendationIntent.seedTitle,
+    artistQuery: recommendationIntent.artistQuery,
+    targetCount: recommendationIntent.targetCount,
+    moodTerms: Array.from(new Set([
+      ...base.moodTerms,
+      ...recommendationIntent.moods,
+      ...recommendationIntent.scenes,
+    ])).slice(0, 8),
+  }
+}
+
 export async function prepareCandidateStage(input: CandidateStageInput): Promise<{ reply?: SendChatResult; ready?: CandidateStageReady }> {
-  const recommendationQuery = input.sessionFollowUp.kind === 'search'
+  const rawRecommendationQuery = input.sessionFollowUp.kind === 'search'
     ? input.sessionFollowUp.query
     : input.pendingDirectSongReply?.query ?? input.pendingMusicEntityReply?.query
     ?? (input.initialChatIntent.kind === 'feedback_current_track' && input.initialChatIntent.feedbackAction === 'more_like_this' && input.currentPlaybackTrack
@@ -114,13 +177,10 @@ export async function prepareCandidateStage(input: CandidateStageInput): Promise
       : input.pendingReply.action === 'extend_recommendation' && input.pendingReply.recommendationText
         ? input.pendingReply.recommendationText
         : input.trimmed)
+  const recommendationQuery = effectiveMusicSearchQuery(rawRecommendationQuery, input.initialChatIntent)
   const recommendationIntent = recommendationQuery === input.effectiveText
     ? input.initialChatIntent
-    : await refineChatIntentWithLlm(
-      classifyChatIntent(recommendationQuery, { currentTrack: input.currentPlaybackTrack }),
-      { currentTrack: input.currentPlaybackTrack },
-      input.signal,
-  )
+    : classifyDerivedRecommendationIntent(recommendationQuery, input)
   const requested = parseRequestedTrackCount(input.trimmed)
   const targetCount = Math.max(1, Math.min(5, Math.floor(recommendationIntent.targetCount || requested.targetCount)))
   const countExplicit = requested.explicit || targetCount > requested.targetCount
@@ -152,7 +212,13 @@ export async function prepareCandidateStage(input: CandidateStageInput): Promise
       current: 3,
       total: 5,
     })
-  }, recommendationIntent)
+  }, recommendationIntent, {
+    similarityReference: recommendationIntent.kind === 'similar_to_track'
+      && !recommendationIntent.seedTitle
+      && !recommendationIntent.artistQuery
+      ? input.currentPlaybackTrack ?? undefined
+      : undefined,
+  })
   if (candidatesCanceled || input.active.canceled) {
     return { reply: input.reply('行,我先停在这里。') }
   }
@@ -195,7 +261,10 @@ export async function prepareCandidateStage(input: CandidateStageInput): Promise
   const usableCandidates = excludeCurrentTrack
     ? excludeCurrentPlaybackTrack(sessionUsableCandidates, input.currentPlaybackTrack)
     : sessionUsableCandidates
-  const entityConstraint = mergeMusicEntityConstraints(constraintFromResolution(entityResolution), currentMusicCorrectionConstraintForQuery(recommendationQuery))
+  const entityConstraint = mergeMusicEntityConstraints(
+    recommendationIntent.kind === 'similar_to_track' ? undefined : constraintFromResolution(entityResolution),
+    currentMusicCorrectionConstraintForQuery(recommendationQuery),
+  )
   const guardedCandidates = filterTracksByMusicEntity(usableCandidates, entityConstraint, {
     strictArtist: Boolean(entityConstraint?.artistQuery || entityConstraint?.verifiedArtistName),
   })

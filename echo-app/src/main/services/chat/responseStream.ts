@@ -3,6 +3,7 @@ import type { getSettings } from '../../db/settings'
 import { LlmError, streamChat } from '../../llm/client'
 import { buildChatContext } from '../../llm/prompt'
 import { SYSTEM_CONTEXT_TAGS, escapeRegExp, stripKnownSystemBlocks } from '../../llm/outputSanitize'
+import { safePromptJson } from '../../llm/promptData'
 import { recordHealth } from '../health'
 import { checkOutputSafe } from '../safety/output-filter'
 import { pickJailbreakResponse } from '../safety/jailbreak-filter'
@@ -210,13 +211,21 @@ export async function streamPendingAnswerReply(
 2. 不推荐新歌,不换歌,不输出歌曲卡片。
 3. 自然回应用户说出的偏好,语气像朋友。
 4. 40-90 个中文字。
-
-刚才追问:${capture.question?.content ?? ''}
-关联歌曲:${artist || '未知艺人'} / ${title || '刚才那首'}
-判断:${capture.polarity ?? 'neutral'}
-焦点:${capture.focus || '未明确'}`,
+动态输入在下一条 user JSON 里。`,
       },
-      { role: 'user', content: userText },
+      {
+        role: 'user',
+        content: safePromptJson({
+          answer: userText,
+          previousQuestion: capture.question?.content ?? '',
+          relatedTrack: {
+            artist: artist || '未知艺人',
+            title: title || '刚才那首',
+          },
+          polarity: capture.polarity ?? 'neutral',
+          focus: capture.focus || '未明确',
+        }),
+      },
     ], { signal: active.signal, maxTokens: 300 })) {
       if (active.canceled) break
       content += chunk.content

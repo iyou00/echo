@@ -16,12 +16,14 @@ import { listTrackFeedback } from '../db/feedback'
 import { applyMemorySignal } from './memoryPolicy'
 import { getSettings } from '../db/settings'
 import { completeChat } from '../llm/client'
+import { safePromptJson } from '../llm/promptData'
 import {
   buildRecommendationTextFromAnswer,
   detectPendingReplyFocus,
   detectPendingReplyPolarity,
   parsePendingReplyAction,
   questionTrackLabel,
+  reconcilePreclassifiedPendingReply,
   ruleClassifyPendingReply,
   type PendingQuestionReplyCapture,
 } from '../skills/intent/pendingReply'
@@ -33,6 +35,14 @@ const RECOMMENDATION_FOLLOW_UP_COOLDOWN_DAYS = 7
 const RECOMMENDATION_FOLLOW_UP_EXPIRES_MS = 24 * 60 * 60 * 1000
 
 export type { PendingQuestionReplyAction, PendingQuestionReplyCapture } from '../skills/intent/pendingReply'
+
+export interface PendingTasteQuestionContext {
+  id: number
+  content: string
+  kind: string
+  trackTitle?: string
+  trackArtist?: string
+}
 
 function stableIndex(value: string, modulo: number): number {
   let hash = 0
@@ -136,9 +146,11 @@ async function llmClassifyPendingReply(text: string, question: TasteQuestion, si
       },
       {
         role: 'user',
-        content: `Echo 刚才问: ${question.content}
-问题上下文:${JSON.stringify(question.context ?? {})}
-用户这句:${text}`,
+        content: safePromptJson({
+          previousQuestion: question.content,
+          questionContext: question.context ?? {},
+          userText: text,
+        }),
       },
     ], { temperature: 0, signal, maxTokens: 100 }),
     FOLLOW_UP_CLASSIFIER_TIMEOUT_MS,
@@ -172,7 +184,7 @@ function addConversationQuestions(userText: string): void {
     {
       regex: /太吵|吵|炸|刺耳|刺|冲|闹/,
       kind: 'conversation_texture',
-      content: '你说的“吵”，更像编曲太满，还是人声太冲？',
+      content: '你说的“吵”，更像编曲太密，还是人声太冲？',
       context: { source: 'conversation', cue: 'noisy' },
     },
     {
@@ -277,13 +289,35 @@ export function generateDynamicTasteQuestions(userText: string, tracks: Track[])
   addBehaviorQuestions()
 }
 
-export async function capturePendingQuestionAnswer(userText: string, signal?: AbortSignal): Promise<PendingQuestionReplyCapture> {
+export function getPendingTasteQuestionContext(): PendingTasteQuestionContext | null {
+  const latest = getLatestAskedPendingQuestion()
+  if (!latest?.conversationId) return null
+  const turns = countUserMessagesAfterConversation(latest.conversationId)
+  if (turns > MIN_USER_TURNS_AFTER_QUESTION) return null
+  const title = typeof latest.question.context?.title === 'string' ? latest.question.context.title.trim() : ''
+  const artist = typeof latest.question.context?.artist === 'string' ? latest.question.context.artist.trim() : ''
+  return {
+    id: latest.question.id,
+    content: latest.question.content,
+    kind: latest.question.kind,
+    trackTitle: title || undefined,
+    trackArtist: artist || undefined,
+  }
+}
+
+export async function capturePendingQuestionAnswer(
+  userText: string,
+  signal?: AbortSignal,
+  preclassifiedAction?: PendingQuestionReplyCapture['action'],
+): Promise<PendingQuestionReplyCapture> {
   assertTasteQuestionActive(signal)
   const latest = getLatestAskedPendingQuestion()
   if (!latest?.conversationId) return { action: 'none' }
   const turns = countUserMessagesAfterConversation(latest.conversationId)
   if (turns > MIN_USER_TURNS_AFTER_QUESTION) return { action: 'none' }
-  const action = await classifyPendingQuestionReply(userText, latest.question, signal)
+  const action = preclassifiedAction
+    ? reconcilePreclassifiedPendingReply(userText, latest.question, preclassifiedAction)
+    : await classifyPendingQuestionReply(userText, latest.question, signal)
   if (action === 'none') return { action: 'none' }
 
   answerTasteQuestion(latest.question.id, userText)

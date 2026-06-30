@@ -51,6 +51,31 @@ export interface PendingDirectSongChoiceReply {
   response?: string
 }
 
+export type PendingIntentContext =
+  | {
+      target: 'direct_song'
+      sourceText: string
+      seedTitle: string
+      artistQuery?: string
+    }
+  | {
+      target: 'music_entity'
+      sourceText: string
+      seedTitle?: string
+      artistQuery?: string
+      ambiguity: MusicEntityAmbiguity
+    }
+  | {
+      target: 'track_choice'
+      sourceText: string
+      options: Array<{ title: string; artist: string }>
+    }
+  | {
+      target: 'track_preference'
+      sourceText: string
+      seedTitle: string
+    }
+
 let pendingDirectSongClarification: PendingDirectSongClarification | null = null
 let pendingDirectSongChoice: PendingDirectSongChoice | null = null
 let pendingMusicEntityClarification: PendingMusicEntityClarification | null = null
@@ -158,6 +183,60 @@ export function clearPendingDirectSongState(): void {
   pendingTrackPreferenceClarification = null
 }
 
+function clearExpiredPendingIntentState(): void {
+  if (pendingDirectSongClarification && pendingDirectSongIsExpired(pendingDirectSongClarification)) {
+    pendingDirectSongClarification = null
+  }
+  if (pendingDirectSongChoice && pendingDirectSongIsExpired(pendingDirectSongChoice)) {
+    pendingDirectSongChoice = null
+  }
+  if (pendingMusicEntityClarification && pendingDirectSongIsExpired(pendingMusicEntityClarification)) {
+    pendingMusicEntityClarification = null
+  }
+  if (pendingTrackPreferenceClarification && pendingDirectSongIsExpired(pendingTrackPreferenceClarification)) {
+    pendingTrackPreferenceClarification = null
+  }
+}
+
+export function getPendingIntentContext(): PendingIntentContext | null {
+  clearExpiredPendingIntentState()
+  if (pendingTrackPreferenceClarification) {
+    return {
+      target: 'track_preference',
+      sourceText: pendingTrackPreferenceClarification.sourceText,
+      seedTitle: pendingTrackPreferenceClarification.seedTitle,
+    }
+  }
+  if (pendingDirectSongClarification) {
+    return {
+      target: 'direct_song',
+      sourceText: pendingDirectSongClarification.sourceText,
+      seedTitle: pendingDirectSongClarification.seedTitle,
+      artistQuery: pendingDirectSongClarification.artistQuery,
+    }
+  }
+  if (pendingMusicEntityClarification) {
+    return {
+      target: 'music_entity',
+      sourceText: pendingMusicEntityClarification.sourceText,
+      seedTitle: pendingMusicEntityClarification.seedTitle,
+      artistQuery: pendingMusicEntityClarification.artistQuery,
+      ambiguity: pendingMusicEntityClarification.ambiguity,
+    }
+  }
+  if (pendingDirectSongChoice) {
+    return {
+      target: 'track_choice',
+      sourceText: pendingDirectSongChoice.sourceText,
+      options: pendingDirectSongChoice.candidates.slice(0, 3).map((track) => ({
+        title: track.title,
+        artist: track.artist,
+      })),
+    }
+  }
+  return null
+}
+
 function clearPendingDirectSongClarification(): void {
   pendingDirectSongClarification = null
 }
@@ -243,7 +322,7 @@ function queryFromArtistTitle(artist?: string, title?: string): string | null {
 }
 
 function isShortArtistReply(text: string): boolean {
-  return /^[A-Za-z0-9 .&'’\-\u4e00-\u9fa5]{1,32}$/.test(text) && !/算了|不用|取消|不是|没有|完整|歌名|这首|这个|这种|感觉|继续|类似|换|首|歌|曲|听|来|放|推荐/.test(text)
+  return /^[A-Za-z0-9 .&'’\-\u4e00-\u9fa5]{1,32}$/.test(text) && !/^(是|对|嗯|没错|就是|可以|好的|行)$/.test(text) && !/算了|不用|取消|不是|没有|完整|歌名|这首|这个|这种|感觉|继续|类似|换|首|歌|曲|听|来|放|推荐/.test(text)
 }
 
 function isNewMusicRequest(text: string): boolean {
@@ -261,8 +340,11 @@ function isLikelyPendingInterruption(text: string): boolean {
   return /天气|气温|温度|下雨|冷不冷|热不热|冷吗|热吗|几度|多少度|我有点|我现在|今天|心情|难受|开心|烦|累|困|睡不着|想聊|怎么|为什么|你能|你会|你是|你是谁|什么|代码|翻译|政治|数学|商业|生意/.test(compact)
 }
 
-function isCancelReply(text: string): boolean {
-  return /算了|不用|取消|先不听|别找|不找了/.test(text)
+export function isPendingIntentCancelReply(text: string): boolean {
+  const compact = text
+    .trim()
+    .replace(/[\s，,。.!！?？、；;：:]/g, '')
+  return /^(?:算了吧?|不用了?|取消|先不听了?|别找了?|不找了?|算了先不听了?|算了先不找了?|算了别找了?|算了不找了?)$/.test(compact)
 }
 
 function parseChoiceIndex(text: string): number | null {
@@ -281,7 +363,7 @@ export function resolvePendingDirectSongReply(text: string): PendingDirectSongRe
     return null
   }
 
-  if (isCancelReply(text)) {
+  if (isPendingIntentCancelReply(text)) {
     clearPendingDirectSongClarification()
     return { response: '行，那这首先放一放。你想听别的再直接说。' }
   }
@@ -315,7 +397,7 @@ export function resolvePendingMusicEntityReply(text: string): PendingDirectSongR
     pendingMusicEntityClarification = null
     return null
   }
-  if (isCancelReply(text)) {
+  if (isPendingIntentCancelReply(text)) {
     pendingMusicEntityClarification = null
     return { response: '行，那这条先放一放。你想听别的再直接说。' }
   }
@@ -349,6 +431,9 @@ export function resolvePendingMusicEntityReply(text: string): PendingDirectSongR
   }
 
   const artist = cleanArtistReply(compact)
+  if (pending.seedTitle && /^(是|对|嗯|没错|就是|完整歌名|歌名没错)$/.test(compact)) {
+    return { response: `歌名我先记着：《${pending.seedTitle}》。你再发我歌手名，我就继续找。` }
+  }
   if (pending.seedTitle && isShortArtistReply(artist)) {
     pendingMusicEntityClarification = null
     return { query: `我要听${artist}的《${pending.seedTitle}》` }
@@ -369,7 +454,7 @@ export function resolvePendingTrackPreferenceReply(text: string): PendingTrackPr
     pendingTrackPreferenceClarification = null
     return null
   }
-  if (isCancelReply(text)) {
+  if (isPendingIntentCancelReply(text)) {
     pendingTrackPreferenceClarification = null
     return { seedTitle: pending.seedTitle, response: '行，这个偏好我先不记。' }
   }
@@ -406,7 +491,7 @@ export function resolvePendingDirectSongChoiceReply(text: string): PendingDirect
     clearPendingDirectSongChoice()
     return null
   }
-  if (isCancelReply(text)) {
+  if (isPendingIntentCancelReply(text)) {
     clearPendingDirectSongChoice()
     return { response: '行，这几个版本我先放一边。你想听别的再直接说。' }
   }

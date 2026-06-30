@@ -44,7 +44,7 @@ const mockTracks: Track[] = [
 
 const mockScenes: SceneDefinition[] = [
   { key: 'focus', label: '静下来', shortLabel: '静下来', line: '少一点存在感,让节奏稳定铺着。', prompt: '想静一会儿,帮我找几首不抢注意力的歌。', targetCount: 5, moods: ['松弛', '陪伴'], scenes: ['独处', '下午工作'], energy: 'low', tempo: 'slow', familiarity: 'safe' },
-  { key: 'sleepy', label: '有点困', shortLabel: '有点困', line: '把精神提一下,别一下子太猛。', prompt: '有点犯困,帮我找几首提神但别太炸的歌。', targetCount: 5, moods: ['清醒', '轻快'], scenes: ['下午工作'], energy: 'high', tempo: 'medium', familiarity: 'balanced' },
+  { key: 'sleepy', label: '有点困', shortLabel: '有点困', line: '把精神提一下，节奏别太冲。', prompt: '有点犯困,帮我找几首提神但别太炸的歌。', targetCount: 5, moods: ['清醒', '轻快'], scenes: ['下午工作'], energy: 'high', tempo: 'medium', familiarity: 'balanced' },
   { key: 'relax', label: '松口气', shortLabel: '松口气', line: '工作间隙缓一下,别把情绪拽太深。', prompt: '想松口气,帮我找几首轻一点的歌。', targetCount: 5, moods: ['松弛', '治愈'], scenes: ['独处'], energy: 'low', tempo: 'slow', familiarity: 'safe' },
   { key: 'irritated', label: '有点烦', shortLabel: '有点烦', line: '先降噪,让脑子别继续被推着走。', prompt: '有点烦,帮我找几首能让脑子安静下来的歌。', targetCount: 5, moods: ['松弛', '治愈'], scenes: ['独处'], energy: 'low', tempo: 'slow', familiarity: 'safe' },
   { key: 'random', label: '随便吧', shortLabel: '随便吧', line: '交给 Echo 发散,从你的口味里随手捞。', prompt: '随便听点什么,从我的口味里捞几首就好。', targetCount: 5, moods: ['陪伴'], scenes: ['下午工作'], energy: 'medium', tempo: 'medium', familiarity: 'explore' },
@@ -90,7 +90,7 @@ const mockSettings: Settings = {
   meta: {
     schemaVersion: 1,
     firstUsedAt: now,
-    onboardingStep: 'playlist',
+    onboardingStep: 'api',
   },
 }
 
@@ -116,7 +116,7 @@ const mockProfile: TasteProfile = {
     { tag: '失眠', frequency: 39, signature_artists: ['林俊杰'] },
   ],
   discovery_appetite: 62,
-  anti_patterns: ['太满的电子音墙', '廉价苦情副歌', '开场过硬的金属质感'],
+  anti_patterns: ['编曲过密的电子音墙', '廉价苦情副歌', '开场过硬的金属质感'],
   signature_tracks: mockTracks,
   echo_portrait:
     '你喜欢旋律性强、情感直白的东西。林俊杰和海洋Bo 是你这周的两个轴心，他们完全不像，却都在你这里。最近 Charlie Puth 的接受度变高了，我看你晚上常放。',
@@ -136,10 +136,10 @@ const neteasePlaylists: NeteasePlaylistSummary[] = [
 ]
 let healthState: ServiceHealth[] = [
   { service: 'llm', status: 'unknown', message: '模型状态还没检查。' },
-  { service: 'netease', status: 'degraded', message: '网易云登录可能过期了。重新扫码后我再拿播放链接。', checkedAt: now },
+  { service: 'netease', status: 'degraded', message: '网易云登录可能过期了。重新登录后我再拿播放链接。', checkedAt: now },
   { service: 'tts', status: 'degraded', message: '浏览器预览不合成语音。', checkedAt: now },
   { service: 'weather', status: 'degraded', message: '还没设置城市。我会跳过天气开场。', checkedAt: now },
-  { service: 'scheduler', status: 'ok', message: '定时任务已恢复。', checkedAt: now },
+  { service: 'scheduler', status: 'ok', message: '定时任务运行正常。', checkedAt: now },
   { service: 'storage', status: 'ok', message: '本地存储正常。', checkedAt: now },
 ]
 let profileState: TasteProfile | null = structuredClone(mockProfile)
@@ -177,7 +177,7 @@ let messages: ChatMessage[] = [
   {
     id: 3,
     role: 'assistant',
-    content: '好，林俊杰和 Charlie Puth 给你接上。一首华语一首欧美，情绪连得上。',
+    content: '好，先放林俊杰和 Charlie Puth。一首华语一首欧美，情绪连得上。',
     createdAt: now,
     tracks: [mockTracks[1], mockTracks[2]],
   },
@@ -203,6 +203,7 @@ function wait(ms: number) {
 }
 
 function emitMockRuntimeTask(task: RuntimeTaskSnapshot) {
+  if (task.visibility !== 'user') return
   const next = structuredClone(task)
   runtimeTaskListeners.forEach((listener) => listener(next))
 }
@@ -211,7 +212,12 @@ function rememberMockRuntimeTask(task: RuntimeTaskSnapshot) {
   const index = runtimeTasks.findIndex((item) => item.id === task.id)
   if (index >= 0) runtimeTasks.splice(index, 1)
   runtimeTasks.unshift(task)
-  runtimeTasks.splice(50)
+  const sameVisibility = runtimeTasks
+    .map((item, itemIndex) => ({ item, itemIndex }))
+    .filter(({ item }) => item.visibility === task.visibility)
+  for (const overflow of sameVisibility.slice(RUNTIME_TASK_RECENT_LIMIT).reverse()) {
+    runtimeTasks.splice(overflow.itemIndex, 1)
+  }
   emitMockRuntimeTask(task)
 }
 
@@ -223,6 +229,7 @@ function startMockRuntimeTask(input: {
   message?: string
   sourceName?: string
   cancellable?: boolean
+  visibility?: RuntimeTaskSnapshot['visibility']
 }): RuntimeTaskSnapshot {
   const startedAt = new Date().toISOString()
   const task: RuntimeTaskSnapshot = {
@@ -238,6 +245,7 @@ function startMockRuntimeTask(input: {
     sourceName: input.sourceName,
     message: input.message,
     cancellable: input.cancellable ?? true,
+    visibility: input.visibility ?? 'user',
   }
   rememberMockRuntimeTask(task)
   return task
@@ -348,7 +356,7 @@ function mockSceneDefinition(key: SceneKey) {
 
 const MOCK_SCENE_TEMPLATES: Record<string, (title: string) => string> = {
   focus: (t) => `好，我把声音放低一点。先听《${t}》，后面几首也排好了。`,
-  sleepy: (t) => `给你提一点精神。先听《${t}》，别一下子太猛。`,
+  sleepy: (t) => `给你提一点精神。先听《${t}》，节奏别太冲。`,
   relax: (t) => `松口气。先听《${t}》，慢慢来。`,
   irritated: (t) => `先把外面的声音降下来。先听《${t}》，让脑子缓一缓。`,
   random: (t) => `随便来一首？先听《${t}》，后面看心情。`,
@@ -372,6 +380,7 @@ function setMockImportTask(snapshot: ImportTaskSnapshot | null) {
       kind: snapshot.kind === 'playlist-file' ? 'playlist-import' : snapshot.kind === 'netease-playlist' ? 'netease-playlist-import' : snapshot.kind,
       status: snapshot.status === 'interrupted' ? 'canceled' : snapshot.status,
       cancellable: false,
+      visibility: 'user',
     }
     rememberMockRuntimeTask(runtimeSnapshot)
   }
@@ -403,10 +412,10 @@ const yinyiEntries: YinyiEntry[] = [
 const mockEcho: EchoApi = {
   runtime: {
     async getTask(id) {
-      return structuredClone(runtimeTasks.find((task) => task.id === id) ?? null)
+      return structuredClone(runtimeTasks.find((task) => task.id === id && task.visibility === 'user') ?? null)
     },
     async getRecentTasks() {
-      return structuredClone(runtimeTasks.slice(0, RUNTIME_TASK_RECENT_LIMIT))
+      return structuredClone(runtimeTasks.filter((task) => task.visibility === 'user').slice(0, RUNTIME_TASK_RECENT_LIMIT))
     },
     async cancelTask(id) {
       const task = runtimeTasks.find((item) => item.id === id)
@@ -499,6 +508,7 @@ const mockEcho: EchoApi = {
       activeSceneState = null
       sceneSessions = []
       messages = []
+      runtimeTasks.length = 0
       playbackState.current = null
       playbackState.position = 0
       playbackState.duration = 0
@@ -517,6 +527,7 @@ const mockEcho: EchoApi = {
       ]
       setMockImportTask(null)
       emitPlayback()
+      settingsChangedListeners.forEach((listener) => listener({ path: '*', value: null }))
       return { ok: true }
     },
     onChanged(listener) {
@@ -540,7 +551,7 @@ const mockEcho: EchoApi = {
         {
           service: 'netease',
           status: neteaseState.loggedIn ? 'ok' : 'degraded',
-          message: neteaseState.loggedIn ? `网易云已登录：${neteaseState.nickname ?? '网易云用户'}` : '网易云登录可能过期了。重新扫码后我再拿播放链接。',
+          message: neteaseState.loggedIn ? `网易云已登录：${neteaseState.nickname ?? '网易云用户'}` : '网易云登录可能过期了。重新登录后我再拿播放链接。',
           checkedAt,
         },
         { service: 'tts', status: 'degraded', message: '浏览器预览不合成语音。', checkedAt },
@@ -550,7 +561,7 @@ const mockEcho: EchoApi = {
           message: settingsState.user.city ? '天气可用：晴 · 25°C' : '还没设置城市。我会跳过天气开场。',
           checkedAt,
         },
-        { service: 'scheduler', status: 'ok', message: '定时任务已恢复。', checkedAt },
+        { service: 'scheduler', status: 'ok', message: '定时任务运行正常。', checkedAt },
         { service: 'storage', status: 'ok', message: '本地存储正常。', checkedAt },
       ]
       return structuredClone(healthState)
@@ -671,6 +682,17 @@ const mockEcho: EchoApi = {
         ].slice(0, 8),
       }
       return structuredClone(audit)
+    },
+    async refreshStructuredProfile() {
+      profileState = {
+        ...(profileState ?? structuredClone(mockProfile)),
+        profile_meta: {
+          ...((profileState ?? mockProfile).profile_meta ?? {}),
+          structuredUpdatedAt: new Date().toISOString(),
+          refreshReason: 'semantic_update',
+        },
+      }
+      return structuredClone(profileState)
     },
     async regeneratePortrait() {
       return runMockRuntimeTask({ kind: 'taste-refresh', phase: 'structured-profile', total: 2, message: '' }, async (task) => {
@@ -1067,6 +1089,10 @@ const mockEcho: EchoApi = {
     },
   },
   app: {
+    async openFeedback() {
+      window.open('https://wj.qq.com/s2/26976706/2fcf/', '_blank', 'noopener,noreferrer')
+      return { ok: true }
+    },
     async minimizeToTray() {
       return { ok: true }
     },
@@ -1199,6 +1225,25 @@ const mockEcho: EchoApi = {
     async checkQrLogin(): Promise<NeteaseQrCheckResult> {
       neteaseState = { loggedIn: true, nickname: 'Echo 预览用户', userId: 10001, message: '浏览器预览已模拟登录' }
       return { code: 803, status: 'authorized', message: '浏览器预览已模拟登录', state: structuredClone(neteaseState) }
+    },
+    async sendCaptcha(phone: string) {
+      return /^1\d{10}$/.test(phone.trim())
+        ? { ok: true, message: '浏览器预览已模拟发送验证码' }
+        : { ok: false, message: '手机号格式不对。' }
+    },
+    async loginWithCaptcha(phone: string, captcha: string) {
+      if (!/^1\d{10}$/.test(phone.trim()) || !captcha.trim()) {
+        neteaseState = { loggedIn: false, message: '手机号或验证码不对。' }
+        return structuredClone(neteaseState)
+      }
+      neteaseState = { loggedIn: true, nickname: 'Echo 预览用户', userId: 10001, message: '浏览器预览已模拟登录' }
+      return structuredClone(neteaseState)
+    },
+    async importCookie(cookie: string) {
+      neteaseState = cookie.includes('MUSIC_U')
+        ? { loggedIn: true, nickname: 'Echo 预览用户', userId: 10001, message: '浏览器预览已模拟导入 Cookie' }
+        : { loggedIn: false, message: 'Cookie 里需要包含 MUSIC_U。' }
+      return structuredClone(neteaseState)
     },
     async logout() {
       neteaseState = { loggedIn: false, message: '浏览器预览已退出' }

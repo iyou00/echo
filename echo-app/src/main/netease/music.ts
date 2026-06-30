@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module'
 import type { ImportPlaylistResult, NeteasePlaylistSummary, Track } from '../../types/ipc'
-import { importPlaylist as savePlaylist } from '../db/playlists'
+import { getAllImportedTracks, importPlaylist as savePlaylist } from '../db/playlists'
 import { buildInitialProfile } from '../services/taste'
 import { buildSemanticsForTracks } from '../services/semantics'
 import { runImportTask } from '../services/importTasks'
@@ -111,13 +111,13 @@ export async function importNeteasePlaylist(id: string): Promise<ImportPlaylistR
     return { imported: false, count: 0, name, message: '这个歌单没有识别到可导入歌曲' }
   }
 
-  return runImportTask('netease-playlist', name, async (report) => {
-    savePlaylist({ name, tracks, source: 'netease' })
-    const semantics = await buildSemanticsForTracks(tracks, report)
+  return runImportTask('netease-playlist', name, async (report, signal) => {
+    savePlaylist({ name, tracks, source: `netease:${id}` })
+    await buildSemanticsForTracks(tracks, report, { signal })
     report({ phase: 'profile', current: 0, total: 1 })
-    const profile = await buildInitialProfile(tracks)
+    const profile = await buildInitialProfile(getAllImportedTracks())
     report({ phase: 'done', current: 1, total: 1 })
-    return { imported: true, count: tracks.length, name, profile, message: `已从网易云导入 ${tracks.length} 首，新增语义标签 ${semantics.tagged} 首` }
+    return { imported: true, count: tracks.length, name, profile, message: `已从网易云导入 ${tracks.length} 首` }
   })
 }
 
@@ -258,39 +258,60 @@ function notifyPlayableLookupDegraded(): void {
   broadcast('netease:cookie-expired', '网易云播放链接获取失败，请到设置页重新登录后再试。')
 }
 
-export async function filterPlayableTracks(candidates: Track[], limit = 3, signal?: AbortSignal): Promise<Track[]> {
+type PlayableResolver = (track: Track) => Promise<Track | null>
+
+async function collectPlayableTracksInOrder(
+  candidates: Track[],
+  limit: number,
+  signal: AbortSignal | undefined,
+  resolveCandidate: PlayableResolver,
+  onError?: (error: unknown) => void,
+): Promise<{ tracks: Track[]; attemptedCount: number; failCount: number }> {
   const playable: Track[] = []
   const concurrency = 5
-  let index = 0
   let failCount = 0
   let attemptedCount = 0
 
-  async function resolveNext(): Promise<void> {
-    while (playable.length < limit) {
-      const currentIndex = index++
-      if (currentIndex >= candidates.length) return
+  for (let start = 0; start < candidates.length && playable.length < limit; start += concurrency) {
+    const batch = candidates.slice(start, start + concurrency)
+    const resolved = await Promise.all(batch.map(async (candidate) => {
       assertPlayableFilterActive(signal)
       attemptedCount++
-      const track = await resolvePlayableTrack(candidates[currentIndex], { signal }).catch((error) => {
+      const track = await resolveCandidate(candidate).catch((error) => {
         assertPlayableFilterActive(signal)
-        if (isPlayableLookupAuthError(error)) notifyPlayableLookupDegraded()
+        onError?.(error)
         return null
       })
       assertPlayableFilterActive(signal)
-      if (track) {
-        if (playable.length < limit) playable.push(track)
-      } else {
-        failCount++
-      }
+      if (!track) failCount++
+      return track
+    }))
+    for (const track of resolved) {
+      if (track && playable.length < limit) playable.push(track)
     }
   }
 
-  const workers = Array.from({ length: Math.min(concurrency, candidates.length) }, () => resolveNext())
-  await Promise.all(workers)
+  return { tracks: playable.slice(0, limit), attemptedCount, failCount }
+}
 
-  if (playable.length === 0 && attemptedCount > 0 && failCount === attemptedCount && readNeteaseCookie()) {
+export const neteaseMusicTestHelpers = {
+  collectPlayableTracksInOrder,
+}
+
+export async function filterPlayableTracks(candidates: Track[], limit = 3, signal?: AbortSignal): Promise<Track[]> {
+  const result = await collectPlayableTracksInOrder(
+    candidates,
+    limit,
+    signal,
+    (candidate) => resolvePlayableTrack(candidate, { signal }),
+    (error) => {
+      if (isPlayableLookupAuthError(error)) notifyPlayableLookupDegraded()
+    },
+  )
+
+  if (result.tracks.length === 0 && result.attemptedCount > 0 && result.failCount === result.attemptedCount && readNeteaseCookie()) {
     notifyPlayableLookupDegraded()
   }
 
-  return playable.slice(0, limit)
+  return result.tracks
 }

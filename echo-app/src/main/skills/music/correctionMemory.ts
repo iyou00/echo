@@ -47,6 +47,7 @@ function artistLooksLike(value: string | undefined, expected: string | undefined
 function extractRequiredArtist(text: string): string | undefined {
   const patterns = [
     /(?:我要的是|要的是|应该是)\s*([A-Za-z0-9 .&'’\-\u4e00-\u9fa5]{1,40})(?:的|唱的|版本|那首|$)/i,
+    /(?:我要听|想听|想要听|要听|播放|放|放首|放一首|点播)\s*(?:的)?(?:是|就是)?\s*([A-Za-z0-9 .&'’\-\u4e00-\u9fa5]{1,40})的[^《》，。！？?！,.]{1,60}/i,
     /不是\s*[A-Za-z0-9 .&'’\-\u4e00-\u9fa5]{1,40}\s*(?:，|,)?\s*(?:是|要)\s*([A-Za-z0-9 .&'’\-\u4e00-\u9fa5]{1,40})/i,
   ]
   for (const pattern of patterns) {

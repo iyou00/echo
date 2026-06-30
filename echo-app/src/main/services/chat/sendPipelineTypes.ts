@@ -8,7 +8,7 @@ import type {
 export type ReplyFn = (
   content: string,
   tracks?: Track[],
-  options?: { durationMs?: number; hints?: ChatHints; persistTracks?: boolean },
+  options?: { durationMs?: number; hints?: ChatHints; persistTracks?: boolean; expectsMusicAction?: boolean },
 ) => SendChatResult
 
 export interface PendingIntentState {

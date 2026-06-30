@@ -3,7 +3,7 @@ import type { CareFrequency, NeteaseLoginState, NeteasePlaylistSummary, NeteaseQ
 
 type AsyncState = 'idle' | 'working' | 'ok' | 'err'
 type TestState = 'idle' | 'testing' | 'ok' | 'fail'
-type ImportState = 'idle' | 'importing' | 'ok' | 'fail'
+type TaskState = 'idle' | 'importing' | 'ok' | 'fail'
 
 interface SettingsPageState {
   provider: string
@@ -30,12 +30,16 @@ interface SettingsPageState {
   dataState: AsyncState
   testState: TestState
   importStatus: string
-  importState: ImportState
+  importState: TaskState
+  profileStatus: string
+  profileState: TaskState
   templateStatus: string
   templateState: Exclude<AsyncState, 'err'> | 'fail'
   neteaseState: NeteaseLoginState
   neteaseQr: NeteaseQrLogin | null
   neteaseQrStatus: string
+  neteaseLoginStatus: string
+  neteaseLoginStatusState: AsyncState
   neteasePlaylists: NeteasePlaylistSummary[]
   neteasePlaylistStatus: string
   importingNeteaseId: string
@@ -76,11 +80,15 @@ const initialSettingsPageState: SettingsPageState = {
   testState: 'idle',
   importStatus: '',
   importState: 'idle',
+  profileStatus: '',
+  profileState: 'idle',
   templateStatus: '',
   templateState: 'idle',
   neteaseState: { loggedIn: false, message: '正在检查网易云状态...' },
   neteaseQr: null,
   neteaseQrStatus: '',
+  neteaseLoginStatus: '',
+  neteaseLoginStatusState: 'idle',
   neteasePlaylists: [],
   neteasePlaylistStatus: '',
   importingNeteaseId: '',
@@ -133,11 +141,15 @@ export function useSettingsPageState() {
     setTestState: setter(dispatch, 'testState'),
     setImportStatus: setter(dispatch, 'importStatus'),
     setImportState: setter(dispatch, 'importState'),
+    setProfileStatus: setter(dispatch, 'profileStatus'),
+    setProfileState: setter(dispatch, 'profileState'),
     setTemplateStatus: setter(dispatch, 'templateStatus'),
     setTemplateState: setter(dispatch, 'templateState'),
     setNeteaseState: setter(dispatch, 'neteaseState'),
     setNeteaseQr: setter(dispatch, 'neteaseQr'),
     setNeteaseQrStatus: setter(dispatch, 'neteaseQrStatus'),
+    setNeteaseLoginStatus: setter(dispatch, 'neteaseLoginStatus'),
+    setNeteaseLoginStatusState: setter(dispatch, 'neteaseLoginStatusState'),
     setNeteasePlaylists: setter(dispatch, 'neteasePlaylists'),
     setNeteasePlaylistStatus: setter(dispatch, 'neteasePlaylistStatus'),
     setImportingNeteaseId: setter(dispatch, 'importingNeteaseId'),

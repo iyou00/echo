@@ -7,6 +7,11 @@ const HEALTH_DEFAULTS: Record<ServiceHealthKind, string> = {
   tts: '语音状态还没检查。',
   weather: '天气状态还没检查。',
   scheduler: '定时任务状态还没检查。',
+  'scheduler-catchup': '启动补偿状态还没检查。',
+  'scheduler-yinyi': '风信定时任务状态还没检查。',
+  'scheduler-taste-structured': '结构画像定时任务状态还没检查。',
+  'scheduler-taste-portrait': '画像文案定时任务状态还没检查。',
+  'scheduler-care-ping': '主动关心定时任务状态还没检查。',
   storage: '本地加密存储还没检查。',
 }
 

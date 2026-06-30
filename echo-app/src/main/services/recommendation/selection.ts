@@ -1,6 +1,7 @@
 import type { Track } from '../../../types/ipc'
 import { getSettings } from '../../db/settings'
 import { completeChat } from '../../llm/client'
+import { safePromptJson } from '../../llm/promptData'
 import type { RecommendationIntent } from './intent'
 import { parseJsonObject, uniqueTracks } from './text'
 
@@ -16,7 +17,7 @@ export function fallbackReason(track: Track, index: number, intent: Recommendati
       : ['第一首先试温度,比较容易进去。', '第二首换一点颜色,让这组歌有变化。', '第三首放在后面,听完还有余味。']
   if (intent.targetCount === 1) {
     if (intent.energy === 'low' || intent.tempo === 'slow') return '这首入口轻,适合先把节奏放慢。'
-    if (intent.energy === 'high') return '这首能把注意力提起来,现在接上比较顺。'
+    if (intent.energy === 'high') return '这首能把注意力提起来,现在听比较顺。'
     return '这首温度刚好,先听它。'
   }
   return reasons[index] ?? `第 ${index + 1} 首换一点颜色,让这组歌更完整。`
@@ -28,9 +29,17 @@ export async function selectFinalTracks(text: string, candidates: Track[], inten
   assertSelectionActive(signal)
   const selected = uniqueTracks(candidates).slice(0, targetCount)
   const settings = getSettings()
-  const list = selected
-    .map((track, index) => `${index + 1}. ${track.title} - ${track.artist}${track.album ? ` / ${track.album}` : ''} / ${track.recommendSource ?? 'search'}`)
-    .join('\n')
+  const promptData = {
+    userText: text,
+    intent,
+    candidates: selected.map((track, index) => ({
+      index: index + 1,
+      title: track.title,
+      artist: track.artist,
+      album: track.album,
+      source: track.recommendSource ?? 'search',
+    })),
+  }
   try {
     const content = await completeChat(settings, [
       {
@@ -41,10 +50,7 @@ notes 数量必须是 ${selected.length}。理由要具体,每首理由要有差
       },
       {
         role: 'user',
-        content: `用户说:${text}
-解析意图:${JSON.stringify(intent)}
-候选:
-${list}`,
+        content: safePromptJson(promptData),
       },
     ], { temperature: 0, signal, maxTokens: 200 })
     assertSelectionActive(signal)

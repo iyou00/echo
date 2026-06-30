@@ -1,5 +1,6 @@
 import type { TasteQuestion } from '../../../types/ipc'
 import { looksLikeFreshNonAnswerTopic } from './meta'
+import { hasExplicitSimilarityAnchor } from '../music/entityResolver'
 
 export type PendingQuestionReplyAction = 'none' | 'answer_only' | 'extend_recommendation'
 export type PendingQuestionReplyPolarity = 'positive' | 'negative' | 'mixed' | 'neutral'
@@ -30,7 +31,7 @@ export function questionSeedText(question: TasteQuestion): string {
 
 function isLikelyAnswer(text: string): boolean {
   if (text.length < 2 || text.length > 240) return false
-  if (/^(再来|来一首|来几首|放|播放|推|推荐|换|下一首|上一首|收藏|暂停|继续|打开|关闭|设置)/.test(text)) return false
+  if (/^(再来|来一首|来几首|挑|选|放|播放|推|推荐|换|下一首|上一首|收藏|暂停|继续|打开|关闭|设置)/.test(text)) return false
   return /喜欢|不喜欢|因为|更|主要|其实|感觉|氛围|声音|歌词|旋律|节奏|编曲|情绪|以前|现在|最近|是|不是|算是|偏/.test(text)
 }
 
@@ -45,8 +46,16 @@ function isActionConfirmationQuestion(question?: TasteQuestion): boolean {
   return /(要不要|要不|想不想|还要|需要|可以).{0,18}(换|继续|再来|接一首|类似|推荐|找歌|放歌|来一首)|(换|继续|再来|接一首|类似).{0,18}(吗|么|嘛|可以|要不要)/.test(content)
 }
 
+function looksLikeContextualPickRequest(text: string): boolean {
+  const trimmed = text.trim()
+  return /(?:帮我|你来|那就|那你|给我|随便)?\s*(?:挑|选|找|放|来)(?:一|几|\d+)?首/.test(trimmed)
+    || /^(?:可以|好|行|嗯|那就|那你)[呀啊吧的了，。!！?？\s]*(?:帮我|你来|给我|随便|你)?\s*(?:挑|选|找|放|来)(?:一|几|\d+)?首/.test(trimmed)
+}
+
 export function looksLikeFollowUpExtension(text: string): boolean {
+  if (hasExplicitSimilarityAnchor(text)) return false
   if (/^(再来|再给|再放|接着|继续|还有|多来|来一首|来几首|换一首|下一首)/.test(text)) return true
+  if (looksLikeContextualPickRequest(text) && /(这种|那种|类似|这个方向|氛围|感觉|味道)/.test(text)) return true
   if (/^(类似|像|照这个|按这个|这个方向).{0,12}(来|找|推|推荐|放|继续|再|换)/.test(text)) return true
   if (/(再来|再给|接着|继续|还有|多来|换一首|下一首).{0,12}(这种|那种|类似|这个方向|氛围|感觉|味道)/.test(text)) return true
   if (/(这种|那种|类似|这个方向|氛围|感觉|味道).{0,12}(再来|再给|接着|继续|还有|多来|换一首|下一首|来一首|来几首)/.test(text)) return true
@@ -79,15 +88,28 @@ export function detectPendingReplyFocus(text: string): string {
 
 export function ruleClassifyPendingReply(text: string, question?: TasteQuestion): PendingQuestionReplyAction | null {
   if (looksLikeFreshNonAnswerTopic(text)) return 'none'
-  const explicitFreshMusic = /(来一首|来几首|推荐|推|放首|放点|找首|找一首|给我).{0,18}(歌|音乐|曲|粤语|英文|欧美|华语|韩语|日语|激昂|热血|舒缓|慢歌|快歌|放松|欢快|魔力红|maroon)/i
+  if (hasExplicitSimilarityAnchor(text)) return 'none'
+  const explicitFreshMusic = /(来一首|来几首|挑一首|选一首|推荐|推|放首|放点|找首|找一首|给我|整一首|整首|整点|安排一首|安排首|安排点|搞一首|搞首|搞点|弄一首|弄首|弄点).{0,18}(歌|音乐|曲|粤语|英文|欧美|华语|韩语|日语|激昂|热血|舒缓|慢歌|快歌|放松|欢快|魔力红|maroon)/i
   if (explicitFreshMusic.test(text) && !/(这种|那种|类似|这个方向|氛围|感觉|味道)/.test(text)) return 'none'
   if (looksLikeFollowUpExtension(text)) return 'extend_recommendation'
+  if (looksLikeContextualPickRequest(text)) return 'none'
   if (explicitFreshMusic.test(text)) return 'none'
   if (isSimpleConfirmation(text) && isActionConfirmationQuestion(question)) return 'extend_recommendation'
   if (isLikelyAnswer(text)) return 'answer_only'
   if (isSimpleConfirmation(text) || /^(还行|不错|喜欢|算|挺好)[呀啊吧的了，。!！?？]*$/.test(text)) return 'answer_only'
   if (looksLikeFreshMusicRequest(text)) return 'none'
   return null
+}
+
+export function reconcilePreclassifiedPendingReply(
+  text: string,
+  question: TasteQuestion,
+  preclassified: PendingQuestionReplyAction,
+): PendingQuestionReplyAction {
+  const deterministic = ruleClassifyPendingReply(text, question)
+  if (deterministic === 'none') return 'none'
+  if (deterministic === 'answer_only' || deterministic === 'extend_recommendation') return deterministic
+  return preclassified
 }
 
 export function parsePendingReplyAction(value: unknown): PendingQuestionReplyAction | null {

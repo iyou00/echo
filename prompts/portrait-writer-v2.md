@@ -138,7 +138,7 @@ Echo 要通过用户的听歌、找歌、切歌、收藏和聊天意图，写一
 </signal_audit>
 
 <last_portrait>
-(上一次 portrait)
+(上一次 portrait。只用于保持关系连续性，避免复读旧文案，避免把旧判断当作新证据。)
 </last_portrait>
 
 <this_week_signals>

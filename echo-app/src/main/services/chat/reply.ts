@@ -2,7 +2,7 @@ import type { WebContents } from 'electron'
 import type { ChatHints, SendChatResult, Track } from '../../../types/ipc'
 import { appendConversation } from '../../db/conversations'
 import { appendRecommendedTracks } from '../../db/tracks'
-import { assertAssistantReplyInputContract, assertSendChatResultContract } from './pipelineContract'
+import { assertAssistantReplyInputContract, assertSendChatResultContract, enforceAssistantTrackBinding } from './pipelineContract'
 
 export type ChatRuntimeEmit = (channel: string, payload: unknown) => void
 
@@ -14,13 +14,15 @@ export interface AssistantReplyOptions {
   sender?: WebContents
   runtimeEmit?: ChatRuntimeEmit
   persistTracks?: boolean
+  expectsMusicAction?: boolean
 }
 
 export function appendAssistantReply(options: AssistantReplyOptions): SendChatResult {
   const tracks = options.tracks ?? []
-  assertAssistantReplyInputContract(options.content, tracks)
+  const content = enforceAssistantTrackBinding(options.content, tracks, options.expectsMusicAction ?? false)
+  assertAssistantReplyInputContract(content, tracks)
   if (options.persistTracks) appendRecommendedTracks(tracks)
-  const message = appendConversation('assistant', options.content, tracks)
+  const message = appendConversation('assistant', content, tracks)
   const payload = {
     message,
     tracks,
