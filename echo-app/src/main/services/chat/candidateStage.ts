@@ -20,6 +20,7 @@ import {
 } from './pendingIntents'
 import type { PendingIntentState, ReplyFn } from './sendPipelineTypes'
 import type { SessionMusicFollowUp } from './sessionContext'
+import type { RecommendationWeatherContext } from './weatherRecommendation'
 
 function shouldExcludeCurrentPlaybackTrack(
   intent: ChatIntent,
@@ -105,12 +106,28 @@ export function hasMusicActionIntent(intent: ChatIntent): boolean {
   return true
 }
 
-function noMusicCandidateContent(intent: ChatIntent, authRequired: boolean, failure?: MusicSearchFailure): string {
+function weatherSearchPrefix(context?: RecommendationWeatherContext): string {
+  if (!context?.requested) return ''
+  if (context.available && context.city && context.summary) return `${context.city}现在${context.summary}。`
+  if (context.unavailableReason === 'city_missing') return '天气城市还没设置。'
+  return '天气服务这次没回。'
+}
+
+function noMusicCandidateContent(
+  intent: ChatIntent,
+  authRequired: boolean,
+  failure?: MusicSearchFailure,
+  weatherContext?: RecommendationWeatherContext,
+): string {
+  const prefix = weatherSearchPrefix(weatherContext)
   if (authRequired) return '现在还没接上网易云。去设置里登录网易云后，我就能继续给你挑歌。'
-  if (failure?.reason === 'search_failed') return '这次音乐服务没拿到可播放结果。你换个歌手、语种或感觉，我再试一次。'
+  if (failure?.reason === 'search_failed') return `${prefix}这次音乐服务没拿到可播放结果。你换个感觉，我再试一次。`
   if (intent.artistQuery) return `我知道你想听${intent.artistQuery}，但这次没拿到可播放的结果。你换个关键词，我再找。`
   if (intent.seedTitle) return `我知道你想听《${intent.seedTitle}》，但这次没拿到可播放的结果。你把歌手或版本补一下，我再找。`
-  return '我知道你是想听歌，但这次没拿到可播放的结果。你换个歌手、语种或感觉再说一句，我再找。'
+  if (intent.recommendationIntent.language) {
+    return `${prefix}我按${intent.recommendationIntent.language}找了一轮，这次没拿到可播放的结果。你换个感觉，我再找。`
+  }
+  return `${prefix}我知道你是想听歌，但这次没拿到可播放的结果。你换个歌手、语种或感觉再说一句，我再找。`
 }
 
 export interface CandidateStageInput {
@@ -127,6 +144,7 @@ export interface CandidateStageInput {
   reply: ReplyFn
   attachSceneToTracks: (tracks: Track[]) => Track[]
   runtimeReport?: (patch: Partial<RuntimeTaskSnapshot>) => void
+  weatherContext?: RecommendationWeatherContext
 }
 
 export interface CandidateStageReady {
@@ -285,7 +303,7 @@ export async function prepareCandidateStage(input: CandidateStageInput): Promise
   }
   if (hasMusicActionIntent(recommendationIntent) && guardedCandidates.length === 0) {
     return {
-      reply: input.reply(noMusicCandidateContent(recommendationIntent, authRequired, failure), [], {
+      reply: input.reply(noMusicCandidateContent(recommendationIntent, authRequired, failure, input.weatherContext), [], {
         hints: authRequired ? { neteaseAuthRequired: true } satisfies ChatHints : undefined,
       }),
     }

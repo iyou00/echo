@@ -5,6 +5,18 @@ export type VoiceContinuousStatus = 'idle' | 'generating' | 'speaking' | 'done' 
 
 export const VOICE_CONTINUOUS_TRIGGER_COOLDOWN_MS = 1500
 
+export function nextVoiceFailureAction(input: {
+  automatic: boolean
+  continuous: boolean
+  previousFailures: number
+}): { action: 'retry' | 'stop' | 'error'; failureCount: number } {
+  if (!input.automatic || !input.continuous) {
+    return { action: 'error', failureCount: input.previousFailures }
+  }
+  const failureCount = input.previousFailures + 1
+  return { action: failureCount >= 2 ? 'stop' : 'retry', failureCount }
+}
+
 export function shouldTriggerNextVoiceSegment(input: {
   isActive: boolean
   voiceContinuous: boolean

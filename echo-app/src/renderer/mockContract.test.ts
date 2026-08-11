@@ -95,6 +95,7 @@ describe('mockContract structural checks', () => {
     expect(result.text).toBeTruthy()
     expect(result.track).toBeDefined()
     expect(result.generatedAt).toBeTruthy()
+    await expect(mock.listening.endSession(result.sessionId)).resolves.toEqual({ ok: true })
   })
 
   it('health.get includes storage service', async () => {

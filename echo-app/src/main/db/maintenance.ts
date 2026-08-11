@@ -3,10 +3,13 @@ import { getStoredSettingsRaw, updateSettingsSilent } from './settings'
 import { removeLegacyAbsentYinyi } from './yinyi'
 
 const PRUNE_TABLES: Array<{ table: string; dateColumn: string; retentionDays: number; extraWhere?: string }> = [
+  { table: 'listening_segments', dateColumn: 'generated_at', retentionDays: 60 },
+  { table: 'listening_sessions', dateColumn: 'last_active_at', retentionDays: 60 },
   { table: 'tracks_listened', dateColumn: 'listened_at', retentionDays: 60 },
   { table: 'taste_question_prompts', dateColumn: 'asked_at', retentionDays: 30 },
   { table: 'conversations', dateColumn: 'created_at', retentionDays: 60 },
   { table: 'track_feedback_events', dateColumn: 'created_at', retentionDays: 90 },
+  { table: 'companion_signal_events', dateColumn: 'created_at', retentionDays: 365 },
   { table: 'care_pings', dateColumn: 'triggered_at', retentionDays: 30 },
   { table: 'care_ping_schedule', dateColumn: 'created_at', retentionDays: 30 },
   { table: 'scheduled_jobs', dateColumn: 'ran_at', retentionDays: 30 },

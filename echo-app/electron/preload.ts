@@ -228,7 +228,8 @@ const echoApi: EchoApi = {
     get: (city) => invoke('weather:get', city),
   },
   listening: {
-    generateSegment: (options?: { continuation?: boolean }) => invoke('listening:generateSegment', options),
+    generateSegment: (options?: { continuation?: boolean; automatic?: boolean }) => invoke('listening:generateSegment', options),
+    endSession: (sessionId?: number) => invoke('listening:endSession', sessionId),
   },
   carePings: {
     test: (type) => invoke('carePings:test', type),

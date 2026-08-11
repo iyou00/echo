@@ -1,4 +1,5 @@
 import type { ChatMessage, Track } from '../../types/ipc'
+import type { CompanionResponseStrategy } from '../services/chat/companionTypes'
 import { getDb } from './index'
 import { parseJson } from './json'
 
@@ -19,10 +20,14 @@ function toMessage(row: { id: number; role: string; content: string; created_at:
   }
 }
 
-export function appendConversation(role: 'user' | 'assistant', content: string, tracks: Track[] = []): ChatMessage {
+export interface ConversationMeta {
+  responseStrategy?: CompanionResponseStrategy
+}
+
+export function appendConversation(role: 'user' | 'assistant', content: string, tracks: Track[] = [], meta: ConversationMeta = {}): ChatMessage {
   const result = getDb()
     .prepare('INSERT INTO conversations (user_id, role, content, meta_json) VALUES (current_user_id(), ?, ?, ?)')
-    .run(role, content, JSON.stringify({ tracks }))
+    .run(role, content, JSON.stringify({ tracks, ...meta }))
   const row = getDb().prepare('SELECT * FROM conversations WHERE id = ?').get(result.lastInsertRowid) as Parameters<typeof toMessage>[0]
   return toMessage(row)
 }
@@ -64,6 +69,21 @@ export function loadUserConversationsForDate(date: string, limit = 30): ChatMess
       LIMIT ?
     `)
     .all(date, limit) as Parameters<typeof toMessage>[0][]
+  return rows.reverse().map(toMessage)
+}
+
+export function loadUserConversationsSince(createdAfter: string, limit = 300): ChatMessage[] {
+  const rows = getDb()
+    .prepare(`
+      SELECT *
+      FROM conversations
+      WHERE user_id = current_user_id()
+        AND role = 'user'
+        AND created_at >= ?
+      ORDER BY created_at DESC, id DESC
+      LIMIT ?
+    `)
+    .all(createdAfter, limit) as Parameters<typeof toMessage>[0][]
   return rows.reverse().map(toMessage)
 }
 

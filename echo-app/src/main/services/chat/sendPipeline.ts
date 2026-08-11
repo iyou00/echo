@@ -46,6 +46,27 @@ import {
 import { prepareCandidateStage } from './candidateStage'
 import { runRecommendationResponseStage } from './responseStage'
 import type { PendingIntentState, ReplyFn } from './sendPipelineTypes'
+import {
+  applyCompanionResponseStyle,
+  loadCompanionResponseBrief,
+  type CompanionResponseBrief,
+} from './companionResponse'
+import {
+  applyCompanionPreferenceSignals,
+  getCompanionProfile,
+  loadLatestAssistantResponseStrategy,
+} from '../../db/companion'
+import type { CompanionResponseStrategy } from './companionTypes'
+import { composePlannedReply } from './plannedReply'
+import { inferCompanionReactionSignals } from './companionStrategy'
+import { MUSIC_LANGUAGE_VALUES } from '../recommendation/language'
+import {
+  applyWeatherToChatIntent,
+  availableWeatherContext,
+  isWeatherAwareMusicRequest,
+  unavailableWeatherContext,
+  type RecommendationWeatherContext,
+} from './weatherRecommendation'
 
 type ActiveChat = ChatActiveTask
 
@@ -140,7 +161,7 @@ function attachSceneToTracks(tracks: Track[]): Track[] {
   }))
 }
 
-const CHAT_MEMORY_GENRE_TERMS = ['流行', '华语', '粤语', '欧美', '英语', '英文', '日语', '韩语', 'R&B', 'r&b', '说唱', '摇滚', '民谣', '电子', '爵士', '古典', '轻音乐']
+const CHAT_MEMORY_GENRE_TERMS = ['流行', ...MUSIC_LANGUAGE_VALUES, '欧美', '英文', 'R&B', 'r&b', '说唱', '摇滚', '民谣', '电子', '爵士', '古典', '轻音乐']
 const CHAT_MEMORY_VIBE_TERMS = [
   '安静',
   '舒缓',
@@ -513,6 +534,13 @@ export async function runChatSendPipeline(
     runtimeEmit,
     ...options,
   })
+  let companionResponseBrief: CompanionResponseBrief | null = null
+  let responseStrategy: CompanionResponseStrategy | undefined
+  const companionReply: ReplyFn = (content, tracks = [], options = {}) => reply(
+    applyCompanionResponseStyle(content, trimmed, companionResponseBrief, responseStrategy),
+    tracks,
+    { ...options, responseStrategy: options.responseStrategy ?? responseStrategy },
+  )
 
   runtimeReport?.({ phase: 'input', current: 1, total: 5, message: '记录用户消息' })
   const userMessage = appendConversation('user', trimmed)
@@ -523,11 +551,14 @@ export async function runChatSendPipeline(
     const settings = getSettings()
     const staticReply = await handleStaticReply({ trimmed, reply })
     if (staticReply) return staticReply
+    companionResponseBrief = loadCompanionResponseBrief(trimmed)
 
     runtimeReport?.({ phase: 'intent', current: 2, total: 5, message: '理解这句话' })
     const pendingIntentContext = getPendingIntentContext()
     const pendingTasteQuestion = getPendingTasteQuestionContext()
     const musicSession = getChatMusicSessionSnapshot()
+    const companionProfile = getCompanionProfile()
+    const previousResponseStrategy = loadLatestAssistantResponseStrategy()
     const routedIntent = await routeChatIntentWithLlm(trimmed, {
       currentTrack: currentPlaybackTrack,
       currentSceneKey: getCurrentScene()?.key,
@@ -535,7 +566,41 @@ export async function runChatSendPipeline(
       pendingIntent: pendingIntentContext,
       pendingTasteQuestion,
       musicSession,
+      companionProfile,
+      previousResponseStrategy,
+      companionResponseBrief,
     }, signal)
+    responseStrategy = routedIntent.responseStrategy
+    const companionSignals = [
+      ...(routedIntent.companionSignals ?? []),
+      ...inferCompanionReactionSignals(trimmed, previousResponseStrategy),
+    ].filter((signal, index, items) => items.findIndex((item) => (
+      item.dimension === signal.dimension && item.direction === signal.direction
+    )) === index)
+    if (companionSignals.length) {
+      try {
+        applyCompanionPreferenceSignals(companionSignals)
+      } catch (error) {
+        console.warn('[chat] companion preference persistence failed', error)
+      }
+    }
+    const plannedCompanionReply = async (
+      factualContent: string,
+      tracks: Track[] = [],
+      options: Parameters<ReplyFn>[2] = {},
+      requiredDetails: string[] = [],
+    ): Promise<SendChatResult> => {
+      const content = await composePlannedReply({
+        userText: trimmed,
+        factualContent,
+        settings,
+        strategy: responseStrategy,
+        tracks,
+        requiredDetails,
+        signal,
+      })
+      return reply(content, tracks, { ...options, responseStrategy })
+    }
     runtimeEmit?.('runtime:chat-intent-routed', {
       kind: routedIntent.kind,
       source: routedIntent.routeSource,
@@ -555,13 +620,13 @@ export async function runChatSendPipeline(
     const pendingTrackPreferenceReply = continuationTarget === 'track_preference' || allowRulePendingFallback
       ? resolvePendingTrackPreferenceReply(trimmed)
       : null
-    if (pendingTrackPreferenceReply?.response) return reply(pendingTrackPreferenceReply.response)
+    if (pendingTrackPreferenceReply?.response) return companionReply(pendingTrackPreferenceReply.response)
     if (pendingTrackPreferenceReply?.artistQuery) {
-      return rememberExplicitTrackPreference(trimmed, pendingTrackPreferenceReply.artistQuery, pendingTrackPreferenceReply.seedTitle, reply)
+      return rememberExplicitTrackPreference(trimmed, pendingTrackPreferenceReply.artistQuery, pendingTrackPreferenceReply.seedTitle, companionReply)
     }
 
     const pendingState = resolvePendingIntentState(trimmed, continuationTarget, allowRulePendingFallback)
-    const pendingIntentReply = handlePendingIntentReply(pendingState, reply)
+    const pendingIntentReply = handlePendingIntentReply(pendingState, companionReply)
     if (pendingIntentReply) return pendingIntentReply
 
     const { pendingDirectSongReply, pendingMusicEntityReply, effectiveText } = pendingState
@@ -573,10 +638,14 @@ export async function runChatSendPipeline(
     if (isFreshRoutedTopic && pendingIntentContext && !forcePendingCancel && !resolvedPendingQuery) clearPendingDirectSongState()
     if (routedIntent.kind === 'weather') {
       runtimeReport?.({ phase: 'weather', current: 3, total: 5, message: '查询设置城市天气' })
-      return reply(await buildWeatherReply(settings, signal))
+      const weatherContent = await buildWeatherReply(settings, signal)
+      const city = settings.user.city.trim()
+      const weatherNumbers = weatherContent.match(/-?\d+(?:\.\d+)?/g) ?? []
+      const weatherFacts = weatherContent.match(/晴|多云|阴|小雨|中雨|大雨|暴雨|雷阵雨|雨夹雪|小雪|中雪|大雪|雾|霾/g) ?? []
+      return plannedCompanionReply(weatherContent, [], {}, [...(city ? [city] : []), ...weatherNumbers, ...weatherFacts])
     }
-    if (routedIntent.kind === 'identity') return reply(identityReply())
-    if (routedIntent.kind === 'out_of_scope') return reply(outOfScopeContent(routedIntent))
+    if (routedIntent.kind === 'identity') return companionReply(identityReply())
+    if (routedIntent.kind === 'out_of_scope') return companionReply(outOfScopeContent(routedIntent))
     if (routedIntent.kind === 'clarification_needed' && routedIntent.needsClarification) {
       setPendingMusicEntityClarification({
         artistQuery: routedIntent.artistQuery,
@@ -587,7 +656,12 @@ export async function runChatSendPipeline(
             ? 'missing_artist'
             : 'too_vague',
       }, trimmed)
-      return reply(routedIntent.needsClarification.prompt)
+      return plannedCompanionReply(
+        routedIntent.needsClarification.prompt,
+        [],
+        {},
+        routedIntent.seedTitle ? [routedIntent.seedTitle] : [],
+      )
     }
 
     let initialChatIntent = resolvedPendingQuery
@@ -627,7 +701,12 @@ export async function runChatSendPipeline(
         artistQuery: sessionFollowUp.track.artist,
         seedTitle: sessionFollowUp.track.title,
       })
-      return reply(sessionFollowUp.content, tracks, { persistTracks: true, expectsMusicAction: true })
+      return plannedCompanionReply(
+        sessionFollowUp.content,
+        tracks,
+        { persistTracks: true, expectsMusicAction: true },
+        [sessionFollowUp.track.title, sessionFollowUp.track.artist],
+      )
     }
 
     if (pendingReply.action === 'none' && initialChatIntent.kind === 'feedback_current_track' && currentPlaybackTrack) {
@@ -645,16 +724,23 @@ export async function runChatSendPipeline(
             seedTitle: initialChatIntent.seedTitle,
           })
         }
-        return reply(feedbackResult.content, feedbackTracks, {
+        const feedbackOptions = {
           hints: feedbackResult.hints,
           persistTracks: feedbackTracks.length > 0,
           expectsMusicAction: feedbackTracks.length > 0 || initialChatIntent.wantsMusic,
-        })
+        }
+        if (feedbackTracks.length === 0) return companionReply(feedbackResult.content, feedbackTracks, feedbackOptions)
+        return plannedCompanionReply(
+          feedbackResult.content,
+          feedbackTracks,
+          feedbackOptions,
+          feedbackTracks.flatMap((track) => [track.title, track.artist]),
+        )
       }
     }
 
     if (pendingReply.action === 'none' && sessionFollowUp.kind === 'none') {
-      const explicitPreferenceReply = await handleExplicitTrackPreference(trimmed, initialChatIntent, currentPlaybackTrack, reply)
+      const explicitPreferenceReply = await handleExplicitTrackPreference(trimmed, initialChatIntent, currentPlaybackTrack, companionReply)
       if (explicitPreferenceReply) return explicitPreferenceReply
     }
 
@@ -670,9 +756,24 @@ export async function runChatSendPipeline(
     }
     if (pendingReply.action === 'answer_only') {
       const started = Date.now()
-      let content = await streamPendingAnswerReply(trimmed, pendingReply, active, settings, emitChunk)
+      let content = await streamPendingAnswerReply(trimmed, pendingReply, active, settings, emitChunk, companionResponseBrief)
       content = sanitizeAssistantOutput(content)
-      return reply(content.trim(), [], { durationMs: Date.now() - started })
+      return reply(content.trim(), [], { durationMs: Date.now() - started, responseStrategy })
+    }
+
+    let recommendationWeatherContext: RecommendationWeatherContext | undefined
+    if (isWeatherAwareMusicRequest(trimmed, initialChatIntent)) {
+      runtimeReport?.({ phase: 'weather', current: 3, total: 5, message: '查询天气并生成选歌条件' })
+      const city = settings.user.city.trim()
+      if (!city) {
+        recommendationWeatherContext = unavailableWeatherContext('')
+      } else {
+        const weather = await getWeather(city, { signal, timeoutMs: 6000 })
+        recommendationWeatherContext = weather
+          ? availableWeatherContext(city, weather)
+          : unavailableWeatherContext(city)
+      }
+      initialChatIntent = applyWeatherToChatIntent(initialChatIntent, recommendationWeatherContext)
     }
 
     const candidateStage = await prepareCandidateStage({
@@ -686,12 +787,13 @@ export async function runChatSendPipeline(
       currentPlaybackTrack,
       active,
       signal,
-      reply,
+      reply: companionReply,
       attachSceneToTracks,
       runtimeReport,
+      weatherContext: recommendationWeatherContext,
     })
     if (candidateStage.reply) return candidateStage.reply
-    if (!candidateStage.ready) return reply('我知道你是想听歌，但这次没拿到可播放的结果。')
+    if (!candidateStage.ready) return plannedCompanionReply('我知道你是想听歌，但这次没拿到可播放的结果。')
     return runRecommendationResponseStage({
       trimmed,
       settings,
@@ -700,10 +802,14 @@ export async function runChatSendPipeline(
       pendingReply,
       candidate: candidateStage.ready,
       currentPlaybackTrack,
+      companionResponseBrief,
+      responseStrategy,
+      companionProfile,
       emitChunk,
       reply,
       attachSceneToTracks,
       runtimeReport,
+      weatherContext: recommendationWeatherContext,
     })
   } catch (error) {
     if (signal.aborted) throw new DOMException('任务已取消', 'AbortError')
@@ -711,7 +817,7 @@ export async function runChatSendPipeline(
     runtimeEmit?.('runtime:chat-pipeline-failed', {
       message: error instanceof Error ? error.message : String(error),
     })
-    return reply('我这会儿没接住这句话。你再说一遍，我重新听。', [], {
+    return companionReply('我这会儿没接住这句话。你再说一遍，我重新听。', [], {
       hints: { runtimeFailure: true },
     })
   }

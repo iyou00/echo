@@ -5,12 +5,13 @@ import { completeChat, LlmError } from '../llm/client'
 import { safePromptJson } from '../llm/promptData'
 import { getSettings } from '../db/settings'
 import { reportStandaloneImportProgress, runImportTask } from './importTasks'
+import { detectMusicLanguage, musicLanguageGenre } from './recommendation/language'
 
 export function broadcastImportProgress(payload: ImportProgressPayload): void {
   reportStandaloneImportProgress(payload)
 }
 
-const GENRES = ['华语流行', '粤语流行', '欧美流行', 'R&B', '民谣', '摇滚', '说唱', '电子', 'K-pop', '日语流行', '轻音乐']
+const GENRES = ['华语流行', '粤语流行', '欧美流行', 'R&B', '民谣', '摇滚', '说唱', '电子', 'K-pop', '日语流行', '法语流行', '德语流行', '西班牙语流行', '俄语流行', '泰语流行', '葡萄牙语流行', '意大利语流行', '轻音乐']
 const MOODS = ['放松', '发呆', '清醒', '治愈', '怀旧', '孤独', '轻快', '热烈', '松弛', '陪伴']
 const SCENES = ['上午', '午休', '下午工作', '通勤', '下班路上', '夜晚', '睡前', '雨天', '独处', '运动']
 
@@ -25,8 +26,12 @@ function hasChinese(text: string): boolean {
 function inferLanguage(track: Track): string {
   const text = `${track.title} ${track.artist} ${track.album ?? ''}`
   if (/陈慧娴|张学友|陈奕迅|Beyond|容祖儿|杨千嬅|粤|广东|香港/.test(text)) return '粤语'
-  if (/newjeans|blackpink|twice|bts|exo|seventeen|stray kids|k-pop|kpop/i.test(text)) return '韩语'
-  if (/yoasobi|aimyon|ado|one ok rock|宇多田|米津|日语|日本/.test(text)) return '日语'
+  if (/[\uac00-\ud7af]/.test(text) || /newjeans|blackpink|twice|bts|exo|seventeen|stray kids|aespa|ive|le sserafim|jennie|taeyang|bigbang|k-pop|kpop/i.test(text)) return '韩语'
+  if (/[\u3040-\u30ff]/.test(text) || /yoasobi|aimyon|ado|one ok rock|宇多田|米津|日语|日本/.test(text)) return '日语'
+  if (/[\u0e00-\u0e7f]/.test(text)) return '泰语'
+  if (/[\u0400-\u04ff]/.test(text)) return '俄语'
+  const explicitLanguage = detectMusicLanguage(text)
+  if (explicitLanguage) return explicitLanguage
   if (hasChinese(text)) return '华语'
   return '英语'
 }
@@ -42,6 +47,8 @@ function inferGenres(track: Track, language: string): string[] {
   if (language === '韩语') return ['K-pop']
   if (language === '日语') return ['日语流行']
   if (language === '英语') return ['欧美流行']
+  const languageGenre = musicLanguageGenre(language)
+  if (languageGenre) return [languageGenre]
   return ['华语流行']
 }
 

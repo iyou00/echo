@@ -9,6 +9,7 @@ import { ensureFavorite } from '../favorites'
 import { next as playNext } from '../playback'
 import type { ChatIntent } from './intent'
 import { setPendingMusicEntityClarification } from './pendingIntents'
+import { detectMusicLanguage, MUSIC_LANGUAGE_VALUES } from '../recommendation/language'
 
 export type CurrentTrackFeedbackResult =
   | { handled: false }
@@ -32,7 +33,7 @@ const REPLACEMENT_DIRECTION_PATTERN = /激情|激昂|高昂|亢奋|振奋|热血
 const FEEDBACK_WORD_PATTERN = /这首歌|这首|这歌|刚才|当前|现在这首|不好听|没感觉|不喜欢|不对|不太对|不合适|不太合适|别放|不听|腻了|太吵|太慢|太快|错误|错歌|放错|播错/gi
 const CHANGE_WORD_PATTERN = /换一首|换首|换掉|下一首|跳过|切歌|切掉|换个|换一个|(?:推荐|来|找|放)(?:一首|首|点|个)?别的|别的(?:歌|一首)/gi
 const EXPLICIT_MISS_PATTERN = /不好听|没感觉|不喜欢|不爱听|不想听|不对|不太对|不合适|不太合适|别放|不听|腻了|太吵|太慢|太快|太闹|太炸|太平|太软|太激烈|太激情|太激昂|太高昂|太亢奋|太热血|太澎湃|太燃|太带感|太情绪高昂|情绪太高昂|没劲|不够|差点意思|少了点|错误|错歌|放错|播错|不是.+(?:版|版本|唱|歌手|的)|听着不舒服|不舒服|不行|不准|不贴|不适合/
-const ALLOWED_REPLACEMENT_LANGUAGES = new Set(['华语', '粤语', '英语', '韩语', '日语'])
+const ALLOWED_REPLACEMENT_LANGUAGES = new Set<string>(MUSIC_LANGUAGE_VALUES)
 const EXPLICIT_FEEDBACK_NEXT_OPTIONS = { recordCurrentFeedback: false, skippedReason: 'explicit_feedback' } as const
 const DIRECTION_PREFIX_PATTERN = /^(?:再|更|稍微|稍|来点|来些|有点|一点|一些|点|给我|帮我)\s*/i
 const DIRECTION_SUFFIX_PATTERN = /(?:一点|一些|点|的)+$/i
@@ -42,7 +43,7 @@ function hasReplacementDirection(text: string, intent: ChatIntent): boolean {
   if (recommendation.artistQuery || recommendation.seedTitle || recommendation.language || recommendation.energy || recommendation.tempo) return true
   if (recommendation.scenes.length > 0) return true
   if (recommendation.moods.some((mood) => mood !== '陪伴')) return true
-  return REPLACEMENT_DIRECTION_PATTERN.test(text)
+  return REPLACEMENT_DIRECTION_PATTERN.test(text) || Boolean(detectMusicLanguage(text))
 }
 
 function shouldRecordExplicitMiss(text: string): boolean {

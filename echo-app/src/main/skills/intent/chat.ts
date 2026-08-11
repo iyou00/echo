@@ -9,9 +9,23 @@ import {
   type IntentRejectIf,
   type RecommendationIntent,
 } from '../../services/recommendation/intent'
-import { resolveMusicEntitiesFromText } from '../music/entityResolver'
+import { isMusicDescriptorPhrase, resolveMusicEntitiesFromText } from '../music/entityResolver'
 import { normalizeText, unique } from '../music/identity'
 import { isEchoIdentityQuestion } from './meta'
+import {
+  createFallbackResponseStrategy,
+  compactCompanionProfile,
+  extractExplicitCompanionSignals,
+  normalizeCompanionResponseStrategy,
+  normalizeCompanionSignals,
+} from '../../services/chat/companionStrategy'
+import type {
+  CompanionPreferenceSignal,
+  CompanionProfile,
+  CompanionResponseStrategy,
+} from '../../services/chat/companionTypes'
+import type { CompanionResponseBrief } from '../../services/chat/companionResponse'
+import { detectMusicLanguage, MUSIC_LANGUAGE_VALUES } from '../../services/recommendation/language'
 
 export type ChatIntentKind =
   | 'direct_song'
@@ -68,6 +82,8 @@ export interface ChatIntent {
   needsClarification?: ChatIntentClarification
   continuationTarget?: ChatContinuationTarget
   pendingTasteAction?: PendingTasteReplyAction
+  responseStrategy?: CompanionResponseStrategy
+  companionSignals?: CompanionPreferenceSignal[]
 }
 
 export interface ChatPendingIntentContext {
@@ -101,6 +117,9 @@ export interface ChatIntentContext {
   pendingIntent?: ChatPendingIntentContext | null
   pendingTasteQuestion?: ChatPendingTasteContext | null
   musicSession?: ChatMusicSessionContext | null
+  companionProfile?: CompanionProfile | null
+  previousResponseStrategy?: CompanionResponseStrategy | null
+  companionResponseBrief?: CompanionResponseBrief | null
 }
 
 const DIRECT_SONG_ACTION_PATTERN = /想听|想要听|要听|我要听|我想听|听听看|听一下|听听|播放|放一下|放首|放一首|点播|给我放|帮我放|安排(?:一下|一首|首)?|整(?:一首|首)?|搞(?:一首|首)?|弄(?:一首|首)?/i
@@ -108,7 +127,7 @@ const MUSIC_ACTION_PATTERN = /推荐(?:.{0,18}(?:歌|歌曲|音乐|作品|歌单
 const SHARE_MUSIC_ACTION_PATTERN = /分享(?:一首|几首|\d+首|点|些)?|(?:一首|几首|\d+首|[一二两三四五六七八九十]首).{0,12}(?:分享|听听|试试)|有什么可以分享|有啥可以分享/i
 const SIMILAR_PATTERN = /像|类似|相似|那种|那类|这类|这种感觉|同款|差不多|接近/i
 const SCENE_PATTERN = /场景|专注|工作|午休|睡前|通勤|下班|雨天|独处|运动|提神|放松|发呆|随机|随便/i
-const MUSIC_QUALITY_PATTERN = /慢|快|安静|热闹|循环|舒缓|缓和|轻|燃|激情|激昂|高昂|亢奋|振奋|热血|澎湃|带感|节奏|动感|鼓点|有劲|提神|治愈|温柔|温暖|暖一点|暖和|暖心|怀旧|英文|欧美|英语|粤语|广东|韩语|kpop|日语|华语|民谣|摇滚|说唱|电子/i
+const MUSIC_QUALITY_PATTERN = /慢|快|欢快|轻快|开心|快乐|愉快|安静|热闹|循环|舒缓|缓和|轻|燃|激情|激昂|高昂|亢奋|振奋|热血|澎湃|带感|节奏|动感|鼓点|有劲|提神|治愈|温柔|温暖|暖一点|暖和|暖心|怀旧|英文|欧美|英语|粤语|广东|韩语|kpop|日语|华语|民谣|摇滚|说唱|电子/i
 const EMOTION_PATTERN = /累|困|疲|睡|烦|燥|低落|emo|想哭|难过|伤心|开心|兴奋|阳光|孤独|焦虑|压力|失眠|无聊|烦躁|压抑/i
 const FEEDBACK_REF_PATTERN = /这首|这歌|刚才|当前|现在这首|它|这个|上一首|错误的歌|错误的歌曲|放错|播错/i
 const STRONG_CURRENT_TRACK_REF_PATTERN = /这首歌|这首|这歌|刚才|当前|现在这首|上一首|错误的歌|错误的歌曲|放错|播错/i
@@ -129,7 +148,7 @@ const CHAT_ONLY_PATTERN = /不想听歌|先不听歌|不需要(?:听)?歌|只想
 const NON_MUSIC_RECOMMENDATION_DOMAIN_PATTERN = /(?:推荐|找|来|选|挑|分享|有什么|有啥|有没有|哪些|哪本|哪部|哪篇).{0,16}(?:书|小说|电影|剧|电视剧|综艺|播客|课程|餐厅|饭店|咖啡|代码|工具|文章|论文|诗|古诗|诗词)|(?:书|小说|电影|剧|电视剧|综艺|播客|课程|餐厅|饭店|咖啡|代码|工具|文章|论文|诗|古诗|诗词).{0,16}(?:推荐|找|来|选|挑|分享|有什么|有啥|有没有|哪些|哪本|哪部|哪篇)/i
 const SCENE_OR_FIT_SELECTION_PATTERN = /(?:找|来|放|推荐|推|选|挑|分享|整|安排|搞|弄)(?:点|些|个|一首|几首)?[^，。！？?！,.]{0,24}(?:适合|合适|工作|专注|睡前|通勤|下班|午休|雨天|运动|发呆|放松|提神|夜晚|现在|此刻|当下|这个时候|这会儿|这会|今天|上午|下午|晚上|时间点)|(?:有什么|有啥|有没有|哪首|哪种|哪些)[^，。！？?！,.]{0,24}(?:适合|合适|工作|专注|睡前|通勤|下班|午休|雨天|运动|发呆|放松|提神|夜晚|现在|此刻|当下|这个时候|这会儿|这会|今天|上午|下午|晚上|时间点)/i
 const GENERIC_TITLE_WORDS = new Set(['歌', '歌曲', '音乐', '作品', '那首', '这首', '一首', '几首', '来一首', '来几首'])
-const ROUTER_LANGUAGES = new Set<NonNullable<IntentOverride['language']>>(['华语', '粤语', '英语', '韩语', '日语'])
+const ROUTER_LANGUAGES = new Set<NonNullable<IntentOverride['language']>>(MUSIC_LANGUAGE_VALUES)
 const ROUTER_MOODS = new Set(['放松', '松弛', '清醒', '热烈', '轻快', '治愈', '怀旧', '孤独', '陪伴', '发呆'])
 const ROUTER_SCENES = new Set(['上午', '午休', '下午工作', '通勤', '下班路上', '夜晚', '睡前', '雨天', '独处', '运动'])
 const ROUTER_ARTIST_ALIASES: Record<string, string> = {
@@ -321,11 +340,14 @@ function normalizeRouterRejectIf(value: unknown): IntentRejectIf | undefined {
   return Object.keys(rejectIf).length > 0 ? rejectIf : undefined
 }
 
-function normalizeRouterTitle(value: unknown): string | undefined {
+function normalizeRouterTitle(value: unknown, source: string): string | undefined {
   const title = stringValue(value)
   if (!title) return undefined
   const generic = normalizeText(title.replace(/[吧吗呢呀啊呗啦咯喽]$/i, ''))
   if (GENERIC_TITLE_WORDS.has(generic)) return undefined
+  const escaped = escapeRegExp(title.trim())
+  const explicitlyMarked = new RegExp(`《\\s*${escaped}\\s*》|${escaped}\\s*(?:这首歌|这首|这歌)`).test(source)
+  if (!explicitlyMarked && isMusicDescriptorPhrase(title)) return undefined
   return title.slice(0, 40)
 }
 
@@ -337,6 +359,7 @@ function sourceContainsNormalizedValue(source: string, value: string): boolean {
 
 function sourceSupportsArtist(source: string, artist: string | undefined): artist is string {
   if (!artist) return false
+  if (isMusicDescriptorPhrase(artist)) return false
   if (sourceContainsNormalizedValue(source, artist)) return true
   const normalizedSource = normalizeText(source)
   const normalizedArtist = normalizeText(artist)
@@ -372,7 +395,7 @@ function sourceSupportsTitle(source: string, title: string | undefined): title i
 function shouldClearUnsupportedRouterTitle(source: string, title: string | undefined): boolean {
   if (!title) return false
   const normalizedTitle = normalizeText(title.replace(/[吧吗呢呀啊呗啦咯喽]$/i, ''))
-  return GENERIC_TITLE_WORDS.has(normalizedTitle) && sourceSupportsTitle(source, title)
+  return (GENERIC_TITLE_WORDS.has(normalizedTitle) || isMusicDescriptorPhrase(title)) && sourceSupportsTitle(source, title)
 }
 
 function recentUserSupportsArtist(context: ChatIntentContext, artist: string | undefined): artist is string {
@@ -516,6 +539,9 @@ function compactRouterContext(context: ChatIntentContext): Record<string, unknow
     pendingTasteQuestion: context.pendingTasteQuestion ?? null,
     musicSession: context.musicSession ?? null,
     recentDialog: recentDialog.length > 0 ? recentDialog : null,
+    companionProfile: context.companionProfile ? compactCompanionProfile(context.companionProfile) : null,
+    previousResponseStrategy: context.previousResponseStrategy ?? null,
+    companionResponseBrief: context.companionResponseBrief ?? null,
   }
 }
 
@@ -558,7 +584,8 @@ function hasFeedbackReplacementCue(text: string): boolean {
     || MORE_LIKE_THIS_PATTERN.test(text)
     || MUSIC_SELECTION_PATTERN.test(text)
     || MUSIC_ACTION_WITH_DOMAIN_PATTERN.test(text)
-    || /激情|激昂|高昂|亢奋|振奋|热血|澎湃|带感|节奏|鼓点|动感|有劲|提神|清醒|燃|快一点|快点|快歌|舒缓|安静|放松|慢一点|慢点|粤语|英文|英语|欧美|韩语|日语|华语|民谣|摇滚|说唱|电子|r&b|rnb|爵士/i.test(text)
+    || /激情|激昂|高昂|亢奋|振奋|热血|澎湃|带感|节奏|鼓点|动感|有劲|提神|清醒|燃|快一点|快点|快歌|舒缓|安静|放松|慢一点|慢点|民谣|摇滚|说唱|电子|r&b|rnb|爵士/i.test(text)
+    || Boolean(detectMusicLanguage(text))
 }
 
 interface InferredChatRoute {
@@ -571,6 +598,8 @@ interface InferredChatRoute {
   pendingTasteAction?: PendingTasteReplyAction
   clarificationReason?: ChatIntentClarification['reason']
   override?: IntentOverride
+  responseStrategy: CompanionResponseStrategy
+  companionSignals: CompanionPreferenceSignal[]
 }
 
 function parseChatRouteContent(content: string, text: string, context: ChatIntentContext): InferredChatRoute | null {
@@ -596,7 +625,7 @@ function parseChatRouteContent(content: string, text: string, context: ChatInten
   if (kind === 'feedback_current_track' && !feedbackAction) return null
   const rawParsedArtistQuery = stringValue(parsed.artistQuery)?.slice(0, 40)
   const rawParsedSeedTitle = stringValue(parsed.seedTitle)
-  const parsedSeedTitle = normalizeRouterTitle(rawParsedSeedTitle)
+  const parsedSeedTitle = normalizeRouterTitle(rawParsedSeedTitle, text)
   const useContextEntities = contextCanSupplyMusicEntities(kind, text, context)
   const artistQuery = sourceSupportsArtist(text, rawParsedArtistQuery)
     || (useContextEntities && recentUserSupportsArtist(context, rawParsedArtistQuery))
@@ -625,8 +654,11 @@ function parseChatRouteContent(content: string, text: string, context: ChatInten
     ? unique(parsed.evidence.map(String).map((item) => item.trim()).filter(Boolean)).slice(0, 6)
     : undefined
   const override: IntentOverride = { wantsMusic }
-  if (rawParsedSeedTitle && !seedTitle && shouldClearUnsupportedRouterTitle(text, rawParsedSeedTitle)) {
+  if (rawParsedSeedTitle && !seedTitle && (isMusicDescriptorPhrase(rawParsedSeedTitle) || shouldClearUnsupportedRouterTitle(text, rawParsedSeedTitle))) {
     override.clearSeedTitle = true
+  }
+  if (rawParsedArtistQuery && !artistQuery && isMusicDescriptorPhrase(rawParsedArtistQuery)) {
+    override.clearArtistQuery = true
   }
   const language = enumValue(parsed.language, ROUTER_LANGUAGES)
   const moods = enumArray(parsed.moods, ROUTER_MOODS)
@@ -692,6 +724,13 @@ function parseChatRouteContent(content: string, text: string, context: ChatInten
     pendingTasteAction,
   )
   validatedOverride.wantsMusic = finalWantsMusic
+  const responseStrategy = normalizeCompanionResponseStrategy(parsed.responseStrategy, {
+    userText: text,
+    wantsMusic: finalWantsMusic,
+    profile: context.companionProfile,
+    brief: context.companionResponseBrief,
+  })
+  const companionSignals = normalizeCompanionSignals(parsed.companionSignals, text)
   return {
     kind: normalizedKind,
     confidence,
@@ -702,6 +741,8 @@ function parseChatRouteContent(content: string, text: string, context: ChatInten
     pendingTasteAction,
     clarificationReason,
     override: validatedOverride,
+    responseStrategy,
+    companionSignals,
   }
 }
 
@@ -742,7 +783,7 @@ async function inferChatRouteWithLlm(text: string, signal?: AbortSignal, context
 - pending_reply: 用户在回答上下文里的待确认问题或承接上一轮音乐结果。
 
 输出格式:
-{"kind":"mood_request","wantsMusic":true,"confidence":0.92,"artistQuery":null,"seedTitle":null,"targetCount":1,"language":null,"moods":[],"scenes":[],"energy":null,"tempo":null,"familiarity":"balanced","rejectIf":null,"feedbackAction":null,"outOfScopeTopic":null,"continuationTarget":null,"pendingTasteAction":null,"clarificationReason":null,"evidence":["原文短词"]}
+{"kind":"mood_request","wantsMusic":true,"confidence":0.92,"artistQuery":null,"seedTitle":null,"targetCount":1,"language":null,"moods":[],"scenes":[],"energy":null,"tempo":null,"familiarity":"balanced","rejectIf":null,"feedbackAction":null,"outOfScopeTopic":null,"continuationTarget":null,"pendingTasteAction":null,"clarificationReason":null,"evidence":["原文短词"],"responseStrategy":{"mode":"warm_care","warmth":0.8,"playfulness":0.1,"directness":0.5,"initiative":"play_music","verbosity":"normal","vulnerability":"medium","reasonCodes":["current_vulnerability"]},"companionSignals":[]}
 
 规则:
 1. 纯粹说心情,例如“我累了”“我有点烦”,kind 填 casual_chat,wantsMusic:false。
@@ -751,6 +792,7 @@ async function inferChatRouteWithLlm(text: string, signal?: AbortSignal, context
 4. “王菲的主角”“Nicky Youre 的 Part Time Lover”“我要听《主角》”是 direct_song。
 5. “歌曲吧/歌吧/音乐吧/作品吧”是泛指词,不能当歌名。
 6. 不确定歌名就 seedTitle:null,不要猜。
+6.1 欢快、轻快、舒缓、治愈、类型、风格、儿歌等词描述用户想要的音乐；它们填入 moods/scenes/energy/tempo 等条件,artistQuery 和 seedTitle 填 null。只有用户用《》或“这首歌”明确标记时才可视为歌名。
 7. targetCount 默认 1,“几首”填 3,最多 5。
 8. 用户说“这首不好听”“刚才那首不对”“换一首激情一点的”,并且确实指当前播放,kind 填 feedback_current_track,feedbackAction 填 not_right 或 skip。
 9. 用户说“我喜欢王菲的《主角》”“王菲的主角这首歌我喜欢”“我喜欢陈奕迅的冷夜”,这是偏好表达,kind 填 casual_chat,wantsMusic:false,artistQuery/seedTitle 仍要抽取。
@@ -761,15 +803,21 @@ async function inferChatRouteWithLlm(text: string, signal?: AbortSignal, context
 14. continuationTarget=taste_question 时填写 pendingTasteAction。只回答偏好填 answer_only；回答后明确要求继续找歌填 extend_recommendation。
 15. 用户开启新话题时忽略旧 pending。天气、身份、明确歌手/歌名和新的情绪表达都算新话题。
 16. out_of_scope 要填写 outOfScopeTopic: politics、code、translation、math、business、academic、other。
-17. 音乐请求同时解析 language、moods、scenes、energy、tempo、familiarity 和 rejectIf。不确定的字段填 null 或空数组。
+17. 音乐请求同时解析 language、moods、scenes、energy、tempo、familiarity 和 rejectIf。language 可选 ${MUSIC_LANGUAGE_VALUES.join('、')}。不确定的字段填 null 或空数组。
 18. 激昂、热血、带感、节奏感强对应 moods:["清醒","热烈"],energy:"high",tempo:"fast",rejectIf.minEnergy 至少 0.55。
 19. 舒缓、睡前、安静、慢一点、温暖、暖一点对应 energy:"low",tempo:"slow",moods 可用 ["治愈","陪伴"],rejectIf.maxEnergy 不超过 0.78。
 20. 用户上一句明确说了歌手或歌名,你刚问“要不要我挑一首”,用户回答“你帮我挑一首”“那你选一首”,要继承上一轮用户说出的实体并执行音乐动作。
 21. 用户想点具体歌曲但缺少关键实体时,kind 填 clarification_needed。歌名有歧义填 ambiguous_direct_song；有歌名但缺歌手填 missing_artist；“放那个”“来刚才说的”且上下文无法确认填 unclear_reference。
+22. responseStrategy 必须结合当前原话、companionProfile、previousResponseStrategy、最近对话和 companionResponseBrief。它是表达策略,不写最终回复。
+23. mode 可选 warm_care、playful_tease、practical、quiet_company、celebrate、clarify、serious_care。用户脆弱、重大失落或身体风险时降低 playfulness；自伤或紧急身体风险时 mode=serious_care,vulnerability=high,playfulness=0。
+24. companionSignals 只提取用户对相处方式的明确表达或对上一条回复的直接评价。dimension 可选 warmth、playfulness、directness、initiative、verbosity；direction 填 more 或 less；evidence 必须逐字来自本轮 input。普通情绪和沉默不形成长期偏好。
+25. “你可以损我”“别调侃我”“直接点”“少说点”属于明确相处偏好，explicit:true。用户评价“你刚才那样说挺好/我不喜欢你刚才的语气”时，结合 previousResponseStrategy 判断具体 dimension，证据仍引用本轮原话。
 
 例子:
 - 你随便来一首陈奕迅的歌曲吧 → {"kind":"artist_request","wantsMusic":true,"confidence":0.96,"artistQuery":"陈奕迅","seedTitle":null,"targetCount":1,"evidence":["随便","陈奕迅","歌曲"]}
 - 有什么可以分享给我听的歌吗 → {"kind":"mood_request","wantsMusic":true,"confidence":0.9,"artistQuery":null,"seedTitle":null,"targetCount":1,"evidence":["分享","听","歌"]}
+- 工作被骂了，来一首欢快歌给我听听吧 → {"kind":"mood_request","wantsMusic":true,"confidence":0.98,"artistQuery":null,"seedTitle":null,"targetCount":1,"moods":["轻快"],"evidence":["被骂了","欢快歌"]}
+- 找欢快类型的歌曲 → {"kind":"mood_request","wantsMusic":true,"confidence":0.98,"artistQuery":null,"seedTitle":null,"targetCount":1,"moods":["轻快"],"evidence":["欢快类型","歌曲"]}
 - 我要听王菲的主角 → {"kind":"direct_song","wantsMusic":true,"confidence":0.98,"artistQuery":"王菲","seedTitle":"主角","targetCount":1,"evidence":["王菲","主角"]}
 - 王菲的主角这首歌我喜欢 → {"kind":"casual_chat","wantsMusic":false,"confidence":0.94,"artistQuery":"王菲","seedTitle":"主角","targetCount":1,"feedbackAction":null,"evidence":["王菲","主角","喜欢"]}
 - 我喜欢陈奕迅的冷夜 → {"kind":"casual_chat","wantsMusic":false,"confidence":0.94,"artistQuery":"陈奕迅","seedTitle":"冷夜","targetCount":1,"feedbackAction":null,"evidence":["陈奕迅","冷夜","喜欢"]}
@@ -920,6 +968,8 @@ function applyInferredChatRoute(intent: ChatIntent, route: InferredChatRoute, co
     outOfScopeTopic: route.outOfScopeTopic,
     continuationTarget: route.continuationTarget,
     pendingTasteAction: route.pendingTasteAction,
+    responseStrategy: route.responseStrategy,
+    companionSignals: route.companionSignals,
   }
 }
 
@@ -933,7 +983,17 @@ function resolveInferredChatRoute(
 }
 
 function fallbackChatIntent(text: string, context: ChatIntentContext): ChatIntent {
-  return applyRecentMusicContext(classifyFallbackChatIntent(text, context), context)
+  const intent = applyRecentMusicContext(classifyFallbackChatIntent(text, context), context)
+  return {
+    ...intent,
+    responseStrategy: createFallbackResponseStrategy({
+      userText: text,
+      wantsMusic: intent.wantsMusic,
+      profile: context.companionProfile,
+      brief: context.companionResponseBrief,
+    }),
+    companionSignals: extractExplicitCompanionSignals(text),
+  }
 }
 
 export async function routeChatIntentWithLlm(
@@ -964,7 +1024,7 @@ export function classifyFallbackChatIntent(text: string, context: ChatIntentCont
   const hasDirectSongAction = DIRECT_SONG_ACTION_PATTERN.test(trimmed)
   const hasSimilarSignal = SIMILAR_PATTERN.test(trimmed)
   const hasSceneSignal = SCENE_PATTERN.test(trimmed)
-  const hasMusicQuality = MUSIC_QUALITY_PATTERN.test(trimmed)
+  const hasMusicQuality = MUSIC_QUALITY_PATTERN.test(trimmed) || Boolean(detectMusicLanguage(trimmed))
   const hasEmotionSignal = EMOTION_PATTERN.test(trimmed)
   const moodTerms = detectMoodTerms(trimmed, recommendationIntent)
   const targetCount = recommendationIntent.targetCount

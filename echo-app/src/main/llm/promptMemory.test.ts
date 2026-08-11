@@ -236,6 +236,63 @@ describe('prompt memory evidence coverage', () => {
     expect(content).toContain('只能点名候选里的歌名和艺人')
   })
 
+  it('adds a playful companion brief when fatigue repeats on the same day', () => {
+    const content = buildChatContext('我又累了，推荐三首歌', {
+      companionResponseBrief: {
+        topic: 'fatigue',
+        tone: 'playful_concern',
+        pattern: 'same_day_repeat',
+        sameDayMentions: 2,
+        guidance: ['使用一句熟人式调侃，随后落到真实关心。'],
+      },
+    }).find((message) => message.role === 'system')?.content ?? ''
+
+    expect(content).toContain('<companion_response_brief>')
+    expect(content).toContain('"tone": "playful_concern"')
+    expect(content).toContain('熟人式调侃')
+    expect(content).toContain('随后落到真实关心')
+  })
+
+  it('injects a calibrated response strategy and compact relationship profile', () => {
+    const content = buildChatContext('我今天有点累', {
+      responseStrategy: {
+        mode: 'quiet_company',
+        warmth: 0.78,
+        playfulness: 0.05,
+        directness: 0.42,
+        initiative: 'reply_only',
+        verbosity: 'short',
+        vulnerability: 'medium',
+        reasonCodes: ['current_vulnerability'],
+      },
+    }).find((message) => message.role === 'system')?.content ?? ''
+
+    expect(content).toContain('<companion_profile>')
+    expect(content).toContain('<response_strategy>')
+    expect(content).toContain('"mode": "quiet_company"')
+    expect(content).toContain('quiet_company 少建议、少追问')
+    expect(content).not.toContain('updatedAt')
+  })
+
+  it('injects verified weather context for a weather-aware music response', () => {
+    const content = buildChatContext('找一首适合今天天气的韩语歌', {
+      weatherContext: {
+        requested: true,
+        city: '长沙',
+        available: true,
+        condition: '小雨',
+        summary: '小雨 · 23°C',
+        tempC: 23,
+        humidity: 86,
+      },
+    }).find((message) => message.role === 'system')?.content ?? ''
+
+    expect(content).toContain('<weather_context>')
+    expect(content).toContain('"city": "长沙"')
+    expect(content).toContain('"summary": "小雨 · 23°C"')
+    expect(content).toContain('已经执行过的真实天气查询')
+  })
+
   it('escapes yinyi conversation and track data inside evidence tags', () => {
     vi.mocked(loadMeaningfulTrackEventsForDate).mockReturnValueOnce([
       {

@@ -567,6 +567,7 @@ describe('taste portrait boundaries', () => {
   })
 
   it('removes artist-level positive chat signals after a later artist dislike', () => {
+    const recentAt = new Date().toISOString()
     const profile: TasteProfile = {
       echo_portrait: '我还在观察你。',
       artists: [{ name: '王菲', affinity: 0.7 }],
@@ -579,9 +580,9 @@ describe('taste portrait boundaries', () => {
       ],
       profile_meta: {
         incrementalSignals: [
-          { kind: 'like_artist', target: '王菲', strength: 0.08, updatedAt: '2026-06-16T08:00:00.000Z' },
-          { kind: 'like_track', target: '王菲 / 主角', artist: '王菲', title: '主角', strength: 0.08, updatedAt: '2026-06-16T08:00:00.000Z' },
-          { kind: 'like_genre', target: '民谣', strength: 0.08, updatedAt: '2026-06-16T08:00:00.000Z' },
+          { kind: 'like_artist', target: '王菲', strength: 0.08, updatedAt: recentAt },
+          { kind: 'like_track', target: '王菲 / 主角', artist: '王菲', title: '主角', strength: 0.08, updatedAt: recentAt },
+          { kind: 'like_genre', target: '民谣', strength: 0.08, updatedAt: recentAt },
         ],
       },
     }
@@ -589,11 +590,12 @@ describe('taste portrait boundaries', () => {
     tasteTestHelpers.removeIncrementalSignalsFor(profile, { kind: 'like_artist', target: '王菲' })
 
     expect(profile.profile_meta?.incrementalSignals).toEqual([
-      { kind: 'like_genre', target: '民谣', strength: 0.08, updatedAt: '2026-06-16T08:00:00.000Z' },
+      { kind: 'like_genre', target: '民谣', strength: 0.08, updatedAt: recentAt },
     ])
   })
 
   it('removes only the matching track-level positive chat signal after a later track dislike', () => {
+    const recentAt = new Date().toISOString()
     const profile: TasteProfile = {
       echo_portrait: '我还在观察你。',
       artists: [{ name: '王菲', affinity: 0.7 }],
@@ -604,9 +606,9 @@ describe('taste portrait boundaries', () => {
       signature_tracks: [],
       profile_meta: {
         incrementalSignals: [
-          { kind: 'like_track', target: '王菲 / 主角', artist: '王菲', title: '主角', strength: 0.08, updatedAt: '2026-06-16T08:00:00.000Z' },
-          { kind: 'like_track', target: '王菲 / 红豆', artist: '王菲', title: '红豆', strength: 0.08, updatedAt: '2026-06-16T08:00:00.000Z' },
-          { kind: 'like_artist', target: '王菲', strength: 0.08, updatedAt: '2026-06-16T08:00:00.000Z' },
+          { kind: 'like_track', target: '王菲 / 主角', artist: '王菲', title: '主角', strength: 0.08, updatedAt: recentAt },
+          { kind: 'like_track', target: '王菲 / 红豆', artist: '王菲', title: '红豆', strength: 0.08, updatedAt: recentAt },
+          { kind: 'like_artist', target: '王菲', strength: 0.08, updatedAt: recentAt },
         ],
       },
     }
@@ -614,8 +616,8 @@ describe('taste portrait boundaries', () => {
     tasteTestHelpers.removeIncrementalSignalsFor(profile, { kind: 'like_track', artist: '王菲', title: '主角' })
 
     expect(profile.profile_meta?.incrementalSignals).toEqual([
-      { kind: 'like_track', target: '王菲 / 红豆', artist: '王菲', title: '红豆', strength: 0.08, updatedAt: '2026-06-16T08:00:00.000Z' },
-      { kind: 'like_artist', target: '王菲', strength: 0.08, updatedAt: '2026-06-16T08:00:00.000Z' },
+      { kind: 'like_track', target: '王菲 / 红豆', artist: '王菲', title: '红豆', strength: 0.08, updatedAt: recentAt },
+      { kind: 'like_artist', target: '王菲', strength: 0.08, updatedAt: recentAt },
     ])
   })
 

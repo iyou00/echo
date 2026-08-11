@@ -58,6 +58,85 @@ const migrations: DbMigration[] = [
       backfillSettingsFirstUsedAt(database)
     },
   },
+  {
+    version: 7,
+    name: 'companion_relationship_profile',
+    up(database) {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS companion_profiles (
+          user_id INTEGER PRIMARY KEY,
+          profile_json TEXT NOT NULL,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS companion_signal_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          dimension TEXT NOT NULL,
+          direction TEXT NOT NULL,
+          confidence REAL NOT NULL,
+          explicit INTEGER NOT NULL DEFAULT 0,
+          evidence TEXT NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_companion_signals_recent
+          ON companion_signal_events(user_id, created_at DESC);
+      `)
+    },
+  },
+  {
+    version: 8,
+    name: 'continuous_listening_sessions',
+    up(database) {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS listening_sessions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          status TEXT NOT NULL DEFAULT 'active',
+          started_at DATETIME NOT NULL,
+          last_active_at DATETIME NOT NULL,
+          ended_at DATETIME,
+          segment_count INTEGER NOT NULL DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_listening_sessions_active
+          ON listening_sessions(user_id, status, last_active_at DESC);
+
+        CREATE TABLE IF NOT EXISTS listening_segments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          session_id INTEGER NOT NULL,
+          track_key TEXT NOT NULL DEFAULT '',
+          track_json TEXT,
+          text TEXT NOT NULL DEFAULT '',
+          delivery TEXT NOT NULL,
+          density TEXT NOT NULL,
+          move TEXT NOT NULL,
+          sentence_form TEXT NOT NULL,
+          topic_source TEXT NOT NULL,
+          signature TEXT NOT NULL DEFAULT '',
+          generated_at DATETIME NOT NULL,
+          FOREIGN KEY (user_id) REFERENCES users(id),
+          FOREIGN KEY (session_id) REFERENCES listening_sessions(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_listening_segments_recent
+          ON listening_segments(user_id, session_id, generated_at DESC);
+      `)
+    },
+  },
+  {
+    version: 9,
+    name: 'continuous_listening_context',
+    up(database) {
+      database.exec(`
+        ALTER TABLE listening_sessions ADD COLUMN companion_mode TEXT;
+        ALTER TABLE listening_sessions ADD COLUMN consumed_event_keys_json TEXT NOT NULL DEFAULT '[]';
+      `)
+    },
+  },
 ]
 
 function backfillSettingsFirstUsedAt(database: Database.Database): void {

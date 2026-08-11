@@ -1,6 +1,7 @@
 import { getDb } from './index'
 
 export interface ActiveEvent {
+  id?: number
   kind: string
   content: string
   confidence?: number
@@ -12,7 +13,7 @@ export interface ActiveEvent {
 export function loadActiveEvents(limit = 8): ActiveEvent[] {
   return getDb()
     .prepare(`
-      SELECT kind, content, confidence, weight, started_at, created_at
+      SELECT id, kind, content, confidence, weight, started_at, created_at
       FROM events
       WHERE user_id = current_user_id()
         AND kind != 'correction'
@@ -32,8 +33,9 @@ export function loadActiveEvents(limit = 8): ActiveEvent[] {
     `)
     .all(limit)
     .map((row) => {
-      const typed = row as { kind: string; content: string; confidence?: number; weight?: number; started_at?: string; created_at?: string }
+      const typed = row as { id?: number; kind: string; content: string; confidence?: number; weight?: number; started_at?: string; created_at?: string }
       return {
+        id: typed.id,
         kind: typed.kind,
         content: typed.content,
         confidence: typed.confidence,
@@ -47,7 +49,7 @@ export function loadActiveEvents(limit = 8): ActiveEvent[] {
 export function loadRecentEvents(kind: string, limit = 8): ActiveEvent[] {
   return getDb()
     .prepare(`
-      SELECT kind, content, confidence, weight, started_at, created_at
+      SELECT id, kind, content, confidence, weight, started_at, created_at
       FROM events
       WHERE user_id = current_user_id() AND kind = ?
       ORDER BY created_at DESC, id DESC
@@ -55,8 +57,9 @@ export function loadRecentEvents(kind: string, limit = 8): ActiveEvent[] {
     `)
     .all(kind, limit)
     .map((row) => {
-      const typed = row as { kind: string; content: string; confidence?: number; weight?: number; started_at?: string; created_at?: string }
+      const typed = row as { id?: number; kind: string; content: string; confidence?: number; weight?: number; started_at?: string; created_at?: string }
       return {
+        id: typed.id,
         kind: typed.kind,
         content: typed.content,
         confidence: typed.confidence,

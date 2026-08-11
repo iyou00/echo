@@ -76,4 +76,22 @@ describe('chat pipeline track binding contract', () => {
 
     expect(enforceAssistantTrackBinding(content, [candidate, otherCandidate], true)).toBe('行，我先挑这几首：候选歌手的《真正候选》、另一位的《另一首》。先从第一首开始。')
   })
+
+  it('rewrites an unquoted latin title outside the bound card', () => {
+    const content = '先放 Yesterday，听一下再说。'
+
+    expect(enforceAssistantTrackBinding(content, [candidate], true)).toBe('行，先放候选歌手的《真正候选》。先听开头。')
+  })
+
+  it('keeps an unquoted latin title when it matches the bound card', () => {
+    const latinCandidate: Track = {
+      id: 'latin',
+      title: 'Part Time Lover',
+      artist: 'Nicky Youre',
+      source: 'netease',
+    }
+    const content = 'Part Time Lover 可以先听，前奏出来再决定。'
+
+    expect(enforceAssistantTrackBinding(content, [latinCandidate], true)).toBe(content)
+  })
 })

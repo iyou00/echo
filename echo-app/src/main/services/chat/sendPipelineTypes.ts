@@ -4,11 +4,12 @@ import type {
   resolvePendingDirectSongReply,
   resolvePendingMusicEntityReply,
 } from './pendingIntents'
+import type { CompanionResponseStrategy } from './companionTypes'
 
 export type ReplyFn = (
   content: string,
   tracks?: Track[],
-  options?: { durationMs?: number; hints?: ChatHints; persistTracks?: boolean; expectsMusicAction?: boolean },
+  options?: { durationMs?: number; hints?: ChatHints; persistTracks?: boolean; expectsMusicAction?: boolean; responseStrategy?: CompanionResponseStrategy },
 ) => SendChatResult
 
 export interface PendingIntentState {

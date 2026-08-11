@@ -7,6 +7,11 @@ vi.mock('./memoryEvidence', () => ({
 }))
 
 describe('listening segment context', () => {
+  it('uses stable event ids so later active events remain distinguishable', () => {
+    expect(listeningTestHelpers.activeEventKey({ id: 12, kind: 'context', content: '今天很累' })).toBe('event:12')
+    expect(listeningTestHelpers.activeEventKey({ id: 13, kind: 'context', content: '今天很累' })).toBe('event:13')
+  })
+
   it('passes shared memory evidence into the long-form voice prompt', () => {
     const profile: TasteProfile = {
       echo_portrait: '我还在观察你。',
@@ -109,6 +114,50 @@ describe('listening segment context', () => {
     )).toBe(true)
   })
 
+  it('rejects mechanically similar copy from recent listening segments', () => {
+    const recentTexts = ['先听王菲的《主角》。这回先跟着前奏走。']
+
+    expect(listeningTestHelpers.hasListeningTextQuality(
+      '先听陈奕迅的《好久不见》。这回先跟着前奏走。',
+      { recentTexts },
+    )).toBe(false)
+  })
+
+  it('applies dynamic density limits to generated copy', () => {
+    const plan = {
+      sessionId: 1,
+      segmentIndex: 2,
+      delivery: 'spoken' as const,
+      density: 'micro' as const,
+      move: 'judge' as const,
+      sentenceForm: 'judgment' as const,
+      topicSource: 'music_transition' as const,
+      minChars: 16,
+      maxChars: 56,
+      maxSentences: 2,
+      checkpoint: false,
+      reason: 'automatic_continuation',
+    }
+
+    expect(listeningTestHelpers.hasListeningTextQuality('王菲的《主角》来了。刚才够安静，这回醒一醒。', { plan })).toBe(true)
+    expect(listeningTestHelpers.hasListeningTextQuality('王菲的《主角》来了。第一句。第二句。第三句。', { plan })).toBe(false)
+
+    const firstFallback = listeningTestHelpers.fallbackText({ title: '主角', artist: '王菲' }, plan)
+    const secondFallback = listeningTestHelpers.fallbackText({ title: '主角', artist: '王菲' }, plan, [firstFallback])
+    expect(listeningTestHelpers.hasListeningTextQuality(firstFallback, { plan })).toBe(true)
+    expect(listeningTestHelpers.hasListeningTextQuality(secondFallback, { plan, recentTexts: [firstFallback] })).toBe(true)
+    expect(secondFallback).not.toBe(firstFallback)
+  })
+
+  it('compares copy shape while ignoring the selected song title', () => {
+    const similarity = listeningTestHelpers.listeningTextSimilarity(
+      '先听王菲的《主角》。这回让耳朵走条新路。',
+      '先听陈奕迅的《好久不见》。这回让耳朵走条新路。',
+    )
+
+    expect(similarity).toBeGreaterThan(0.58)
+  })
+
   it('uses artist evidence when picking among duplicate song titles', () => {
     const candidates: Track[] = [
       { title: '主角', artist: '未知歌手', source: 'netease' },
@@ -118,6 +167,32 @@ describe('listening segment context', () => {
     const picked = listeningTestHelpers.pickTrackFromText('现在先听王菲的《主角》。你不用认真听，等副歌出来再说。', candidates)
 
     expect(picked?.artist).toBe('王菲')
+  })
+
+  it('ranks a different language and genre ahead of a cooled artist', () => {
+    const semantic = (language: string, genres: string[], energy: number): Track['semantic'] => ({
+      language,
+      genres,
+      moods: ['放松'],
+      scenes: ['夜晚'],
+      energy,
+      tempo: energy > 0.6 ? 'fast' : 'slow',
+      familiarity: 'safe',
+      confidence: 0.8,
+    })
+    const history = [
+      { artist: '麦小兜', language: '华语', genres: ['华语流行'], moods: ['放松'], energy: 0.35, tempo: 'slow', year: 2024 },
+      { artist: '魏玉慧', language: '华语', genres: ['华语流行'], moods: ['治愈'], energy: 0.38, tempo: 'slow', year: 2023 },
+      { artist: '指尖笑', language: '华语', genres: ['华语流行'], moods: ['安静'], energy: 0.4, tempo: 'slow', year: 2022 },
+    ]
+    const candidates: Track[] = [
+      { title: '旧方向', artist: '麦小兜', year: 2024, semantic: semantic('华语', ['华语流行'], 0.36) },
+      { title: '新方向', artist: 'New Hope Club', year: 2019, semantic: semantic('英语', ['欧美流行'], 0.72) },
+    ]
+
+    const ranked = listeningTestHelpers.rankBySessionDiversity(candidates, history)
+
+    expect(ranked[0].title).toBe('新方向')
   })
 
   it('separates imported-only profile evidence from real listening behavior for voice fallback wording', () => {

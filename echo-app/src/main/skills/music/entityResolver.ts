@@ -64,9 +64,20 @@ const GENERIC_TITLE_DETAIL_WORDS = new Set([
   '味道',
   '歌声',
 ])
-const IMPLAUSIBLE_ARTIST_TERMS = /是|最|很|挺|特别|温暖|相遇|拥抱|听|想|要|播放|放|推荐|适合|值得|天气|心情|感觉|类似|相似|像|好听|耐听|顺耳|入耳|对味|舒缓|缓和|轻柔|安静|放松|激昂|热血|澎湃|带感|节奏|国外|外国|欧美|英文|粤语|华语|日语|韩语/
+const IMPLAUSIBLE_ARTIST_TERMS = /是|最|很|挺|特别|温暖|相遇|拥抱|听|想|要|播放|放|推荐|适合|值得|天气|心情|感觉|类似|相似|像|好听|耐听|顺耳|入耳|对味|舒缓|缓和|轻柔|安静|放松|激昂|热血|澎湃|带感|节奏|国外|外国|欧美|英文|粤语|华语|日语|韩语|法语|德语|西班牙语|俄语|泰语|葡萄牙语|意大利语/
 const SIMILARITY_PREFIX_PATTERN = /^(?:推荐|推|找|来|给我|帮我)?\s*(?:类似|像|相似于|相近于|和|跟)\s*/i
 const CONTEXTUAL_TRACK_REFERENCE_PATTERN = /^(?:刚才|刚刚|当前|现在|上一首|这首|那首|这个|那个|这种|那种)(?:的)?(?:歌|歌曲|音乐|曲子)?$/i
+const MUSIC_DESCRIPTOR_PART_PATTERN = /(?:欢快|轻快|开心|快乐|愉快|轻松|舒缓|放松|安静|温柔|治愈|热血|激昂|激情|高昂|提神|清醒|带感|动感|有劲|伤感|悲伤|难过|低落|孤独|怀旧|甜|梦幻|空灵|节奏感强|节奏|鼓点|慢歌|快歌|慢一点|快一点|慢|快|类型|风格|氛围|感觉|心情|情绪|儿歌|工作|学习|睡前|通勤|运动|粤语|英文|英语|欧美|韩语|日语|华语|法语|德语|西班牙语|俄语|泰语|葡萄牙语|意大利语|民谣|摇滚|说唱|电子|爵士|r&b|rnb)/gi
+const MUSIC_DESCRIPTOR_FILLER_PATTERN = /(?:听听吧|歌曲|音乐|作品|给我|帮我|播放|推荐|想要|一首|几首|一点|一些|那种|这种|这个|其他|适合|可用|听听|听吧|我|找|来|推|放|听|想|要|[一二两三四五六七八九十两]|\d+|首|点|的|歌|给|吧|呀|啊|呢|呗|啦|咯)/gi
+
+export function isMusicDescriptorPhrase(value: string): boolean {
+  const normalized = normalizeText(value)
+  if (!normalized) return false
+  const remaining = normalized
+    .replace(MUSIC_DESCRIPTOR_PART_PATTERN, '')
+    .replace(MUSIC_DESCRIPTOR_FILLER_PATTERN, '')
+  return remaining.length === 0
+}
 
 export function parseMusicRequestCount(text: string): { requestedCount: number; targetCount: number; overLimit: boolean; explicit: boolean } {
   const lower = text.toLowerCase()
@@ -133,13 +144,14 @@ export function normalizeMusicTitle(value: string): string {
     .trim()
 }
 
-function usableSongTitle(value: string): string | undefined {
+function usableSongTitle(value: string, allowDescriptor = false): string | undefined {
   const title = normalizeMusicTitle(value)
   if (!title) return undefined
   const genericCandidate = normalizeText(title.replace(/[吧吗呢呀啊呗啦咯喽]$/i, ''))
   if (GENERIC_TITLE_WORDS.has(genericCandidate)) return undefined
   if (CONTEXTUAL_TRACK_REFERENCE_PATTERN.test(title)) return undefined
   if (/的?(歌|歌曲|音乐|作品)$/.test(title)) return undefined
+  if (!allowDescriptor && isMusicDescriptorPhrase(title)) return undefined
   if (title.length > 40) return undefined
   return title
 }
@@ -158,6 +170,7 @@ function isPlausibleArtistName(value: string): boolean {
   if (!artist) return false
   if (artist.length > 24) return false
   if (IMPLAUSIBLE_ARTIST_TERMS.test(value)) return false
+  if (isMusicDescriptorPhrase(value)) return false
   return true
 }
 
@@ -286,8 +299,8 @@ function addArtist(entities: MusicEntity[], sourceSpan: string, confidence: numb
   return artist
 }
 
-function addTitle(entities: MusicEntity[], sourceSpan: string, confidence: number): string | undefined {
-  const title = usableSongTitle(sourceSpan)
+function addTitle(entities: MusicEntity[], sourceSpan: string, confidence: number, allowDescriptor = false): string | undefined {
+  const title = usableSongTitle(sourceSpan, allowDescriptor)
   if (!title) return undefined
   entities.push(entity('title', title, sourceSpan.trim(), confidence))
   return title
@@ -303,7 +316,7 @@ export function resolveMusicEntitiesFromText(text: string): MusicEntityResolutio
 
   const quoted = trimmed.match(/《([^》]{1,40})》/)
   if (quoted?.[1]) {
-    seedTitle = addTitle(entities, quoted[1], 0.96)
+    seedTitle = addTitle(entities, quoted[1], 0.96, true)
     const prefix = trimmed.slice(0, quoted.index)
       .replace(ACTION_PREFIX_PATTERN, '')
       .replace(COUNT_PREFIX_PATTERN, '')
@@ -333,7 +346,7 @@ export function resolveMusicEntitiesFromText(text: string): MusicEntityResolutio
     const pair = trimmed.match(/(?:我)?(?:想听|想要听|要听|我要听|我想听|播放|放|放首|放一首|找首|找一首|来一首|点播)\s*(?:的)?(?:是|就是)?\s*([^《》，。！？?！,.]{1,24})的([^《》，。！？?！,.]{1,40})/i)
     if (pair) {
       const artist = addArtist(entities, pair[1] ?? '', 0.9)
-      const title = addTitle(entities, pair[2] ?? '', 0.88)
+      const title = addTitle(entities, pair[2] ?? '', 0.88, true)
       artistQuery = artistQuery ?? artist
       seedTitle = seedTitle ?? title
     }
@@ -343,7 +356,7 @@ export function resolveMusicEntitiesFromText(text: string): MusicEntityResolutio
     const preferencePair = trimmed.match(/([^《》，。！？?！,.]{1,24})的([^《》，。！？?！,.]{1,40}?)(?:这首|这歌|这个歌|这个首歌|这首歌|这首歌曲|这首作品|这个作品|这首音乐|这个音乐|这个曲子|这首曲子)/i)
     if (preferencePair) {
       const artist = addArtist(entities, preferencePair[1] ?? '', 0.84)
-      const title = addTitle(entities, preferencePair[2] ?? '', 0.84)
+      const title = addTitle(entities, preferencePair[2] ?? '', 0.84, true)
       artistQuery = artistQuery ?? artist
       seedTitle = seedTitle ?? title
     }

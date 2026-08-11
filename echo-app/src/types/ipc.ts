@@ -649,7 +649,17 @@ export interface EchoApi {
     get(city?: string): Promise<{ city: string; condition: string; tempC: number; humidity: number; summary: string } | null>
   }
   listening: {
-    generateSegment(options?: { continuation?: boolean }): Promise<{ text: string; track: Track | null; audioUrl?: string; error?: string; generatedAt: string }>
+    generateSegment(options?: { continuation?: boolean; automatic?: boolean }): Promise<{
+      text: string
+      track: Track | null
+      delivery: 'spoken' | 'silent'
+      density: 'silent' | 'micro' | 'brief' | 'full'
+      sessionId: number
+      audioUrl?: string
+      error?: string
+      generatedAt: string
+    }>
+    endSession(sessionId?: number): Promise<{ ok: boolean }>
   }
   carePings: {
     test(type?: PingType): Promise<{ ok: boolean; message: string }>

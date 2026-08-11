@@ -17,6 +17,13 @@ import { normalizeText, unique, uniqueTracks } from './text'
 import { NeteaseAuthRequiredError } from './errors'
 import { allowsArtistFromCorrection, buildRecommendationMemoryConstraints } from './memoryConstraints'
 import { createRecommendationDeterminismContext, stableInt, stableShuffle, type RecommendationDeterminismContext } from './deterministic'
+import { inferTrackSemanticFallback } from '../semantics'
+import {
+  musicLanguageGenre,
+  musicLanguageSearchTerms,
+  stripMusicLanguageCues,
+  type MusicLanguage,
+} from './language'
 
 const require = createRequire(import.meta.url)
 const netease = require('@neteasecloudmusicapienhanced/api') as Record<string, (query: Record<string, unknown>) => Promise<ApiResponse>>
@@ -98,6 +105,9 @@ function extractSimilarArtistIds(response: ApiResponse, excludedId?: string): st
 
 export const recommendationRecallTestHelpers = {
   extractSimilarArtistIds,
+  buildLanguageSearchQueries,
+  compactIntentQuery,
+  keywordFromIntent,
 }
 
 function extractPlaylistIds(response: ApiResponse): string[] {
@@ -187,20 +197,51 @@ function sceneKeyword(intent: RecommendationIntent, determinism: RecommendationD
   }
 }
 
+function compactIntentQuery(query: string): string {
+  return stripMusicLanguageCues(query)
+    .replace(/(?:适合|合适|贴合|配|根据|按照|按|结合|对应|应景)?(?:今天|今日|现在|当前|当地|外面|这边)?(?:的)?(?:天气|气温|温度)(?:情况)?/gi, ' ')
+    .replace(/(?:帮我|给我|我要|我想|想要|想听|要听|播放|推荐|推|挑|选|来|找|放|整|安排|搞|弄)(?:一首|几首|\d+首|点|些)?/g, ' ')
+    .replace(/歌曲|音乐|作品|曲子|单曲|歌单|歌/g, ' ')
+    .replace(/(?:^|\s)(?:的|呢|吗|吧|呀|啊)(?=\s|$)/g, ' ')
+    .replace(/[，。！？,.!?、:：;；“”"'‘’（）()《》]/g, ' ')
+    .replace(/(?:^|\s)(?:的|呢|吗|吧|呀|啊)(?=\s|$)/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function languageMoodHint(intent: RecommendationIntent): string {
+  if (intent.moods.includes('轻快')) return '轻快'
+  if (intent.moods.includes('治愈')) return '治愈'
+  if (intent.moods.includes('放松') || intent.tempo === 'slow') return '舒缓'
+  if (intent.moods.includes('清醒') || intent.energy === 'high') return '节奏'
+  return ''
+}
+
+function buildLanguageSearchQueries(intent: RecommendationIntent): string[] {
+  const terms = musicLanguageSearchTerms(intent.language)
+  if (terms.length === 0 || intent.seedTitle || intent.artistQuery) return []
+  const mood = languageMoodHint(intent)
+  return unique([
+    ...terms,
+    ...(mood ? terms.slice(0, 2).map((term) => `${term} ${mood}`) : []),
+  ]).slice(0, 5)
+}
+
 function keywordFromIntent(intent: RecommendationIntent, determinism: RecommendationDeterminismContext, context: RecommendationRecallContext): string {
   if (intent.seedTitle) {
     return unique([intent.seedTitle, intent.artistQuery ?? ''].filter(Boolean)).join(' ')
   }
+  const languageKeyword = musicLanguageSearchTerms(intent.language)[0] ?? ''
   const parts = [
     sceneKeyword(intent, determinism, context),
     context.similarityArtistQuery ?? '',
     intent.artistQuery ?? '',
-    intent.language === '粤语' ? '粤语' : intent.language === '英语' ? '欧美' : intent.language === '韩语' ? 'Kpop' : '',
+    languageKeyword,
     intent.moods.includes('放松') || intent.tempo === 'slow' ? '慢歌' : '',
     intent.moods.includes('清醒') || intent.energy === 'high' ? '激昂 节奏 热血' : '',
     intent.scenes.includes('雨天') ? '雨天' : '',
     intent.scenes.includes('夜晚') || intent.scenes.includes('睡前') ? '夜晚' : '',
-    intent.query.replace(/[推荐推来点几首听什么值得适合歌曲音乐作品的呢吗？?]/g, '').trim(),
+    compactIntentQuery(intent.query),
   ].filter(Boolean)
   return parts.join(' ') || '华语流行'
 }
@@ -433,6 +474,29 @@ function netCall(promise: Promise<ApiResponse>, source: RecommendationSource): P
     .catch(() => [])
 }
 
+function withLanguageRecallEvidence(track: Track, language: MusicLanguage): Track {
+  const semantic = track.semantic ?? inferTrackSemanticFallback(track)
+  const genre = musicLanguageGenre(language)
+  return {
+    ...track,
+    semantic: {
+      ...semantic,
+      language,
+      genres: unique([...(genre ? [genre] : []), ...semantic.genres]).slice(0, 3),
+      confidence: Math.max(semantic.confidence, 0.62),
+    },
+  }
+}
+
+function languageSearchCalls(intent: RecommendationIntent, cookie: string): Array<Promise<Track[]>> {
+  if (!intent.language) return []
+  const language = intent.language as MusicLanguage
+  return buildLanguageSearchQueries(intent).map((keywords) => (
+    netCall(netease.cloudsearch({ keywords, type: 1, limit: 30, offset: 0, cookie }), 'search')
+      .then((tracks) => tracks.map((track) => withLanguageRecallEvidence(track, language)))
+  ))
+}
+
 async function fetchCandidatesInternal(intent: RecommendationIntent, signal?: AbortSignal, determinism = createRecommendationDeterminismContext(), context: RecommendationRecallContext = {}): Promise<Track[]> {
   assertRecallActive(signal)
   const cookie = readNeteaseCookie()
@@ -451,6 +515,7 @@ async function fetchCandidatesInternal(intent: RecommendationIntent, signal?: Ab
         netCall(netease.personal_fm({ cookie }), 'fm'),
       ]
   const calls: Array<Promise<Track[]>> = [
+    ...languageSearchCalls(intent, cookie),
     ...sceneCalls,
     ...(intent.seedTitle ? [netCall(netease.cloudsearch({ keywords: keyword, type: 1, limit: 10, offset: 0, cookie }), 'search')] : []),
     ...personalizedCalls,

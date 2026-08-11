@@ -94,6 +94,30 @@ export function containsUnboundQuotedTrackClaim(content: string, tracks: Track[]
   return claims.some(({ claim }) => !tracks.some((track) => trackClaimMatches(track, claim)))
 }
 
+function unquotedLatinTrackClaims(content: string): string[] {
+  const claims: string[] = []
+  const beforeAction = /(?:^|[，。！？；,.!?;\s])([A-Za-z0-9][A-Za-z0-9'’.-]*(?:\s+[A-Za-z0-9][A-Za-z0-9'’.-]*){1,8})(?=.{0,12}(?:先听|听一下|试试|开始放|放着听))/g
+  const afterAction = /(?:先放|播放|换成|推荐|听听|听一下)\s*([A-Za-z0-9][A-Za-z0-9'’.-]*(?:\s+[A-Za-z0-9][A-Za-z0-9'’.-]*){0,8})/g
+  for (const pattern of [beforeAction, afterAction]) {
+    for (const match of content.matchAll(pattern)) {
+      const claim = (match[1] ?? '').trim()
+      if (claim) claims.push(claim)
+    }
+  }
+  return Array.from(new Set(claims))
+}
+
+export function containsUnboundUnquotedTrackClaim(content: string, tracks: Track[]): boolean {
+  const claims = unquotedLatinTrackClaims(content)
+  return claims.some((claim) => {
+    const normalizedClaim = compactTrackText(claim)
+    return !tracks.some((track) => (
+      trackClaimMatches(track, claim)
+      || normalizedClaim === compactTrackText(track.artist)
+    ))
+  })
+}
+
 export function boundTrackClaimContent(tracks: Track[]): string {
   const first = tracks[0]
   if (!first) return '我刚才没拿到能播放的版本，这次先不乱报歌名。你再让我挑一次，我直接把歌放出来。'
@@ -104,7 +128,9 @@ export function boundTrackClaimContent(tracks: Track[]): string {
 
 export function enforceAssistantTrackBinding(content: string, tracks: Track[], expectsMusicAction = true): string {
   if (tracks.length > 0) {
-    return containsUnboundQuotedTrackClaim(content, tracks) ? boundTrackClaimContent(tracks) : content
+    return containsUnboundQuotedTrackClaim(content, tracks) || containsUnboundUnquotedTrackClaim(content, tracks)
+      ? boundTrackClaimContent(tracks)
+      : content
   }
   if (!containsUnboundTrackClaim(content)) return content
   if (!expectsMusicAction && !/(?:放|播放|听听|先听|这首|这歌|《[^》]{1,40}》)/.test(content)) return content

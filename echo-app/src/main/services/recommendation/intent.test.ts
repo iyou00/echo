@@ -483,6 +483,8 @@ describe('recommendation intent entity inference boundaries', () => {
   })
 
   it('lets later explicit positive direction memory override older correction blocks', () => {
+    const positiveAt = new Date().toISOString()
+    const correctionAt = new Date(Date.now() - 86400000).toISOString()
     const profile = {
       artists: [],
       genres: [],
@@ -493,12 +495,12 @@ describe('recommendation intent entity inference boundaries', () => {
       echo_portrait: '',
       profile_meta: {
         incrementalSignals: [
-          { kind: 'like_genre', target: '电子音墙', strength: 0.08, updatedAt: '2026-06-20T08:00:00.000Z' },
+          { kind: 'like_genre', target: '电子音墙', strength: 0.08, updatedAt: positiveAt },
         ],
       },
     } satisfies TasteProfile
     const constraints = buildRecommendationMemoryConstraints(profile, [
-      { kind: 'correction', content: '少推电子音墙，我之前听这个会烦。', weight: 0.9, createdAt: '2026-06-01T08:00:00.000Z' },
+      { kind: 'correction', content: '少推电子音墙，我之前听这个会烦。', weight: 0.9, createdAt: correctionAt },
     ])
     const intent = parseIntent('推荐一首歌')
     const track: Track = {

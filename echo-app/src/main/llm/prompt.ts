@@ -15,11 +15,19 @@ import { buildMemoryEvidencePrompt, buildOperationalTasteSummary } from '../serv
 import { buildSoulPolicyPrompt } from '../skills/soul/policy'
 import { memoryPolicySummary } from '../skills/memory/policy'
 import type { TodayTrackEvent } from '../db/tracks'
+import type { CompanionResponseBrief } from '../services/chat/companionResponse'
+import { compactCompanionProfile } from '../services/chat/companionStrategy'
+import { createDefaultCompanionProfile, type CompanionProfile, type CompanionResponseStrategy } from '../services/chat/companionTypes'
+import type { RecommendationWeatherContext } from '../services/chat/weatherRecommendation'
 
 export interface ChatContextOptions {
   recommendationCandidates?: Track[]
   neteaseAuthRequired?: boolean
   followUpQuestion?: TasteQuestion | null
+  companionResponseBrief?: CompanionResponseBrief | null
+  responseStrategy?: CompanionResponseStrategy
+  companionProfile?: CompanionProfile
+  weatherContext?: RecommendationWeatherContext
 }
 
 function formatCandidates(tracks: Track[]): string {
@@ -70,6 +78,10 @@ export function buildChatContext(userText: string, options: ChatContextOptions =
   const musicSession = buildTodayMusicSessionSummary()
   const sceneContext = buildCurrentSceneContext()
   const activeEvents = loadActiveEvents(8)
+  const companionResponseBrief = options.companionResponseBrief ?? null
+  const companionProfile = options.companionProfile ?? createDefaultCompanionProfile()
+  const responseStrategy = options.responseStrategy ?? null
+  const weatherContext = options.weatherContext
   const candidatesBlock = candidates.length > 0
     ? `
 
@@ -104,6 +116,16 @@ ${formatCandidates(candidates)}
 ${safePromptJson({ question: options.followUpQuestion.content })}
 </taste_curiosity>`
     : ''
+  const weatherBlock = weatherContext
+    ? `
+
+<weather_context>
+${safePromptJson(weatherContext)}
+</weather_context>
+<weather_context_contract>
+weather_context 是本轮已经执行过的真实天气查询。available=true 时可以自然提到 city、condition、summary、tempC、humidity，并说明歌曲为什么适合；必须忠实保留这些事实。available=false 时只说明天气暂时不可用，继续根据用户其余条件选歌。不要自行补充天气、城市或温度。
+</weather_context_contract>`
+    : ''
 
   const messages: LlmMessage[] = [
     {
@@ -122,9 +144,24 @@ ${memoryPolicySummary()}
 
 ${buildMemoryEvidencePrompt(profile)}
 
+<companion_profile>
+${safePromptJson(compactCompanionProfile(companionProfile))}
+</companion_profile>
+<companion_profile_contract>
+这是用户对相处方式的长期倾向。置信度低时保持 Echo 默认人格；当前原话和明确纠正优先。
+</companion_profile_contract>
+
+${responseStrategy ? `<response_strategy>
+${safePromptJson(responseStrategy)}
+</response_strategy>
+<response_strategy_contract>
+这是首轮 LLM 为本轮选择的表达策略。先落实 mode 和 vulnerability，再用 warmth、playfulness、directness、initiative、verbosity 调整分寸。不要展示字段名、分数、理由码或内部机制。
+playful_tease 只允许一句善意调侃，随后落到具体关心；serious_care 禁止调侃；quiet_company 少建议、少追问；practical 给一个轻量可执行动作。
+</response_strategy_contract>` : ''}
+
 <current_context>
 - 当前时间:${(() => { const n = new Date(); const w = ['周日','周一','周二','周三','周四','周五','周六']; return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')} ${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')} ${w[n.getDay()]}` })()}
-</current_context>${candidatesBlock}${candidateContractBlock}${authBlock}${curiosityBlock}
+</current_context>${weatherBlock}${candidatesBlock}${candidateContractBlock}${authBlock}${curiosityBlock}
 <active_events>
 ${safePromptJson(activeEvents.map((event) => ({
   content: event.content,
@@ -143,6 +180,14 @@ kind=context 表示今天仍在持续的短期状态,只能写成“今天/这�
 ${escapePromptData(musicSession)}
 </today_music_session>
 ${sceneContext}
+${companionResponseBrief ? `<companion_response_brief>
+${safePromptJson(companionResponseBrief)}
+</companion_response_brief>
+<companion_response_contract>
+companion_response_brief 是本轮语气建议。结合用户原话、当前场景和关系感自然表达，不要复述 tone、pattern、次数、规则或内部判断。
+playful_concern 允许一句熟人式调侃，随后落到真实关心或可执行动作；serious_care 全程认真、平静。
+存在 response_strategy 时，以经过用户偏好和安全校准的 response_strategy 为最终语气依据。
+</companion_response_contract>` : ''}
 ${recentSeal ? `
 <recent_day_seal>
 ${escapePromptData(recentSeal)}

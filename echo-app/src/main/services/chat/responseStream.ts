@@ -1,6 +1,6 @@
 import type { TasteQuestion, Track } from '../../../types/ipc'
 import type { getSettings } from '../../db/settings'
-import { LlmError, streamChat } from '../../llm/client'
+import { completeChat, LlmError, streamChat } from '../../llm/client'
 import { buildChatContext } from '../../llm/prompt'
 import { SYSTEM_CONTEXT_TAGS, escapeRegExp, stripKnownSystemBlocks } from '../../llm/outputSanitize'
 import { safePromptJson } from '../../llm/promptData'
@@ -9,6 +9,9 @@ import { checkOutputSafe } from '../safety/output-filter'
 import { pickJailbreakResponse } from '../safety/jailbreak-filter'
 import type { PendingQuestionReplyCapture } from '../tasteQuestionScheduler'
 import { buildSoulPolicyPrompt } from '../../skills/soul/policy'
+import type { CompanionResponseBrief } from './companionResponse'
+import type { CompanionProfile, CompanionResponseStrategy } from './companionTypes'
+import type { RecommendationWeatherContext } from './weatherRecommendation'
 
 export interface ChatStreamActive {
   readonly canceled: boolean
@@ -191,6 +194,7 @@ export async function streamPendingAnswerReply(
   active: ChatStreamActive,
   settings: ReturnType<typeof getSettings>,
   emitChunk?: ChatChunkEmitter,
+  companionResponseBrief?: CompanionResponseBrief | null,
 ): Promise<string> {
   const fallback = pendingAnswerFallback(capture)
   let content = ''
@@ -211,6 +215,11 @@ export async function streamPendingAnswerReply(
 2. 不推荐新歌,不换歌,不输出歌曲卡片。
 3. 自然回应用户说出的偏好,语气像朋友。
 4. 40-90 个中文字。
+${companionResponseBrief ? `5. 结合 companion_response_brief 先回应用户当前状态,再确认这次偏好。
+
+<companion_response_brief>
+${safePromptJson(companionResponseBrief)}
+</companion_response_brief>` : ''}
 动态输入在下一条 user JSON 里。`,
       },
       {
@@ -254,6 +263,10 @@ export async function streamChatReply(options: {
   candidates: Track[]
   authRequired: boolean
   followUpQuestion: TasteQuestion | null
+  companionResponseBrief?: CompanionResponseBrief | null
+  responseStrategy?: CompanionResponseStrategy
+  companionProfile?: CompanionProfile
+  weatherContext?: RecommendationWeatherContext
   emitChunk?: ChatChunkEmitter
 }): Promise<string> {
   let content = ''
@@ -262,6 +275,10 @@ export async function streamChatReply(options: {
     recommendationCandidates: options.candidates,
     neteaseAuthRequired: options.authRequired,
     followUpQuestion: options.followUpQuestion,
+    companionResponseBrief: options.companionResponseBrief,
+    responseStrategy: options.responseStrategy,
+    companionProfile: options.companionProfile,
+    weatherContext: options.weatherContext,
   })
   try {
     for await (const chunk of streamChat(options.settings, messages, { signal: options.active.signal, maxTokens: 300 })) {
@@ -269,6 +286,20 @@ export async function streamChatReply(options: {
       content += chunk.content
       const displayChunk = sanitizeChunk(chunk.content)
       if (displayChunk) options.emitChunk?.(displayChunk)
+    }
+
+    if (!content.trim() && !options.active.canceled) {
+      try {
+        content = await completeChat(options.settings, messages, {
+          signal: options.active.signal,
+          maxTokens: 300,
+          temperature: 0.8,
+        })
+        const retryDisplay = sanitizeAssistantOutput(content)
+        if (retryDisplay) options.emitChunk?.(retryDisplay)
+      } catch (error) {
+        recordChatStreamError(error)
+      }
     }
   } catch (error) {
     if (content.trim()) {

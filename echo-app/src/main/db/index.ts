@@ -338,6 +338,10 @@ export function resetDatabase(): void {
   try {
     database.transaction(() => {
       database.exec(`
+        DELETE FROM listening_segments;
+        DELETE FROM listening_sessions;
+        DELETE FROM companion_signal_events;
+        DELETE FROM companion_profiles;
         DELETE FROM taste_question_prompts;
         DELETE FROM taste_questions;
         DELETE FROM playlists_imported;

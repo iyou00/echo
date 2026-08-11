@@ -5,6 +5,7 @@ import { getWeather } from '../weather/client'
 import { listeningSegmentAgent } from '../services/listeningAgent'
 import { voiceLineAgent } from '../services/voiceAgent'
 import { runAgent } from '../runtime/runtime'
+import { endListeningSession } from '../db/listening'
 
 export function registerVoiceIpc(): void {
   ipcMain.handle('voice:generate', () => runAgent(voiceLineAgent, undefined, {
@@ -17,7 +18,7 @@ export function registerVoiceIpc(): void {
   ipcMain.handle('tts:synthesize', (_event, text: string) => synthesize(text))
   ipcMain.handle('tts:test', () => testTts())
   ipcMain.handle('weather:get', (_event, city?: string) => getWeather(city || getSettings().user.city))
-  ipcMain.handle('listening:generateSegment', (_event, options?: { continuation?: boolean }) => runAgent(listeningSegmentAgent, options, {
+  ipcMain.handle('listening:generateSegment', (_event, options?: { continuation?: boolean; automatic?: boolean }) => runAgent(listeningSegmentAgent, options, {
     phase: 'generate',
     total: 4,
     cancellable: true,
@@ -25,4 +26,9 @@ export function registerVoiceIpc(): void {
     isFailureResult: (segment) => Boolean(segment.error),
     messageForResult: (segment) => segment.error ?? '回声片段已生成。',
   }))
+  ipcMain.handle('listening:endSession', (_event, sessionId?: number) => {
+    if (sessionId !== undefined && (!Number.isInteger(sessionId) || sessionId <= 0)) return { ok: false }
+    endListeningSession(sessionId)
+    return { ok: true }
+  })
 }

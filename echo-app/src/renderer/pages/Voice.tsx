@@ -4,7 +4,7 @@ import type { AppPageProps } from '../appState'
 import { getVoiceLongAbsence, markVoiceSeen, pickVoiceIdleGreeting } from '../../data/voice-idle-greetings'
 import { sameTrack, trackIdentity } from '../../shared/trackIdentity'
 import { friendlyOperationError } from '../../shared/runtimeRecovery'
-import { shouldAcceptVoiceContinuousTrigger, shouldTriggerNextVoiceSegment } from './voiceContinuous'
+import { nextVoiceFailureAction, shouldAcceptVoiceContinuousTrigger, shouldTriggerNextVoiceSegment } from './voiceContinuous'
 
 interface VoicePageProps extends AppPageProps {
   echo: EchoApi
@@ -110,6 +110,7 @@ export function VoicePage({
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null)
   const rafRef = useRef<number | null>(null)
   const musicTimerRef = useRef<number | null>(null)
+  const failureRetryTimerRef = useRef<number | null>(null)
   const restoreVolumeRef = useRef(100)
   const volumeRestoreArmedRef = useRef(false)
   const musicStartedRef = useRef(false)
@@ -122,6 +123,12 @@ export function VoicePage({
   const speakRef = useRef<(automatic?: boolean) => Promise<void>>()
   const speakingLockRef = useRef(false)
   const autoFailureCountRef = useRef(0)
+  const sessionIdRef = useRef(0)
+  const currentAutomaticRef = useRef(false)
+  const backgroundPlaybackFailedRef = useRef(false)
+  const recoveringTtsRef = useRef(false)
+  const isActiveRef = useRef(isActive)
+  const voiceContinuousRef = useRef(voiceContinuous)
   const lastContinuousTriggerAtRef = useRef(0)
   const lastAutoStartTokenRef = useRef(0)
   const prevAudioUrlRef = useRef('')
@@ -166,8 +173,71 @@ export function VoicePage({
   }, [playbackState])
 
   useEffect(() => {
+    isActiveRef.current = isActive
+  }, [isActive])
+
+  useEffect(() => {
+    voiceContinuousRef.current = voiceContinuous
+  }, [voiceContinuous])
+
+  useEffect(() => {
     statusRef.current = status
   }, [status])
+
+  const endCurrentListeningSession = useCallback(async () => {
+    const sessionId = sessionIdRef.current
+    sessionIdRef.current = 0
+    try {
+      await echo.listening.endSession(sessionId > 0 ? sessionId : undefined)
+    } catch (error) {
+      if (sessionId > 0 && sessionIdRef.current === 0) sessionIdRef.current = sessionId
+      throw error
+    }
+  }, [echo])
+
+  function markVoiceRunSucceeded(): void {
+    autoFailureCountRef.current = 0
+    backgroundPlaybackFailedRef.current = false
+    if (failureRetryTimerRef.current) {
+      window.clearTimeout(failureRetryTimerRef.current)
+      failureRetryTimerRef.current = null
+    }
+  }
+
+  function failVoiceRun(error: unknown): void {
+    musicStartedRef.current = false
+    backgroundPlaybackFailedRef.current = false
+    const decision = nextVoiceFailureAction({
+      automatic: currentAutomaticRef.current,
+      continuous: voiceContinuousRef.current,
+      previousFailures: autoFailureCountRef.current,
+    })
+    autoFailureCountRef.current = decision.failureCount
+    if (decision.action === 'retry') {
+      setNotice('刚才没接上，我再试一次。')
+      setProgress(1)
+      setStatus('done')
+      if (failureRetryTimerRef.current) window.clearTimeout(failureRetryTimerRef.current)
+      failureRetryTimerRef.current = window.setTimeout(() => {
+        failureRetryTimerRef.current = null
+        if (!isActiveRef.current || !voiceContinuousRef.current || statusRef.current !== 'done') return
+        triggerContinuousSegment()
+      }, 2000)
+      return
+    }
+    if (decision.action === 'stop') {
+      if (failureRetryTimerRef.current) window.clearTimeout(failureRetryTimerRef.current)
+      failureRetryTimerRef.current = null
+      setVoiceContinuous(false)
+      voiceContinuousRef.current = false
+      void endCurrentListeningSession().catch(() => undefined)
+      setNotice('我先停一下，连续两次都没接上。')
+      setStatus('error')
+      return
+    }
+    setNotice(voiceFriendlyError(error))
+    setStatus('error')
+  }
 
   function triggerContinuousSegment(): void {
     const now = Date.now()
@@ -175,6 +245,15 @@ export function VoicePage({
     lastContinuousTriggerAtRef.current = now
     speakRef.current?.(true).catch(() => undefined)
   }
+
+  useEffect(() => {
+    if (isActive) return
+    if (failureRetryTimerRef.current) {
+      window.clearTimeout(failureRetryTimerRef.current)
+      failureRetryTimerRef.current = null
+    }
+    if (sessionIdRef.current > 0) void endCurrentListeningSession().catch(() => undefined)
+  }, [endCurrentListeningSession, isActive])
 
   useEffect(() => {
     if (!isActive) return undefined
@@ -221,11 +300,19 @@ export function VoicePage({
     if (statusRef.current === 'idle' && !voiceContinuous) return
 
     voiceBaselinePlaybackKeyRef.current = ''
-    if (voiceContinuous) setVoiceContinuous(false)
+    if (voiceContinuous) {
+      setVoiceContinuous(false)
+      voiceContinuousRef.current = false
+      void endCurrentListeningSession().catch(() => undefined)
+    }
     fadeRunRef.current += 1
     if (musicTimerRef.current) {
       window.clearTimeout(musicTimerRef.current)
       musicTimerRef.current = null
+    }
+    if (failureRetryTimerRef.current) {
+      window.clearTimeout(failureRetryTimerRef.current)
+      failureRetryTimerRef.current = null
     }
     stopTtsWave(true)
     audioRef.current?.pause()
@@ -236,17 +323,19 @@ export function VoicePage({
     setNotice('')
     setStatus('idle')
     restorePlaybackVolume().catch((error) => console.warn('[Voice] restore volume failed (playback change)', error))
-  }, [echo, isActive, playbackState, restorePlaybackVolume, setVoiceContinuous, voiceContinuous])
+  }, [echo, endCurrentListeningSession, isActive, playbackState, restorePlaybackVolume, setVoiceContinuous, voiceContinuous])
 
   useEffect(() => () => {
     fadeRunRef.current += 1
     if (musicTimerRef.current) window.clearTimeout(musicTimerRef.current)
+    if (failureRetryTimerRef.current) window.clearTimeout(failureRetryTimerRef.current)
     if (rafRef.current) window.cancelAnimationFrame(rafRef.current)
     clearCurrentAudioUrl()
     audioRef.current?.pause()
     audioContextRef.current?.close().catch(() => undefined)
     restorePlaybackVolume().catch((error) => console.warn('[Voice] restore volume failed (unmount)', error))
-  }, [echo, restorePlaybackVolume])
+    void endCurrentListeningSession().catch(() => undefined)
+  }, [echo, endCurrentListeningSession, restorePlaybackVolume])
 
   function stopTtsWave(reset = false) {
     if (rafRef.current) {
@@ -308,19 +397,66 @@ export function VoicePage({
       musicStartedRef.current = true
       await refreshQueue()
     }
+    markVoiceRunSucceeded()
   }
 
   function scheduleBackgroundMusic(nextTrack: Track | null) {
     if (musicTimerRef.current) window.clearTimeout(musicTimerRef.current)
     musicTimerRef.current = window.setTimeout(() => {
-      startBackgroundMusic(nextTrack).catch(() => undefined)
+      startBackgroundMusic(nextTrack).catch(() => {
+        backgroundPlaybackFailedRef.current = true
+        setNotice('歌曲刚才没接上，等这句话说完我再试一次。')
+      })
     }, 800)
+  }
+
+  async function recoverFromTtsPlaybackFailure(): Promise<void> {
+    if (recoveringTtsRef.current) return
+    recoveringTtsRef.current = true
+    try {
+      if (musicTimerRef.current) {
+        window.clearTimeout(musicTimerRef.current)
+        musicTimerRef.current = null
+      }
+      clearCurrentAudioUrl()
+      setProgress(1)
+      const nextTrack = trackRef.current
+      if (!nextTrack) {
+        markVoiceRunSucceeded()
+        setNotice('语音播放失败，文字已经保留。')
+        setStatus('text-only-done')
+        return
+      }
+      if (musicStartedRef.current) {
+        markVoiceRunSucceeded()
+        setNotice('语音播放失败，歌曲还在继续。')
+        setStatus('text-only-done')
+        return
+      }
+      const next = await echo.playback.play(nextTrack)
+      setPlaybackState(next)
+      musicStartedRef.current = true
+      volumeRestoreArmedRef.current = false
+      markVoiceRunSucceeded()
+      await refreshQueue()
+      setNotice('语音播放失败，歌曲已经接上。')
+      setStatus('text-only-done')
+    } catch (error) {
+      failVoiceRun(error)
+    } finally {
+      recoveringTtsRef.current = false
+    }
   }
 
   async function finishSpeaking() {
     const runId = fadeRunRef.current
     stopTtsWave()
     setProgress(1)
+    if (backgroundPlaybackFailedRef.current) {
+      await restorePlaybackVolume().catch(() => undefined)
+      failVoiceRun(new Error('背景音乐播放失败'))
+      return
+    }
     setStatus('done')
     const currentVolume = await echo.playback.getVolume().catch(() => 30)
       if (fadeRunRef.current !== runId) return
@@ -338,6 +474,14 @@ export function VoicePage({
     if (statusRef.current === 'generating' || statusRef.current === 'speaking') return
     speakingLockRef.current = true
     try {
+      currentAutomaticRef.current = automatic
+      backgroundPlaybackFailedRef.current = false
+      recoveringTtsRef.current = false
+      if (failureRetryTimerRef.current) {
+        window.clearTimeout(failureRetryTimerRef.current)
+        failureRetryTimerRef.current = null
+      }
+      if (!automatic) autoFailureCountRef.current = 0
       fadeRunRef.current += 1
       if (musicTimerRef.current) window.clearTimeout(musicTimerRef.current)
       stopTtsWave(true)
@@ -351,10 +495,29 @@ export function VoicePage({
       restoreVolumeRef.current = await echo.playback.getVolume()
       volumeRestoreArmedRef.current = true
 
-      const segment = await echo.listening.generateSegment({ continuation: automatic || continuation })
-      autoFailureCountRef.current = 0
+      const segment = await echo.listening.generateSegment({ continuation: automatic || continuation, automatic })
+      sessionIdRef.current = segment.sessionId
+      if (!isActiveRef.current || (automatic && !voiceContinuousRef.current)) {
+        await endCurrentListeningSession().catch(() => undefined)
+        setStatus('idle')
+        return
+      }
       setText(segment.text)
       trackRef.current = segment.track
+      if (segment.delivery === 'silent') {
+        setText('')
+        if (segment.track) {
+          const next = await echo.playback.play(segment.track)
+          setPlaybackState(next)
+          musicStartedRef.current = true
+          await refreshQueue()
+        }
+        markVoiceRunSucceeded()
+        volumeRestoreArmedRef.current = false
+        setProgress(1)
+        setStatus('done')
+        return
+      }
       if (!segment.audioUrl) {
         setNotice(friendlyOperationError(segment.error, '我现在说不出话来，但文字还在。'))
         if (segment.track) {
@@ -363,6 +526,7 @@ export function VoicePage({
           musicStartedRef.current = true
           await refreshQueue()
         }
+        markVoiceRunSucceeded()
         setProgress(1)
         setStatus('text-only-done')
         return
@@ -370,22 +534,10 @@ export function VoicePage({
       setCurrentAudioUrl(segment.audioUrl)
       setStatus('speaking')
       window.setTimeout(() => audioRef.current?.play().catch(() => {
-        setNotice('语音播放失败,文字已经保留。')
-        setProgress(1)
-        setStatus('text-only-done')
+        void recoverFromTtsPlaybackFailure()
       }), 80)
     } catch (error) {
-      if (automatic) {
-        autoFailureCountRef.current += 1
-        if (autoFailureCountRef.current >= 2) {
-          setVoiceContinuous(false)
-          setNotice('我先停一下，刚才没接上。')
-          setStatus('error')
-          return
-        }
-      }
-      setNotice(voiceFriendlyError(error))
-      setStatus('error')
+      failVoiceRun(error)
     } finally {
       speakingLockRef.current = false
     }
@@ -426,13 +578,30 @@ export function VoicePage({
 
   function backToChat() {
     setVoiceContinuous(false)
+    voiceContinuousRef.current = false
+    void endCurrentListeningSession().catch(() => undefined)
     voiceBaselinePlaybackKeyRef.current = ''
     fadeRunRef.current += 1
     if (musicTimerRef.current) window.clearTimeout(musicTimerRef.current)
+    if (failureRetryTimerRef.current) {
+      window.clearTimeout(failureRetryTimerRef.current)
+      failureRetryTimerRef.current = null
+    }
     stopTtsWave(true)
     audioRef.current?.pause()
     restorePlaybackVolume().catch((error) => console.warn('[Voice] restore volume failed (backToChat)', error))
     navigate('chat')
+  }
+
+  function toggleContinuousListening() {
+    const next = !voiceContinuous
+    setVoiceContinuous(next)
+    voiceContinuousRef.current = next
+    if (!next) void endCurrentListeningSession().catch(() => undefined)
+    if (!next && failureRetryTimerRef.current) {
+      window.clearTimeout(failureRetryTimerRef.current)
+      failureRetryTimerRef.current = null
+    }
   }
 
   return (
@@ -445,6 +614,7 @@ export function VoicePage({
         }}
         onPlay={() => {
           startTtsWave().catch(() => undefined)
+          if (!trackRef.current) markVoiceRunSucceeded()
           if (playbackState.current) {
             const runId = fadeRunRef.current
             fadeVolume(echo, restoreVolumeRef.current, 30, 800, setPlaybackState, () => fadeRunRef.current !== runId).catch(() => undefined)
@@ -454,6 +624,9 @@ export function VoicePage({
         onTimeUpdate={(event) => {
           const duration = event.currentTarget.duration || Math.max(4, text.length * 0.12)
           setProgress(Math.min(1, event.currentTarget.currentTime / duration))
+        }}
+        onError={() => {
+          if (statusRef.current === 'speaking') void recoverFromTtsPlaybackFailure()
         }}
         onEnded={() => finishSpeaking().catch(() => setStatus('done'))}
       />
@@ -509,7 +682,7 @@ export function VoicePage({
             {notice && <div className="voice-notice">{notice}</div>}
             <div className="voice-foot">
               <div className="voice-actions">
-                <button className={voiceContinuous ? 'exit-btn voice-loop active' : 'exit-btn voice-loop'} type="button" onClick={() => setVoiceContinuous(!voiceContinuous)}>
+                <button className={voiceContinuous ? 'exit-btn voice-loop active' : 'exit-btn voice-loop'} type="button" onClick={toggleContinuousListening}>
                   连 续 回 声
                 </button>
                 <button className="exit-btn" type="button" onClick={() => { void speak(false, true) }} disabled={status === 'speaking'}>再 来 一 次</button>

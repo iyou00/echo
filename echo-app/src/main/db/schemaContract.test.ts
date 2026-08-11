@@ -19,6 +19,11 @@ describe('database schema contract', () => {
     expect(migrationsSource).toContain("name: 'remove_user_id_defaults'")
     expect(migrationsSource).toContain("name: 'separate_explicit_feedback_from_playback_counts'")
     expect(migrationsSource).toContain("name: 'backfill_settings_first_used_at'")
+    expect(migrationsSource).toContain("name: 'continuous_listening_sessions'")
+    expect(migrationsSource).toContain("name: 'continuous_listening_context'")
+    expect(migrationsSource).toContain('CREATE TABLE IF NOT EXISTS listening_sessions')
+    expect(migrationsSource).toContain('CREATE TABLE IF NOT EXISTS listening_segments')
+    expect(migrationsSource).toContain('consumed_event_keys_json')
 
     for (const table of [
       'scene_sessions',

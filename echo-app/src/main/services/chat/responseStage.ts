@@ -24,28 +24,10 @@ import {
 } from './sessionContext'
 import type { ReplyFn } from './sendPipelineTypes'
 import { clearPendingDirectSongState } from './pendingIntents'
-import { selectTracksForChatResponse } from './trackSelection'
-import { trackLabel } from './trackFeedback'
-import { boundTrackClaimContent, enforceAssistantTrackBinding } from './pipelineContract'
-
-function mentionedTrackCount(content: string, tracks: Track[]): number {
-  const normalized = content.toLowerCase().replace(/\s+/g, '')
-  return tracks.filter((track) => {
-    const title = track.title.toLowerCase().replace(/\s+/g, '')
-    const artist = track.artist.toLowerCase().replace(/\s+/g, '')
-    return Boolean(title && normalized.includes(title)) || Boolean(artist && normalized.includes(artist) && title && normalized.includes(`《${title}》`))
-  }).length
-}
-
-function boundMusicActionContent(content: string, tracks: Track[]): string {
-  const first = tracks[0]
-  if (!first) return content
-  const requiredMentionCount = Math.min(tracks.length, 3)
-  if (mentionedTrackCount(content, tracks) >= requiredMentionCount) return content
-  if (tracks.length > 1) return boundTrackClaimContent(tracks)
-  const reason = first.reason || first.echoNote
-  return `行，先放${trackLabel(first)}。${reason ? ` ${reason}` : '先听开头。'}`
-}
+import { enforceAssistantTrackBinding } from './pipelineContract'
+import { applyCompanionResponseStyle, type CompanionResponseBrief } from './companionResponse'
+import type { CompanionProfile, CompanionResponseStrategy } from './companionTypes'
+import type { RecommendationWeatherContext } from './weatherRecommendation'
 
 export const responseStageTestHelpers = {
   enforceTrackClaimContract: enforceAssistantTrackBinding,
@@ -59,6 +41,26 @@ function expectsMusicAction(intent: CandidateStageReady['recommendationIntent'],
   return hasMusicActionIntent(intent) || candidates.length > 0
 }
 
+function emptyModelReply(
+  userText: string,
+  tracks: Track[],
+  companionResponseBrief: CompanionResponseBrief | null = null,
+  responseStrategy?: CompanionResponseStrategy,
+): string {
+  if (tracks.length === 0) {
+    return applyCompanionResponseStyle('我刚才走神了一下。你接着说，我在听。', userText, companionResponseBrief, responseStrategy)
+  }
+
+  const picked = tracks.length === 1 ? '我给你挑了这首' : `我给你挑了${tracks.length}首`
+  let content = `${picked}，先听一会儿。`
+  if (/被骂|挨骂|受气|委屈/.test(userText)) {
+    content = `挨骂这一下确实挺堵心的。先缓口气，${picked}偏轻快的，听着把这股闷气散一散。`
+  } else if (/心情不好|难过|低落|烦躁|压抑|想哭|emo/i.test(userText)) {
+    content = `心情不好的时候，先别逼自己一直绷着。${picked}，听一会儿，看看能不能让脑子松一点。`
+  }
+  return applyCompanionResponseStyle(content, userText, companionResponseBrief, responseStrategy)
+}
+
 export interface RecommendationResponseStageInput {
   trimmed: string
   settings: Settings
@@ -67,6 +69,10 @@ export interface RecommendationResponseStageInput {
   pendingReply: PendingQuestionReplyCapture
   candidate: CandidateStageReady
   currentPlaybackTrack: Track | null | undefined
+  companionResponseBrief?: CompanionResponseBrief | null
+  responseStrategy?: CompanionResponseStrategy
+  companionProfile?: CompanionProfile
+  weatherContext?: RecommendationWeatherContext
   emitChunk(chunk: string): void
   reply: ReplyFn
   attachSceneToTracks(tracks: Track[]): Track[]
@@ -82,6 +88,10 @@ export async function runRecommendationResponseStage(input: RecommendationRespon
     pendingReply,
     candidate,
     currentPlaybackTrack,
+    companionResponseBrief = null,
+    responseStrategy,
+    companionProfile,
+    weatherContext,
     emitChunk,
     reply,
     attachSceneToTracks,
@@ -91,11 +101,9 @@ export async function runRecommendationResponseStage(input: RecommendationRespon
     recommendationIntent,
     requested,
     targetCount,
-    countExplicit,
     guardedCandidates,
     authRequired,
     excludeCurrentTrack,
-    entityConstraint,
   } = candidate
 
   const tracks: Track[] = []
@@ -104,42 +112,32 @@ export async function runRecommendationResponseStage(input: RecommendationRespon
     : guardedCandidates
   const playableCandidates = effectiveCandidates.filter(hasPlayableUrl)
   const musicActionExpected = expectsMusicAction(recommendationIntent, playableCandidates)
+  const selectedCandidates = musicActionExpected ? playableCandidates.slice(0, targetCount) : []
+  tracks.push(...selectedCandidates)
   const started = Date.now()
   let content = ''
   let followUpQuestion: TasteQuestion | null = null
 
   try {
     runtimeReport?.({ phase: 'stream', current: 4, total: 5, message: '生成聊天回复' })
-    generateDynamicTasteQuestions(trimmed, playableCandidates)
-    followUpQuestion = pendingReply.action !== 'none' ? null : pickTasteFollowUpQuestion(trimmed, playableCandidates)
+    generateDynamicTasteQuestions(trimmed, selectedCandidates)
+    followUpQuestion = pendingReply.action !== 'none' ? null : pickTasteFollowUpQuestion(trimmed, selectedCandidates)
     content = sanitizeAssistantOutput(await streamChatReply({
       userText: trimmed,
       settings,
       active,
-      candidates: playableCandidates,
+      candidates: selectedCandidates,
       authRequired,
       followUpQuestion,
+      companionResponseBrief,
+      responseStrategy,
+      companionProfile,
+      weatherContext,
       emitChunk,
     }))
 
-    tracks.push(...await selectTracksForChatResponse({
-      content,
-      candidates: playableCandidates,
-      targetCount,
-      explicit: countExplicit,
-      authRequired,
-      entityConstraint,
-      signal,
-    }))
-    if (musicActionExpected && tracks.length === 0 && playableCandidates.length > 0) {
-      tracks.push(...playableCandidates.slice(0, targetCount))
-    }
-    if (musicActionExpected && tracks.length > 0) {
-      content = boundMusicActionContent(content, tracks)
-    }
-
     if (!content.trim()) {
-      content = tracks.length > 0 ? '我先给你挑这首。' : '(没说话——我先想想,你接着说)'
+      content = emptyModelReply(trimmed, tracks, companionResponseBrief, responseStrategy)
     }
     if (requested.overLimit && tracks.length > 0 && !content.includes(OVER_LIMIT_RECOMMENDATION_LINE)) {
       content = `${OVER_LIMIT_RECOMMENDATION_LINE}${content ? ` ${content}` : ''}`
@@ -148,11 +146,15 @@ export async function runRecommendationResponseStage(input: RecommendationRespon
     if (signal.aborted) throw error
     followUpQuestion = null
     recordChatStreamError(error)
-    if (playableCandidates.length > 0) {
-      tracks.push(...playableCandidates.slice(0, targetCount))
-      content = fallbackRecommendationContent(tracks, OVER_LIMIT_RECOMMENDATION_LINE, requested.overLimit)
+    if (tracks.length > 0) {
+      content = applyCompanionResponseStyle(
+        fallbackRecommendationContent(tracks, OVER_LIMIT_RECOMMENDATION_LINE, requested.overLimit),
+        trimmed,
+        companionResponseBrief,
+        responseStrategy,
+      )
     } else {
-      content = friendlyError(error)
+      content = applyCompanionResponseStyle(friendlyError(error), trimmed, companionResponseBrief, responseStrategy)
     }
     emitChunk(content)
   }
@@ -181,6 +183,7 @@ export async function runRecommendationResponseStage(input: RecommendationRespon
     hints: authRequired ? { neteaseAuthRequired: true } : undefined,
     persistTracks: true,
     expectsMusicAction: musicActionExpected,
+    responseStrategy,
   })
   recordFollowUpQuestionAsked(followUpQuestion, result.message.id)
   return result

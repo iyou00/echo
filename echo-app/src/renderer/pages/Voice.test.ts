@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Track } from '../../types/ipc'
-import { shouldAcceptVoiceContinuousTrigger, shouldTriggerNextVoiceSegment } from './voiceContinuous'
+import { nextVoiceFailureAction, shouldAcceptVoiceContinuousTrigger, shouldTriggerNextVoiceSegment } from './voiceContinuous'
 
 describe('voice continuous playback boundaries', () => {
   it('continues after a text-only segment when no background music started', () => {
@@ -126,5 +126,17 @@ describe('voice continuous playback boundaries', () => {
     expect(shouldAcceptVoiceContinuousTrigger(0, 1000)).toBe(true)
     expect(shouldAcceptVoiceContinuousTrigger(1000, 1800)).toBe(false)
     expect(shouldAcceptVoiceContinuousTrigger(1000, 2600)).toBe(true)
+  })
+
+  it('retries one automatic failure and stops after the second', () => {
+    expect(nextVoiceFailureAction({ automatic: true, continuous: true, previousFailures: 0 })).toEqual({
+      action: 'retry',
+      failureCount: 1,
+    })
+    expect(nextVoiceFailureAction({ automatic: true, continuous: true, previousFailures: 1 })).toEqual({
+      action: 'stop',
+      failureCount: 2,
+    })
+    expect(nextVoiceFailureAction({ automatic: false, continuous: true, previousFailures: 0 }).action).toBe('error')
   })
 })

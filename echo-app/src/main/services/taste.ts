@@ -23,6 +23,7 @@ import { buildSoulPolicyPrompt } from '../skills/soul/policy'
 import { inferTrackSemanticFallback } from './semantics'
 import { buildMemoryEvidencePrompt, formatAvoidedPattern } from './memoryEvidence'
 import { parseIntent, type RecommendationIntent } from './recommendation/intent'
+import { musicLanguageGenre } from './recommendation/language'
 
 interface ArtistSeed {
   genre?: string[]
@@ -119,11 +120,7 @@ function addWeighted(counts: Map<string, number>, key: string, value: number): v
 
 function normalizedGenre(genre: string, language?: string): string {
   if (genre === '流行') {
-    if (language === '粤语') return '粤语流行'
-    if (language === '英语') return '欧美流行'
-    if (language === '韩语') return 'K-pop'
-    if (language === '日语') return '日语流行'
-    return '华语流行'
+    return musicLanguageGenre(language) ?? '华语流行'
   }
   if (/r&b/i.test(genre)) return 'Pop / R&B'
   return genre

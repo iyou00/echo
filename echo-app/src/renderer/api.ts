@@ -1168,10 +1168,16 @@ const mockEcho: EchoApi = {
         return {
           text: options?.continuation ? `接着来。换一首风格接近的，${track.artist}的《${track.title}》。` : `${period}好。这个时间适合把节奏放轻一点,我给你放${track.artist}的《${track.title}》。先让它垫在后面,你不用急着切走。`,
           track,
+          delivery: 'spoken' as const,
+          density: options?.continuation ? 'micro' as const : 'full' as const,
+          sessionId: 1,
           generatedAt: new Date().toISOString(),
           error: '浏览器预览不合成语音',
         }
       })
+    },
+    async endSession() {
+      return { ok: true }
     },
   },
   carePings: {

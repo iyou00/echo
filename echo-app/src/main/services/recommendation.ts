@@ -290,6 +290,13 @@ function constrainByIntent<T extends Track>(tracks: T[], intent: RecommendationI
   })
 }
 
+function constrainByRequestedLanguage<T extends Track>(tracks: T[], intent: RecommendationIntent): T[] {
+  if (!intent.language || intent.seedTitle || intent.artistQuery) return tracks
+  return tracks
+    .map((track) => ({ ...track, semantic: semanticForCandidate(track) }))
+    .filter((track) => track.semantic.language === intent.language) as T[]
+}
+
 export async function pickPlayableCandidatesForTest(
   candidates: Track[],
   intent: RecommendationIntent,
@@ -316,6 +323,7 @@ export const recommendationTestHelpers = {
   memoryConstraintsFingerprint,
   tasteProfileFingerprint,
   trackIdentitySet,
+  constrainByRequestedLanguage,
 }
 
 export async function recommendFromNetease(text: string, override?: IntentOverride, options: RecommendationOptions = {}): Promise<Track[]> {
@@ -368,7 +376,10 @@ export async function recommendFromNetease(text: string, override?: IntentOverri
   const cached = getRecommendationCache(cacheKey)
   reportRecommendationProgress(options, { phase: 'cache', current: 2, total: 5, message: '检查推荐缓存和冷却' })
   if (cached?.tracks.length && !poolSize) {
-    const cachedFreshSource = excludeSimilarityReference(directSongRequest ? directSongCandidates(cached.tracks, intent) : constrainByIntent(cached.tracks, intent))
+    const cachedFreshSource = constrainByRequestedLanguage(
+      excludeSimilarityReference(directSongRequest ? directSongCandidates(cached.tracks, intent) : constrainByIntent(cached.tracks, intent)),
+      intent,
+    )
     const cachedFresh = cachedFreshSource
       .filter(allowedByMemory)
       .filter((track) => !hasTrackIdentity(hardCooldownKeys, track) && (matchesSeedTitle(track) || !hasTrackIdentity(recentKeys, track)))
@@ -384,7 +395,7 @@ export async function recommendFromNetease(text: string, override?: IntentOverri
   const excludeSimilarityArtist = (tracks: Track[]): Track[] => similarityArtistKey
     ? tracks.filter((track) => !normalizeText(track.artist).includes(similarityArtistKey))
     : tracks
-  const candidates = excludeSimilarityArtist(excludeSimilarityReference(constrainByIntent(
+  const candidates = constrainByRequestedLanguage(excludeSimilarityArtist(excludeSimilarityReference(constrainByIntent(
     await fetchCandidates(recallIntent, options.signal, determinism, {
       profile,
       similarityReference: options.similarityReference,
@@ -392,7 +403,7 @@ export async function recommendFromNetease(text: string, override?: IntentOverri
       similarityArtistId: options.similarityArtistId,
     }),
     intent,
-  )))
+  ))), intent)
     .filter(allowedByMemory)
   assertRecommendationActive(options.signal)
   if (directSongRequest) {

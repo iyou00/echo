@@ -48,7 +48,7 @@ function reply(content: string, tracks: Track[] = []): SendChatResult {
 }
 
 describe('chat recommendation response stage', () => {
-  it('binds implicit playback wording to the real candidate card', async () => {
+  it('preserves companion copy while binding the real candidate card', async () => {
     vi.mocked(streamChatReply).mockResolvedValueOnce('这首前奏一出来就挺适合现在，先听听看。')
     const candidate: Track = {
       id: 'real-candidate',
@@ -80,7 +80,7 @@ describe('chat recommendation response stage', () => {
     })
 
     expect(result.tracks).toEqual([candidate])
-    expect(result.message.content).toBe('行，先放新歌手的《热烈一点》。先听开头。')
+    expect(result.message.content).toBe('这首前奏一出来就挺适合现在，先听听看。')
   })
 
   it('falls back to real candidates when the assistant text names a track outside the candidate pool', async () => {
@@ -117,7 +117,7 @@ describe('chat recommendation response stage', () => {
     expect(result.message.content).toBe('行，先放候选歌手的《真正候选》。先听开头。')
   })
 
-  it('binds a card when a contextual music search has candidates but the inherited intent is weak', async () => {
+  it('keeps natural copy when a contextual music search has candidates but the inherited intent is weak', async () => {
     vi.mocked(streamChatReply).mockResolvedValueOnce('这首前奏轻，先听，不合适再换。')
     const candidate: Track = {
       id: 'chen-moni',
@@ -149,7 +149,7 @@ describe('chat recommendation response stage', () => {
     })
 
     expect(result.tracks).toEqual([candidate])
-    expect(result.message.content).toBe('行，先放陈默之的《沉溺》。先听开头。')
+    expect(result.message.content).toBe('这首前奏轻，先听，不合适再换。')
   })
 
   it('attaches a card when the assistant accepts a contextual pick without naming the song', async () => {
@@ -191,17 +191,18 @@ describe('chat recommendation response stage', () => {
 
     expect(result.tracks).toEqual([candidate])
     expect(result.message.tracks).toEqual([candidate])
-    expect(result.message.content).toBe('行，先放陈默之的《沉溺》。先听开头。')
+    expect(result.message.content).toBe('这首前奏轻，先听，不合适再换。')
   })
 
-  it('returns the requested number of cards when the assistant only names one candidate', async () => {
-    vi.mocked(streamChatReply).mockResolvedValueOnce('先听候选歌手的《第一首》，剩下两首我放在后面。')
+  it('returns the requested cards without replacing a human response with a track roll call', async () => {
+    const companionCopy = '最近心情一直不太好，就别逼自己一直绷着，适当摸会儿鱼也可以。先歇一下，我给你找了 3 首偏轻松的，听着缓一缓。'
+    vi.mocked(streamChatReply).mockResolvedValueOnce(companionCopy)
     const candidates: Track[] = [
       { id: 'first', title: '第一首', artist: '候选歌手', source: 'netease', playUrl: 'https://example.com/first.mp3' },
       { id: 'second', title: '第二首', artist: '另一位', source: 'netease', playUrl: 'https://example.com/second.mp3' },
       { id: 'third', title: '第三首', artist: '第三位', source: 'netease', playUrl: 'https://example.com/third.mp3' },
     ]
-    const text = '推荐三首适合现在听的歌'
+    const text = '最近心情不好，你推荐3首歌给我听。'
     const recommendationIntent = classifyFallbackChatIntent(text)
     const result = await runRecommendationResponseStage({
       trimmed: text,
@@ -225,7 +226,43 @@ describe('chat recommendation response stage', () => {
     })
 
     expect(result.tracks).toEqual(candidates)
-    expect(result.message.content).toBe('行，我先挑这几首：候选歌手的《第一首》、另一位的《第二首》、第三位的《第三首》。先从第一首开始。')
+    expect(result.message.content).toBe(companionCopy)
+  })
+
+  it('uses the requested count and current mood when both model attempts return empty', async () => {
+    vi.mocked(streamChatReply).mockResolvedValueOnce('')
+    const candidates: Track[] = [
+      { id: 'first', title: '第一首', artist: '候选歌手', source: 'netease', playUrl: 'https://example.com/first.mp3' },
+      { id: 'second', title: '第二首', artist: '另一位', source: 'netease', playUrl: 'https://example.com/second.mp3' },
+      { id: 'third', title: '第三首', artist: '第三位', source: 'netease', playUrl: 'https://example.com/third.mp3' },
+    ]
+    const text = '最近心情不好，你推荐3首歌给我听。'
+    const recommendationIntent = classifyFallbackChatIntent(text)
+    const result = await runRecommendationResponseStage({
+      trimmed: text,
+      settings,
+      active: { signal: new AbortController().signal, canceled: false },
+      signal: new AbortController().signal,
+      pendingReply: { action: 'none' },
+      candidate: {
+        recommendationIntent,
+        requested: parseRequestedTrackCount(text),
+        targetCount: 3,
+        countExplicit: true,
+        guardedCandidates: candidates,
+        authRequired: false,
+        excludeCurrentTrack: false,
+      },
+      currentPlaybackTrack: null,
+      emitChunk: vi.fn(),
+      reply,
+      attachSceneToTracks: (tracks) => tracks,
+    })
+
+    expect(result.tracks).toEqual(candidates)
+    expect(result.message.content).toContain('心情不好')
+    expect(result.message.content).toContain('3首')
+    expect(result.message.content).not.toBe('我先给你挑这首。')
   })
 
   it('keeps the rejected current track out of card fallback candidates', async () => {
