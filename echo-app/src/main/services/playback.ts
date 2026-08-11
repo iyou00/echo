@@ -1,11 +1,11 @@
 import { BrowserWindow } from 'electron'
 import type { PlaybackHeartbeat, PlaybackPlayOptions, PlaybackState, Track } from '../../types/ipc'
+import { trackIdentity as trackKey } from '../../shared/trackIdentity'
 import { getQueue, markQueueStatus } from './queue'
 import { refreshPlayableUrl } from '../netease/music'
-import { applySignal, maybeRefreshStructuredProfile } from './taste'
 import { recordHealth } from './health'
 import { recordTrackFeedback } from '../db/feedback'
-import { endCurrentScene, getCurrentScene } from './scene'
+import { applyMemorySignal } from './memoryPolicy'
 
 const state: PlaybackState = {
   current: null,
@@ -18,15 +18,19 @@ const state: PlaybackState = {
 }
 const loopCounts = new Map<string, { count: number; firstAt: number }>()
 const stateListeners = new Set<(state: PlaybackState) => void>()
+const urlRefreshInFlight = new Set<string>()
+const LOOP_COUNT_TTL_MS = 24 * 60 * 60 * 1000
+const LOOP_COUNT_MAX_ENTRIES = 500
 
 type InternalPlaybackPlayOptions = PlaybackPlayOptions & {
   pushHistory?: boolean
   preserveQueue?: boolean
+  recordPreviousFeedback?: boolean
 }
 
-function trackKey(track?: Track | null): string {
-  if (!track) return ''
-  return `${track.id ?? track.neteaseId ?? ''}:${track.title.trim().toLowerCase()}:${track.artist.trim().toLowerCase()}`
+interface PlaybackNextOptions {
+  recordCurrentFeedback?: boolean
+  skippedReason?: Track['queueStatusReason']
 }
 
 function cloneState(): PlaybackState {
@@ -35,7 +39,7 @@ function cloneState(): PlaybackState {
 
 function broadcast(channel: string, payload: unknown): void {
   for (const window of BrowserWindow.getAllWindows()) {
-    window.webContents.send(channel, payload)
+    if (!window.isDestroyed()) window.webContents.send(channel, payload)
   }
 }
 
@@ -105,38 +109,57 @@ function replaceTrackInState(track: Track): void {
   state.history = state.history.map((item) => (trackKey(item) === key ? track : item))
 }
 
+function pruneLoopCounts(now = Date.now()): void {
+  for (const [key, value] of loopCounts.entries()) {
+    if (now - value.firstAt >= LOOP_COUNT_TTL_MS) loopCounts.delete(key)
+  }
+  if (loopCounts.size <= LOOP_COUNT_MAX_ENTRIES) return
+  const overflow = loopCounts.size - LOOP_COUNT_MAX_ENTRIES
+  const oldest = Array.from(loopCounts.entries())
+    .sort((a, b) => a[1].firstAt - b[1].firstAt)
+    .slice(0, overflow)
+  for (const [key] of oldest) loopCounts.delete(key)
+}
+
 async function applyPlaybackFeedback(track: Track, completionRate: number): Promise<void> {
   const rate = Math.max(0, Math.min(1, completionRate))
   if (rate >= 0.8) {
     recordTrackFeedback('played', track, rate)
-    await applySignal('played', { artist: track.artist, trackId: track.id ?? track.neteaseId, title: track.title, completionRate: rate })
-    maybeRefreshStructuredProfile('played')
+    await applyMemorySignal('played', { artist: track.artist, trackId: track.id ?? track.neteaseId, title: track.title, completionRate: rate }, { source: 'playback', track })
     const key = trackKey(track)
     const now = Date.now()
+    pruneLoopCounts(now)
     const existing = loopCounts.get(key)
-    const next = existing && now - existing.firstAt < 24 * 60 * 60 * 1000
+    const next = existing && now - existing.firstAt < LOOP_COUNT_TTL_MS
       ? { count: existing.count + 1, firstAt: existing.firstAt }
       : { count: 1, firstAt: now }
     loopCounts.set(key, next)
     if (next.count === 3) {
       recordTrackFeedback('looped', track, rate)
-      await applySignal('looped', { artist: track.artist, trackId: track.id ?? track.neteaseId, title: track.title })
-      maybeRefreshStructuredProfile('looped')
+      await applyMemorySignal('looped', { artist: track.artist, trackId: track.id ?? track.neteaseId, title: track.title }, { source: 'playback', track })
     }
     return
   }
   if (rate < 0.3) {
     recordTrackFeedback('skipped', track, rate)
-    await applySignal('skipped', { artist: track.artist, trackId: track.id ?? track.neteaseId, title: track.title, completionRate: rate })
-    maybeRefreshStructuredProfile('skipped')
+    await applyMemorySignal('skipped', { artist: track.artist, trackId: track.id ?? track.neteaseId, title: track.title, completionRate: rate }, { source: 'playback', track })
   }
+}
+
+function currentCompletionRate(defaultRate: number): number {
+  if (state.duration > 0) return Math.max(0, Math.min(1, state.position / state.duration))
+  return Math.max(0, Math.min(1, defaultRate))
+}
+
+function statusForCompletionRate(rate: number): NonNullable<Track['queueStatus']> {
+  return rate < 0.3 ? 'skipped' : 'completed'
 }
 
 async function ensurePlayable(track: Track): Promise<Track> {
   if (!isUrlStale(track)) return track
   const refreshed = await refreshPlayableUrl(track)
   if (!refreshed?.playUrl) {
-    recordHealth('netease', 'degraded', '网易云登录可能过期了。重新扫码后我再拿播放链接。')
+    recordHealth('netease', 'degraded', '网易云登录可能过期了。重新登录后我再拿播放链接。')
     broadcast('netease:cookie-expired', '网易云播放链接获取失败，请重新登录后再试。')
     throw new Error('网易云播放链接获取失败')
   }
@@ -146,12 +169,18 @@ async function ensurePlayable(track: Track): Promise<Track> {
 export async function play(track: Track, options: InternalPlaybackPlayOptions = {}): Promise<PlaybackState> {
   const pushHistory = options.pushHistory ?? true
   const previousQueue = state.queue
+  const previousCurrent = state.current
+  const previousCompletionRate = currentCompletionRate(0)
   const playable = await ensurePlayable(track)
-  const currentKey = trackKey(state.current)
+  const currentKey = trackKey(previousCurrent)
   const nextKey = trackKey(playable)
 
-  if (pushHistory && state.current && currentKey && currentKey !== nextKey) {
-    state.history = [state.current, ...state.history].slice(0, 20)
+  if (pushHistory && previousCurrent && currentKey && currentKey !== nextKey) {
+    if (options.recordPreviousFeedback !== false) {
+      await applyPlaybackFeedback(previousCurrent, previousCompletionRate)
+      markQueueStatus(previousCurrent, statusForCompletionRate(previousCompletionRate), statusForCompletionRate(previousCompletionRate) === 'skipped' ? 'playback_skipped' : 'playback_completed')
+    }
+    state.history = [previousCurrent, ...state.history].slice(0, 20)
   }
 
   state.current = playable
@@ -162,7 +191,7 @@ export async function play(track: Track, options: InternalPlaybackPlayOptions = 
     state.volume = Math.max(0, Math.min(100, Math.floor(options.initialVolume)))
   }
   state.error = undefined
-  markQueueStatus(playable, 'playing')
+  markQueueStatus(playable, 'playing', 'playback_started')
   state.queue = options.preserveQueue
     ? mergeQueue(previousQueue.filter((item) => trackKey(item) !== nextKey), playableQueue(playable), playable)
     : playableQueue(playable, { includeCompleted: true })
@@ -179,20 +208,23 @@ export async function enqueue(track: Track): Promise<PlaybackState> {
   return emitState()
 }
 
-export async function next(): Promise<PlaybackState> {
+export async function next(options: PlaybackNextOptions = {}): Promise<PlaybackState> {
   const finished = state.current
   if (finished) {
-    const completionRate = state.position > 0 && state.duration > 0 ? state.position / state.duration : 1
-    await applyPlaybackFeedback(finished, completionRate)
-    markQueueStatus(finished, completionRate < 0.3 ? 'skipped' : 'completed')
+    const completionRate = currentCompletionRate(0)
+    if (options.recordCurrentFeedback !== false) {
+      await applyPlaybackFeedback(finished, completionRate)
+    }
+    const status = options.recordCurrentFeedback === false ? 'skipped' : statusForCompletionRate(completionRate)
+    markQueueStatus(finished, status, status === 'skipped' ? options.skippedReason ?? 'playback_skipped' : 'playback_completed')
   }
   let lastError: unknown
   for (const target of nextCandidates(finished)) {
     try {
-      return await play(target, { pushHistory: Boolean(finished), preserveQueue: true })
+      return await play(target, { pushHistory: Boolean(finished), preserveQueue: true, recordPreviousFeedback: false })
     } catch (error) {
       lastError = error
-      markQueueStatus(target, 'skipped')
+      markQueueStatus(target, 'skipped', 'playback_failed')
       const failedKey = trackKey(target)
       state.queue = state.queue.filter((track) => trackKey(track) !== failedKey)
     }
@@ -203,16 +235,16 @@ export async function next(): Promise<PlaybackState> {
   state.status = 'idle'
   state.queue = []
   state.error = lastError ? '下一首暂时播不出来' : undefined
-  if (getCurrentScene()) endCurrentScene()
   return emitState()
 }
 
 export async function finishCurrent(): Promise<PlaybackState> {
   const finished = state.current
   if (finished) {
-    const completionRate = state.position > 0 && state.duration > 0 ? state.position / state.duration : 1
+    const completionRate = currentCompletionRate(1)
     await applyPlaybackFeedback(finished, completionRate)
-    markQueueStatus(finished, completionRate < 0.3 ? 'skipped' : 'completed')
+    const status = statusForCompletionRate(completionRate)
+    markQueueStatus(finished, status, status === 'skipped' ? 'playback_skipped' : 'playback_completed')
     state.history = [finished, ...state.history].slice(0, 20)
   }
   state.current = null
@@ -258,15 +290,24 @@ export function seek(positionMs: number): PlaybackState {
 export function removeFromQueue(index: number): PlaybackState {
   const fallbackQueue = playableQueue(state.current)
   const target = state.queue[index] ?? fallbackQueue[index]
-  if (target) markQueueStatus(target, 'skipped')
+  if (target) markQueueStatus(target, 'skipped', 'queue_removed')
   state.queue = state.queue.filter((_, itemIndex) => itemIndex !== index)
+  return emitState()
+}
+
+export function removeTrackFromQueue(track: Track): PlaybackState {
+  const key = trackKey(track)
+  if (!key) return cloneState()
+  if (trackKey(state.current) === key) return cloneState()
+  markQueueStatus(track, 'skipped', 'queue_removed')
+  state.queue = state.queue.filter((item) => trackKey(item) !== key)
   return emitState()
 }
 
 export function clearQueue(): PlaybackState {
   const pending = state.queue.length > 0 ? state.queue : playableQueue(state.current)
   for (const track of pending) {
-    markQueueStatus(track, 'skipped')
+    markQueueStatus(track, 'skipped', 'queue_removed')
   }
   state.queue = []
   return emitState()
@@ -274,6 +315,7 @@ export function clearQueue(): PlaybackState {
 
 export function reorderQueue(fromIndex: number, toIndex: number): PlaybackState {
   if (fromIndex < 0 || fromIndex >= state.queue.length) return cloneState()
+  if (state.queue.length < 2) return cloneState()
   const boundedTo = Math.max(0, Math.min(state.queue.length - 1, toIndex))
   const next = [...state.queue]
   const [moved] = next.splice(fromIndex, 1)
@@ -286,6 +328,13 @@ export function heartbeat(payload: PlaybackHeartbeat): PlaybackState {
   state.position = Math.max(0, Math.floor(payload.position))
   if (payload.duration && payload.duration > 0) state.duration = Math.floor(payload.duration)
   if (state.current && payload.status) state.status = payload.status
+  if (state.current && isUrlStale(state.current)) {
+    const refreshId = state.current.id ?? state.current.neteaseId
+    if (refreshId && !urlRefreshInFlight.has(refreshId)) {
+      urlRefreshInFlight.add(refreshId)
+      void refreshUrl(refreshId).catch(() => undefined).finally(() => { urlRefreshInFlight.delete(refreshId) })
+    }
+  }
   return cloneState()
 }
 
@@ -299,7 +348,7 @@ export async function refreshUrl(trackId: string): Promise<{ track: Track; state
   if (!refreshed?.playUrl) {
     state.status = 'error'
     state.error = '网易云播放链接续期失败'
-    recordHealth('netease', 'degraded', '网易云登录可能过期了。重新扫码后我再拿播放链接。')
+    recordHealth('netease', 'degraded', '网易云登录可能过期了。重新登录后我再拿播放链接。')
     broadcast('netease:cookie-expired', '网易云播放链接续期失败，请重新登录后再试。')
     emitState()
     throw new Error(state.error)
@@ -329,5 +378,6 @@ export function resetPlaybackState(): PlaybackState {
   state.history = []
   state.error = undefined
   loopCounts.clear()
+  urlRefreshInFlight.clear()
   return emitState()
 }

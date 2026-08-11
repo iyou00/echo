@@ -135,7 +135,7 @@ renderer/pages/
 1. scheduler.ts 到点,调 services/yinyi.ts
 2. yinyi.ts:
    a. 读今天的对话历史 + 播放记录 + 品味变化
-   b. 组装 prompt:prompts/yinyi-writer.md + 今日数据
+   b. 组装 prompt:prompts/yinyi-writer-v5.md + 今日数据
    c. 调 LLM,生成一段对话型日记
    d. 存入 yinyi 表
    e. 通过 IPC 发给渲染进程(如果开着窗口):弹通知"今日风信已出"

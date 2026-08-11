@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Echo · 拾音</title>
+<style>
+  :root {
+    --green-900: #27500a;
+    --green-700: #3b6d11;
+    --green-600: #639922;
+    --green-300: #c0dd97;
+    --green-100: #eaf3de;
+    --green-50: #f5faed;
+    --paper: #ffffff;
+    --surface: #f7f7f5;
+    --text: #1a1a1a;
+    --text-2: #5c5c5a;
+    --text-3: #999996;
+    --line: rgba(0, 0, 0, 0.08);
+    --danger: #a4573b;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --serif: "Songti SC", "Noto Serif SC", Georgia, serif;
+    --mono: "SF Mono", "Cascadia Code", Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    background:
+      radial-gradient(circle at 24% 0%, rgba(99, 153, 34, 0.10), transparent 34%),
+      #e9ede5;
+    color: var(--text);
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  button { font: inherit; cursor: pointer; }
+
+  .phone {
+    position: relative;
+    width: 428px;
+    height: 760px;
+    overflow: hidden;
+    border-radius: 16px;
+    border: 1px solid rgba(39, 80, 10, 0.16);
+    background: var(--paper);
+    box-shadow: 0 24px 70px rgba(31, 52, 21, 0.16);
+  }
+
+  .topbar {
+    height: 48px;
+    display: grid;
+    grid-template-columns: 84px 1fr 76px;
+    align-items: center;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.96);
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--green-700);
+    font-family: var(--serif);
+    font-size: 15px;
+  }
+
+  .logo-mark {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background:
+      radial-gradient(circle, transparent 34%, var(--green-600) 36%, var(--green-600) 45%, transparent 47%),
+      #20231d;
+  }
+
+  .nav {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    color: var(--text-2);
+    font-size: 13px;
+  }
+
+  .nav .active {
+    color: var(--green-700);
+    border-bottom: 2px solid var(--green-600);
+    padding-bottom: 4px;
+  }
+
+  .window-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 7px;
+  }
+
+  .window-actions button {
+    width: 23px;
+    height: 23px;
+    border-radius: 50%;
+    border: 1px solid rgba(99, 153, 34, 0.35);
+    background: var(--green-50);
+    color: var(--green-700);
+  }
+
+  .content {
+    height: calc(100% - 126px);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    background:
+      linear-gradient(180deg, rgba(245, 250, 237, 0.7), transparent 138px),
+      var(--paper);
+  }
+
+  .now-strip {
+    margin: 16px 16px 12px;
+    padding: 12px 13px;
+    border: 1px solid rgba(99, 153, 34, 0.20);
+    border-radius: 12px;
+    background: var(--green-50);
+  }
+
+  .now-line {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .now-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .live-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--green-600);
+    box-shadow: 0 0 0 4px rgba(99, 153, 34, 0.12);
+    flex: 0 0 auto;
+  }
+
+  .now-title span:last-child {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .now-time {
+    color: var(--text-3);
+    font-family: var(--mono);
+    font-size: 10px;
+  }
+
+  .wave {
+    display: flex;
+    align-items: end;
+    gap: 3px;
+    height: 20px;
+    margin-top: 11px;
+  }
+
+  .wave i {
+    flex: 1;
+    max-width: 7px;
+    border-radius: 99px;
+    background: var(--green-300);
+  }
+
+  .wave i:nth-child(3n) { background: var(--green-600); }
+
+  .switch-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 34px;
+    gap: 9px;
+    padding: 0 16px 12px;
+  }
+
+  .switcher {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+    padding: 4px;
+    border-radius: 12px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+  }
+
+  .switcher button,
+  .search-btn {
+    height: 30px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-2);
+    font-size: 12px;
+  }
+
+  .switcher button.active {
+    background: white;
+    color: var(--green-700);
+    box-shadow: 0 1px 5px rgba(31, 52, 21, 0.06);
+  }
+
+  .switcher small {
+    margin-left: 4px;
+    color: var(--text-3);
+    font-family: var(--mono);
+    font-size: 10px;
+  }
+
+  .search-btn {
+    border: 1px solid var(--line);
+    background: white;
+    color: var(--green-700);
+    font-size: 14px;
+  }
+
+  .panel {
+    flex: 1;
+    overflow: auto;
+    padding: 0 16px 18px;
+  }
+
+  .panel::-webkit-scrollbar { width: 4px; }
+  .panel::-webkit-scrollbar-thumb { background: var(--line); border-radius: 999px; }
+
+  .view { display: none; }
+  .view.active { display: block; }
+
+  .song-list {
+    display: grid;
+    gap: 8px;
+  }
+
+  .song {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    min-height: 58px;
+    padding: 10px 11px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.78);
+  }
+
+  .song strong {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .song small {
+    display: block;
+    color: var(--text-2);
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .actions {
+    display: flex;
+    gap: 5px;
+  }
+
+  .icon {
+    width: 28px;
+    height: 28px;
+    border: 0;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    background: transparent;
+    color: var(--text-3);
+    font-size: 15px;
+  }
+
+  .icon:hover,
+  .icon.active {
+    background: var(--green-100);
+    color: var(--green-700);
+  }
+
+  .icon.remove:hover {
+    background: #f7ece7;
+    color: var(--danger);
+  }
+
+  .date-row {
+    margin: 14px 2px 8px;
+    color: var(--text-3);
+    font-family: var(--mono);
+    font-size: 10px;
+  }
+
+  .empty-hint {
+    margin: 10px 2px 0;
+    color: var(--text-3);
+    font-size: 12px;
+    line-height: 1.6;
+  }
+
+  .dock {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 78px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: blur(12px);
+  }
+
+  .dock-inner {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .dock-title {
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .dock-meta {
+    margin-top: 4px;
+    color: var(--text-3);
+    font-size: 11px;
+  }
+
+  .dock-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .round {
+    width: 34px;
+    height: 34px;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    background: white;
+    color: var(--text-2);
+  }
+
+  .round.main {
+    width: 42px;
+    height: 42px;
+    border: 0;
+    background: var(--green-600);
+    color: white;
+  }
+
+  .toast {
+    position: absolute;
+    left: 50%;
+    top: 64px;
+    transform: translateX(-50%) translateY(-8px);
+    opacity: 0;
+    padding: 8px 12px;
+    border-radius: 999px;
+    background: rgba(26, 26, 26, 0.84);
+    color: white;
+    font-size: 12px;
+    pointer-events: none;
+    transition: opacity 0.18s ease, transform 0.18s ease;
+  }
+
+  .toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  @media (max-width: 520px) {
+    body { display: block; background: var(--paper); }
+    .phone {
+      width: 100vw;
+      height: 100vh;
+      border: 0;
+      border-radius: 0;
+    }
+  }
+</style>
+</head>
+<body>
+  <main class="phone">
+    <header class="topbar">
+      <div class="logo"><span class="logo-mark"></span><span>Echo</span></div>
+      <nav class="nav">
+        <span>絮语</span>
+        <span>风信</span>
+        <span>回声</span>
+        <span class="active">拾音</span>
+      </nav>
+      <div class="window-actions">
+        <button aria-label="最小化">-</button>
+        <button aria-label="关闭">×</button>
+      </div>
+    </header>
+
+    <section class="content">
+      <article class="now-strip">
+        <div class="now-line">
+          <div class="now-title"><span class="live-dot"></span><span>冷夜 · 王菲</span></div>
+          <div class="now-time">01:18 / 03:42</div>
+        </div>
+        <div class="wave" aria-hidden="true">
+          <i style="height:34%"></i><i style="height:62%"></i><i style="height:86%"></i><i style="height:42%"></i>
+          <i style="height:70%"></i><i style="height:30%"></i><i style="height:76%"></i><i style="height:50%"></i>
+          <i style="height:90%"></i><i style="height:38%"></i><i style="height:66%"></i><i style="height:46%"></i>
+          <i style="height:72%"></i><i style="height:32%"></i><i style="height:58%"></i><i style="height:82%"></i>
+        </div>
+      </article>
+
+      <div class="switch-row">
+        <div class="switcher" role="tablist" aria-label="拾音视图">
+          <button class="active" data-view-button="queue" role="tab" aria-selected="true">待播<small>2</small></button>
+          <button data-view-button="likes" role="tab" aria-selected="false">收藏<small>36</small></button>
+          <button data-view-button="recent" role="tab" aria-selected="false">最近<small>128</small></button>
+        </div>
+        <button class="search-btn" title="搜索">⌕</button>
+      </div>
+
+      <section class="panel">
+        <div class="view active" data-view="queue">
+          <div class="song-list">
+            <article class="song">
+              <div>
+                <strong>暗涌</strong>
+                <small>王菲 · 下一首</small>
+              </div>
+              <div class="actions">
+                <button class="icon" title="播放" data-toast="已播放">▶</button>
+                <button class="icon" title="收藏" data-toast="已收藏">♡</button>
+                <button class="icon remove" title="移除" data-toast="已移除">×</button>
+              </div>
+            </article>
+            <article class="song">
+              <div>
+                <strong>温柔</strong>
+                <small>五月天 · 待播</small>
+              </div>
+              <div class="actions">
+                <button class="icon" title="播放" data-toast="已播放">▶</button>
+                <button class="icon" title="收藏" data-toast="已收藏">♡</button>
+                <button class="icon remove" title="移除" data-toast="已移除">×</button>
+              </div>
+            </article>
+          </div>
+          <p class="empty-hint">待播只保留 Echo 接下来准备播放的歌。</p>
+        </div>
+
+        <div class="view" data-view="likes">
+          <div class="song-list">
+            <article class="song">
+              <div>
+                <strong>主角</strong>
+                <small>王菲 · 收藏于今天</small>
+              </div>
+              <div class="actions">
+                <button class="icon" title="播放" data-toast="已播放">▶</button>
+                <button class="icon active" title="取消收藏" data-toast="已取消收藏">♥</button>
+              </div>
+            </article>
+            <article class="song">
+              <div>
+                <strong>容易受伤的女人</strong>
+                <small>王菲 · 收藏于昨天</small>
+              </div>
+              <div class="actions">
+                <button class="icon" title="播放" data-toast="已播放">▶</button>
+                <button class="icon active" title="取消收藏" data-toast="已取消收藏">♥</button>
+              </div>
+            </article>
+            <article class="song">
+              <div>
+                <strong>忽然之间</strong>
+                <small>莫文蔚 · 收藏于周一</small>
+              </div>
+              <div class="actions">
+                <button class="icon" title="播放" data-toast="已播放">▶</button>
+                <button class="icon active" title="取消收藏" data-toast="已取消收藏">♥</button>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <div class="view" data-view="recent">
+          <div class="date-row">今天</div>
+          <div class="song-list">
+            <article class="song">
+              <div>
+                <strong>和你相遇</strong>
+                <small>浮现Zeyue · 13:25</small>
+              </div>
+              <div class="actions">
+                <button class="icon" title="播放" data-toast="已播放">▶</button>
+                <button class="icon" title="收藏" data-toast="已收藏">♡</button>
+              </div>
+            </article>
+            <article class="song">
+              <div>
+                <strong>夜太黑</strong>
+                <small>林忆莲 · 12:58</small>
+              </div>
+              <div class="actions">
+                <button class="icon" title="播放" data-toast="已播放">▶</button>
+                <button class="icon" title="收藏" data-toast="已收藏">♡</button>
+              </div>
+            </article>
+          </div>
+          <div class="date-row">昨天</div>
+          <div class="song-list">
+            <article class="song">
+              <div>
+                <strong>矜持</strong>
+                <small>王菲 · 昨晚</small>
+              </div>
+              <div class="actions">
+                <button class="icon" title="播放" data-toast="已播放">▶</button>
+                <button class="icon" title="收藏" data-toast="已收藏">♡</button>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <footer class="dock">
+      <div class="dock-inner">
+        <div>
+          <div class="dock-title">冷夜</div>
+          <div class="dock-meta">01:18 / 03:42</div>
+        </div>
+        <div class="dock-actions">
+          <button class="round" aria-label="上一首">‹</button>
+          <button class="round main" aria-label="暂停">Ⅱ</button>
+          <button class="round" aria-label="下一首">›</button>
+        </div>
+      </div>
+    </footer>
+
+    <div class="toast" id="toast">已处理</div>
+  </main>
+
+  <script>
+    const toast = document.getElementById('toast')
+    let timer = null
+
+    document.querySelectorAll('[data-toast]').forEach((button) => {
+      button.addEventListener('click', () => {
+        toast.textContent = button.dataset.toast
+        toast.classList.add('show')
+        clearTimeout(timer)
+        timer = setTimeout(() => toast.classList.remove('show'), 1200)
+      })
+    })
+
+    document.querySelectorAll('[data-view-button]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const view = button.dataset.viewButton
+        document.querySelectorAll('[data-view-button]').forEach((item) => {
+          item.classList.toggle('active', item === button)
+          item.setAttribute('aria-selected', item === button ? 'true' : 'false')
+        })
+        document.querySelectorAll('[data-view]').forEach((panel) => {
+          panel.classList.toggle('active', panel.dataset.view === view)
+        })
+      })
+    })
+  </script>
+</body>
+</html>

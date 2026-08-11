@@ -1,16 +1,18 @@
 {
   "name": "echo-app",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.3",
+  "description": "Echo AI 音乐伴侣",
+  "author": "Echo",
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
+    "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && vite build",
     "dist": "npm run build && electron-builder --win nsis",
     "rebuild:native": "electron-builder install-app-deps",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "test": "vitest run --config vitest.config.ts",
+    "test": "vitest run --config vitest.config.ts --passWithNoTests",
     "test:watch": "vitest --config vitest.config.ts",
     "preview": "vite preview"
   },
@@ -50,14 +52,17 @@
     "appId": "app.echo.desktop",
     "productName": "Echo",
     "artifactName": "Echo-Setup-${version}.${ext}",
+    "directories": {
+      "output": "release"
+    },
     "files": [
       "dist",
       "dist-electron"
     ],
     "extraResources": [
       {
-        "from": "../prompts",
-        "to": "prompts",
+        "from": "public/brand",
+        "to": "brand",
         "filter": [
           "**/*"
         ]
@@ -80,12 +85,20 @@
     },
     "nsis": {
       "oneClick": false,
+      "installerIcon": "public/brand/icon.ico",
+      "uninstallerIcon": "public/brand/icon.ico",
+      "installerHeaderIcon": "public/brand/icon.ico",
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "Echo",
       "allowToChangeInstallationDirectory": true,
       "allowElevation": true,
       "unicode": true,
       "deleteAppDataOnUninstall": false,
       "uninstallDisplayName": "Echo",
-      "installerLanguages": ["zh_CN"],
+      "installerLanguages": [
+        "zh_CN"
+      ],
       "language": "2052",
       "runAfterFinish": true,
       "include": "build/installer.nsh"

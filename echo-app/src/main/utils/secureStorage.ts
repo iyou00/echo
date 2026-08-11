@@ -59,12 +59,19 @@ export function decryptSecret(value: string): string {
   if (value.startsWith('safe:')) {
     if (!isSecureStorageAvailable()) {
       console.warn('[secureStorage] decrypt failed: safeStorage unavailable')
+      upsertHealth('storage', 'error', 'API Key 解密失败，请在设置页重新填写。', 'safeStorage unavailable')
       return ''
     }
     try {
-      return safeStorage.decryptString(Buffer.from(value.slice(5), 'base64'))
+      const result = safeStorage.decryptString(Buffer.from(value.slice(5), 'base64'))
+      if (lastAvailable !== true) {
+        lastAvailable = true
+        upsertHealth('storage', 'ok', '本地加密存储可用，API Key 与登录态会加密落盘。')
+      }
+      return result
     } catch (err) {
       console.warn('[secureStorage] decrypt failed:', err instanceof Error ? err.message : err)
+      upsertHealth('storage', 'error', 'API Key 解密失败，请在设置页重新填写。', err instanceof Error ? err.message : String(err))
       return ''
     }
   }

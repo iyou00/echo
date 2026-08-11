@@ -1,5 +1,6 @@
 import { app, BrowserWindow, Menu, nativeImage, Notification, Tray } from 'electron'
 import type { MenuItemConstructorOptions } from 'electron'
+import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import type { AppNavigatePayload, AppPageKey, SceneKey } from '../src/types/ipc'
@@ -9,12 +10,14 @@ import { pruneOldData } from '../src/main/db/maintenance'
 import { upgradeLegacyNeteaseSecret } from '../src/main/netease/auth'
 import { registerIpc } from '../src/main/ipc'
 import { registerScheduler, runStartupCatchup, stopScheduler } from '../src/main/services/scheduler'
-import { archiveDaySeal } from '../src/main/services/daySeal'
+import { archiveDaySeal, warmMostRecentSealCache } from '../src/main/services/daySeal'
 import { checkSecureStorage } from '../src/main/utils/secureStorage'
 import { getState as getPlaybackState, onPlaybackStateChanged, pause, resume } from '../src/main/services/playback'
 import { getCurrentScene, listSceneDefinitions, onSceneChanged } from '../src/main/services/scene'
 import { NeteaseAuthRequiredError } from '../src/main/services/recommendation'
 import { startScenePlayback } from '../src/main/services/scenePlayback'
+import { recordSchedulerHealth } from '../src/main/services/health'
+import { warmRootFileCache } from '../src/main/utils/paths'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -36,9 +39,24 @@ export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
 
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST
 
-if (process.platform === 'win32') {
-  app.setAppUserModelId('local.echo.app')
+app.disableHardwareAcceleration()
+app.commandLine.appendSwitch('disable-gpu')
+
+if (VITE_DEV_SERVER_URL) {
+  app.setPath('userData', path.join(process.env.APP_ROOT, '.electron-user-data'))
 }
+
+if (process.platform === 'win32') {
+  app.setAppUserModelId('app.echo.desktop')
+}
+
+process.on('uncaughtException', (error) => {
+  console.error('[fatal] uncaught exception:', error)
+})
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[fatal] unhandled rejection:', reason)
+})
 
 let win: BrowserWindow | null
 let isQuitting = false
@@ -47,12 +65,22 @@ let tray: Tray | null = null
 let traySceneRunning: SceneKey | null = null
 
 const TRAY_SCENE_KEYS: SceneKey[] = ['focus', 'sleepy', 'relax', 'irritated', 'random']
+const gotSingleInstanceLock = app.requestSingleInstanceLock()
+
+if (!gotSingleInstanceLock) {
+  app.quit()
+}
 
 function createAppIcon() {
   const publicDir = process.env.VITE_PUBLIC ?? path.join(process.env.APP_ROOT ?? process.cwd(), 'public')
-  const iconPath = path.join(publicDir, 'brand', 'icon.ico')
-  const icon = nativeImage.createFromPath(iconPath)
-  if (!icon.isEmpty()) return icon
+  const iconPaths = [
+    path.join(process.resourcesPath, 'brand', 'icon.ico'),
+    path.join(publicDir, 'brand', 'icon.ico'),
+  ]
+  for (const iconPath of iconPaths) {
+    const icon = nativeImage.createFromPath(iconPath)
+    if (!icon.isEmpty()) return icon
+  }
   return nativeImage.createFromDataURL(
     'data:image/svg+xml;utf8,' +
       encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" rx="14" fill="#639922"/><text x="32" y="41" text-anchor="middle" font-family="Georgia,serif" font-size="34" fill="white">E</text></svg>'),
@@ -60,7 +88,7 @@ function createAppIcon() {
 }
 
 function createWindow() {
-  win = new BrowserWindow({
+  const target = new BrowserWindow({
     title: 'Echo',
     width: 440,
     height: 720,
@@ -78,11 +106,37 @@ function createWindow() {
     icon: createAppIcon(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
       backgroundThrottling: false,
     },
   })
 
-  win.on('close', (event) => {
+  win = target
+  target.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+    const connectSrc = VITE_DEV_SERVER_URL ? "'self' http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:*" : "'self'"
+    const scriptSrc = VITE_DEV_SERVER_URL ? "'self' 'unsafe-inline'" : "'self'"
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [
+          [
+            "default-src 'self'",
+            `script-src ${scriptSrc}`,
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data: https:",
+            "media-src 'self' blob: data: https: http:",
+            `connect-src ${connectSrc} https: http:`,
+            "font-src 'self' data:",
+            "object-src 'none'",
+          ].join('; '),
+        ],
+      },
+    })
+  })
+
+  target.on('close', (event) => {
     if (isQuitting) return
     event.preventDefault()
     const settings = getSettings()
@@ -90,17 +144,81 @@ function createWindow() {
       win?.hide()
       return
     }
+    if (settings.ui.closeBehavior === 'quit') {
+      isQuitting = true
+      app.quit()
+      return
+    }
 
     win?.show()
     win?.webContents.send('app:close-requested')
   })
 
-  if (VITE_DEV_SERVER_URL) {
-    win.loadURL(VITE_DEV_SERVER_URL)
-  } else {
-    // win.loadFile('dist/index.html')
-    win.loadFile(path.join(RENDERER_DIST, 'index.html'))
+  const load = VITE_DEV_SERVER_URL
+    ? target.loadURL(VITE_DEV_SERVER_URL)
+    : target.loadFile(path.join(RENDERER_DIST, 'index.html'))
+  void load.catch((error) => {
+    if (target.isDestroyed() || win !== target) return
+    target.destroy()
+    createStartupFailureWindow(error)
+  })
+}
+
+function logStartupFailure(error: unknown): void {
+  try {
+    const logDir = path.join(app.getPath('userData'), 'logs')
+    fs.mkdirSync(logDir, { recursive: true })
+    const detail = error instanceof Error ? error.stack ?? error.message : String(error)
+    fs.appendFileSync(path.join(logDir, 'startup-error.log'), `[${new Date().toISOString()}]\n${detail}\n\n`, 'utf8')
+  } catch (logError) {
+    console.warn('[startup] failed to write recovery log', logError)
   }
+}
+
+function createStartupFailureWindow(error: unknown): void {
+  console.error('[startup] initialization failed', error)
+  logStartupFailure(error)
+  win = new BrowserWindow({
+    title: 'Echo',
+    width: 440,
+    height: 720,
+    minWidth: 380,
+    minHeight: 600,
+    autoHideMenuBar: true,
+    center: true,
+    backgroundColor: '#F5FAED',
+    icon: createAppIcon(),
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  })
+  const html = `<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>Echo 启动恢复</title>
+<style>
+  body{margin:0;background:#f5faed;color:#26331f;font-family:"Microsoft YaHei",sans-serif;display:grid;place-items:center;min-height:100vh}
+  main{width:min(340px,calc(100vw - 48px));text-align:center}
+  h1{font:600 22px Georgia,serif;margin:0 0 16px}
+  p{font-size:14px;line-height:1.8;margin:0 0 18px;color:#53634a}
+  button{margin-top:22px;border:1px solid #8eb966;background:#639922;color:white;padding:9px 18px;border-radius:6px;cursor:pointer}
+</style>
+<main>
+  <h1>Echo 这次没有顺利醒来</h1>
+  <p>本地数据或启动服务遇到了问题。诊断信息已经保存在本地日志中，重新打开仍然失败时请提交反馈。</p>
+  <button onclick="window.close()">退出后重新打开</button>
+</main>
+</html>`
+  win.on('closed', () => {
+    isQuitting = true
+    app.quit()
+  })
+  void win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch((loadError) => {
+    console.error('[startup] recovery window failed to load', loadError)
+    app.quit()
+  })
 }
 
 function sendNavigate(target: BrowserWindow, payload: AppNavigatePayload): void {
@@ -138,7 +256,9 @@ function showTrayNotification(body: string): void {
 
 function trayActionErrorMessage(error: unknown): string {
   if (error instanceof NeteaseAuthRequiredError) return '先登录网易云，Echo 才能在后台给你放歌。'
-  if (error instanceof Error && error.message.trim()) return error.message
+  if (error instanceof Error && /网络|fetch|ECONN|ENOTFOUND|超时/i.test(error.message)) {
+    return '刚才连接不太顺，稍后再试一次。'
+  }
   return 'Echo 这次没接上，稍后再试。'
 }
 
@@ -232,7 +352,9 @@ function createTray() {
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
 app.on('window-all-closed', async () => {
-  await archiveDaySeal().catch(() => undefined)
+  await archiveDaySeal().catch((error) => {
+    console.warn('[daySeal] archive failed during window-all-closed', error)
+  })
   if (isQuitting && process.platform !== 'darwin') {
     app.quit()
     win = null
@@ -247,28 +369,66 @@ app.on('activate', () => {
   }
 })
 
+app.on('second-instance', () => {
+  showWindow()
+})
+
 app.on('before-quit', async (event) => {
   if (cleanupStarted) return
   event.preventDefault()
   cleanupStarted = true
   isQuitting = true
-  await archiveDaySeal().catch(() => undefined)
+  await archiveDaySeal().catch((error) => {
+    console.warn('[daySeal] archive failed during before-quit', error)
+  })
   stopScheduler()
   closeDb()
   app.exit(0)
 })
 
-app.whenReady().then(() => {
-  Menu.setApplicationMenu(null)
-  checkSecureStorage()
-  upgradeLegacySettingsSecrets()
-  upgradeLegacyNeteaseSecret()
-  registerIpc()
-  pruneOldData()
-  registerScheduler()
-  onPlaybackStateChanged(() => rebuildTrayMenu())
-  onSceneChanged(() => rebuildTrayMenu())
-  runStartupCatchup().catch(() => undefined)
-  createWindow()
-  createTray()
-})
+if (gotSingleInstanceLock) {
+  app.whenReady()
+    .then(() => {
+      try {
+        Menu.setApplicationMenu(null)
+        checkSecureStorage()
+        upgradeLegacySettingsSecrets()
+        upgradeLegacyNeteaseSecret()
+        registerIpc()
+        pruneOldData()
+        registerScheduler()
+        onPlaybackStateChanged(() => rebuildTrayMenu())
+        onSceneChanged(() => rebuildTrayMenu())
+        warmRootFileCache([
+          'prompts/system.md',
+          'prompts/agent-soul.md',
+          'prompts/yinyi-writer-v5.md',
+          'prompts/yinyi-writer-v4.md',
+          'prompts/seal-writer.md',
+          'prompts/care-ping-recommend.md',
+          'prompts/care-ping-voice-invite.md',
+          'prompts/care-ping-casual.md',
+          'prompts/portrait-writer-v2.md',
+          'prompts/portrait-writer.md',
+          'prompts/scenario-100.md',
+          'samples/artist-genre-seed.json',
+        ]).catch((error) => {
+          console.warn('[paths] warm root file cache failed', error)
+        })
+        warmMostRecentSealCache().catch((error) => {
+          console.warn('[daySeal] warm cache failed', error)
+        })
+        runStartupCatchup().catch((error) => {
+          const message = error instanceof Error ? error.message : String(error)
+          recordSchedulerHealth('catchup', 'degraded', '启动补偿失败。', message)
+        })
+        createWindow()
+        createTray()
+      } catch (error) {
+        createStartupFailureWindow(error)
+      }
+    })
+    .catch((error) => {
+      createStartupFailureWindow(error)
+    })
+}

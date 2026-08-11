@@ -6,6 +6,7 @@ import { registerNeteaseIpc } from './ipc/netease'
 import { registerPlaybackIpc } from './ipc/playback'
 import { registerQueueIpc } from './ipc/queue'
 import { registerRecommendationIpc } from './ipc/recommendation'
+import { registerRuntimeIpc } from './ipc/runtime'
 import { registerSceneIpc } from './ipc/scene'
 import { registerSettingsIpc } from './ipc/settings'
 import { registerTasteIpc } from './ipc/taste'
@@ -15,6 +16,7 @@ import { registerYinyiIpc } from './ipc/yinyi'
 export { broadcast, maskSettings } from './ipc/shared'
 
 export function registerIpc(): void {
+  registerRuntimeIpc()
   registerSettingsIpc()
   registerHealthIpc()
   registerChatIpc()

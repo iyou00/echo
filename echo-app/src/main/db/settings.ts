@@ -1,5 +1,6 @@
-import type { Settings } from '../../types/ipc'
+import type { Settings, SettingPath, SettingUpdatePatch } from '../../types/ipc'
 import { getDb } from './index'
+import { parseJson } from './json'
 import {
   decryptSecret,
   encryptSecret,
@@ -9,6 +10,8 @@ import {
   tryUpgradeLegacyPlain,
 } from '../utils/secureStorage'
 import { upsertHealth } from './health'
+
+export type { SettingPath, SettingUpdatePatch }
 
 const defaultSettings: Settings = {
   llm: {
@@ -51,12 +54,148 @@ const defaultSettings: Settings = {
     schemaVersion: 1,
     firstUsedAt: new Date().toISOString(),
     lastViewedYinyiAt: '',
-    onboardingStep: 'playlist',
+    onboardingStep: 'api',
     lastPrunedAt: '',
   },
 }
 
+export const SETTINGS_PATHS: readonly SettingPath[] = [
+  'llm.baseUrl',
+  'llm.apiKey',
+  'llm.model',
+  'llm.lastTestedAt',
+  'llm.lastTestedOk',
+  'yinyi.generateAt',
+  'yinyi.openWithRandom',
+  'carePings.enabled',
+  'carePings.frequency',
+  'carePings.detectFullscreen',
+  'chat.restoreOnStart',
+  'playback.autoPlayNext',
+  'ui.theme',
+  'ui.closeBehavior',
+  'window.closeHintShown',
+  'user.city',
+  'tts.baseUrl',
+  'tts.voice',
+  'tts.speed',
+  'tts.pitch',
+  'meta.schemaVersion',
+  'meta.firstUsedAt',
+  'meta.lastViewedYinyiAt',
+  'meta.firstRunWelcomeCompletedAt',
+  'meta.onboardingCompletedAt',
+  'meta.onboardingStep',
+  'meta.lastPrunedAt',
+] as const
+
+const SETTINGS_PATH_SET = new Set<string>(SETTINGS_PATHS)
+
+function assertSettingPath(path: string): asserts path is SettingPath {
+  if (!SETTINGS_PATH_SET.has(path)) {
+    throw new Error(`未知设置项: ${path}`)
+  }
+}
+
+function assertString(value: unknown, path: SettingPath): string {
+  if (typeof value !== 'string') throw new Error(`${path} 需要是文本`)
+  return value
+}
+
+function assertBoolean(value: unknown, path: SettingPath): boolean {
+  if (typeof value !== 'boolean') throw new Error(`${path} 需要是布尔值`)
+  return value
+}
+
+function assertNumber(value: unknown, path: SettingPath): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`${path} 需要是数字`)
+  return value
+}
+
+function assertOneOf<T extends string>(value: unknown, path: SettingPath, allowed: readonly T[]): T {
+  if (typeof value !== 'string' || !allowed.includes(value as T)) {
+    throw new Error(`${path} 的值无效`)
+  }
+  return value as T
+}
+
+function assertOptionalString(value: unknown, path: SettingPath): string | undefined {
+  if (value === undefined) return undefined
+  return assertString(value, path)
+}
+
+function assertHttpUrl(value: unknown, path: SettingPath, options: { allowEmpty?: boolean } = {}): string {
+  const text = assertString(value, path).trim()
+  if (!text && options.allowEmpty) return ''
+  let parsed: URL
+  try {
+    parsed = new URL(text)
+  } catch {
+    throw new Error(`${path} 需要是有效的 URL`)
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`${path} 只支持 http 或 https`)
+  }
+  return text
+}
+
+function validateSettingValue(path: SettingPath, value: unknown): unknown {
+  switch (path) {
+    case 'llm.baseUrl':
+      return assertHttpUrl(value, path, { allowEmpty: true })
+    case 'tts.baseUrl':
+      return assertHttpUrl(value, path, { allowEmpty: true })
+    case 'llm.apiKey':
+    case 'llm.model':
+    case 'llm.lastTestedAt':
+    case 'user.city':
+    case 'tts.voice':
+    case 'tts.pitch':
+    case 'meta.firstUsedAt':
+      return assertString(value, path)
+    case 'meta.lastViewedYinyiAt':
+    case 'meta.firstRunWelcomeCompletedAt':
+    case 'meta.onboardingCompletedAt':
+    case 'meta.lastPrunedAt':
+      return assertOptionalString(value, path)
+    case 'llm.lastTestedOk':
+    case 'yinyi.openWithRandom':
+    case 'carePings.enabled':
+    case 'carePings.detectFullscreen':
+    case 'chat.restoreOnStart':
+    case 'playback.autoPlayNext':
+    case 'window.closeHintShown':
+      return assertBoolean(value, path)
+    case 'yinyi.generateAt': {
+      const text = assertString(value, path)
+      if (!/^\d{2}:\d{2}$/.test(text)) throw new Error('生成时间格式需要是 HH:mm')
+      return text
+    }
+    case 'carePings.frequency':
+      return assertOneOf(value, path, ['gentle', 'normal', 'frequent'])
+    case 'ui.theme':
+      return assertOneOf(value, path, ['light', 'dark', 'system'])
+    case 'ui.closeBehavior':
+      return assertOneOf(value, path, ['ask', 'minimize', 'quit'])
+    case 'tts.speed': {
+      const speed = assertNumber(value, path)
+      if (speed < 0.5 || speed > 1.5) throw new Error('语速需要在 0.5 到 1.5 之间')
+      return speed
+    }
+    case 'meta.schemaVersion': {
+      const version = assertNumber(value, path)
+      if (!Number.isInteger(version) || version < 1) throw new Error('设置版本号无效')
+      return version
+    }
+    case 'meta.onboardingStep':
+      return assertOneOf(value, path, ['api', 'playlist', 'done'])
+  }
+}
+
 function mergeDefaults(value: Partial<Settings>): Settings {
+  const firstUsedAt = typeof value.meta?.firstUsedAt === 'string' && value.meta.firstUsedAt.trim()
+    ? value.meta.firstUsedAt
+    : new Date().toISOString()
   return {
     ...defaultSettings,
     ...value,
@@ -69,13 +208,18 @@ function mergeDefaults(value: Partial<Settings>): Settings {
     window: { ...defaultSettings.window, ...(value.window ?? {}) },
     user: { ...defaultSettings.user, ...(value.user ?? {}) },
     tts: { ...defaultSettings.tts, ...(value.tts ?? {}) },
-    meta: { ...defaultSettings.meta, ...(value.meta ?? {}) },
+    meta: { ...defaultSettings.meta, ...(value.meta ?? {}), firstUsedAt },
   }
 }
 
 export function getSettings(): Settings {
   const row = getDb().prepare('SELECT data_json FROM settings WHERE id = 1').get() as { data_json: string } | undefined
-  const parsed = row ? JSON.parse(row.data_json || '{}') : {}
+  let parsed: Record<string, unknown> = {}
+  try {
+    parsed = row ? JSON.parse(row.data_json || '{}') : {}
+  } catch {
+    console.warn('[settings] data_json corrupt, falling back to defaults')
+  }
   const merged = mergeDefaults(parsed)
   merged.llm.apiKey = decryptSecret(merged.llm.apiKey)
   return merged
@@ -83,7 +227,13 @@ export function getSettings(): Settings {
 
 export function getStoredSettingsRaw(): Settings {
   const row = getDb().prepare('SELECT data_json FROM settings WHERE id = 1').get() as { data_json: string } | undefined
-  return mergeDefaults(row ? JSON.parse(row.data_json || '{}') : {})
+  let parsed: Record<string, unknown> = {}
+  try {
+    parsed = row ? JSON.parse(row.data_json || '{}') : {}
+  } catch {
+    console.warn('[settings] data_json corrupt, falling back to defaults')
+  }
+  return mergeDefaults(parsed)
 }
 
 export function saveSettings(settings: Settings, preserveEncryptedKey = false): Settings {
@@ -95,7 +245,9 @@ export function saveSettings(settings: Settings, preserveEncryptedKey = false): 
     copy.llm.apiKey = encryptSecret(copy.llm.apiKey)
   } else if (preserveEncryptedKey) {
     const existingRow = getDb().prepare('SELECT data_json FROM settings WHERE id = 1').get() as { data_json: string } | undefined
-    const existingKey = existingRow ? (JSON.parse(existingRow.data_json || '{}')?.llm?.apiKey ?? '') as string : ''
+    const existing = parseJson<Record<string, unknown>>(existingRow?.data_json, {}, 'settings.data_json')
+    const llm = existing.llm && typeof existing.llm === 'object' ? existing.llm as Record<string, unknown> : {}
+    const existingKey = typeof llm.apiKey === 'string' ? llm.apiKey : ''
     if (existingKey.startsWith('safe:')) {
       console.warn('[settings] saveSettings: apiKey 为空但数据库存在加密值，保留加密值防止丢失')
       copy.llm.apiKey = existingKey
@@ -118,12 +270,13 @@ export function saveSettings(settings: Settings, preserveEncryptedKey = false): 
 export function upgradeLegacySettingsSecrets(): void {
   const row = getDb().prepare('SELECT data_json FROM settings WHERE id = 1').get() as { data_json: string } | undefined
   if (!row) return
-  const parsed = row.data_json ? JSON.parse(row.data_json) : {}
-  const stored = parsed?.llm?.apiKey
+  const parsed = parseJson<Record<string, unknown>>(row.data_json, {}, 'settings.data_json')
+  const llm = parsed.llm && typeof parsed.llm === 'object' ? parsed.llm as Record<string, unknown> : {}
+  const stored = llm.apiKey
   if (typeof stored !== 'string' || !isLegacyPlain(stored)) return
   const upgraded = tryUpgradeLegacyPlain(stored)
   parsed.llm = {
-    ...parsed.llm,
+    ...llm,
     apiKey: upgraded ?? '',
   }
   getDb()
@@ -146,15 +299,36 @@ function setNestedValue(obj: Record<string, unknown>, dotPath: string, value: un
 }
 
 export function updateSetting(path: string, value: unknown): Settings {
-  if (path === 'llm.apiKey') {
-    const settings = getSettings()
-    setNestedValue(settings as unknown as Record<string, unknown>, path, value)
-    return saveSettings(settings)
-  }
-  const raw = getStoredSettingsRaw()
-  setNestedValue(raw as unknown as Record<string, unknown>, path, value)
-  updateSettingsSilent(raw)
-  return getSettings()
+  assertSettingPath(path)
+  return updateSettingsBatch([{ path, value } as SettingUpdatePatch])
+}
+
+export function updateSettingsBatch(updates: readonly SettingUpdatePatch[]): Settings {
+  const normalized = updates.flatMap((item) => {
+    assertSettingPath(item.path)
+    if (item.path === 'llm.apiKey' && item.value === '••••••') return []
+    return [{ path: item.path, value: validateSettingValue(item.path, item.value) }]
+  })
+  if (normalized.length === 0) return getSettings()
+
+  const touchesApiKey = normalized.some((item) => item.path === 'llm.apiKey')
+  const write = getDb().transaction(() => {
+    if (touchesApiKey) {
+      const settings = getSettings()
+      for (const item of normalized) {
+        setNestedValue(settings as unknown as Record<string, unknown>, item.path, item.value)
+      }
+      return saveSettings(settings)
+    }
+
+    const raw = getStoredSettingsRaw()
+    for (const item of normalized) {
+      setNestedValue(raw as unknown as Record<string, unknown>, item.path, item.value)
+    }
+    updateSettingsSilent(raw)
+    return getSettings()
+  })
+  return write()
 }
 
 export function updateSettingsSilent(settings: Settings): void {

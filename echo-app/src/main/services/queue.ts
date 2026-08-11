@@ -1,18 +1,15 @@
 import type { Track } from '../../types/ipc'
 import type { QueueHistoryDay } from '../../types/ipc'
+import { trackIdentity as trackKey } from '../../shared/trackIdentity'
 import { hideRecommendedTrackHistoryDates, loadRecentTracks, loadRecommendedTrackHistory, updateRecommendedTrackStatus } from '../db/tracks'
-
-function trackKey(track: Track): string {
-  return `${track.title.trim().toLowerCase()}::${track.artist.trim().toLowerCase()}`
-}
 
 export function getQueue(limit = 30): Track[] {
   const seen = new Set<string>()
-  const tracks = loadRecentTracks(limit)
+  const tracks = loadRecentTracks(limit * 4)
   const queue: Track[] = []
 
   for (const track of tracks) {
-    if (track.queueStatus === 'skipped') continue
+    if (track.queueStatus === 'skipped' || track.queueStatus === 'completed') continue
     const key = trackKey(track)
     if (seen.has(key)) continue
     seen.add(key)
@@ -32,7 +29,7 @@ export function clearQueueHistoryDates(dates: string[]): QueueHistoryDay[] {
   return getQueueHistory()
 }
 
-export function markQueueStatus(track: Track, status: NonNullable<Track['queueStatus']>): Track[] {
+export function markQueueStatus(track: Track, status: NonNullable<Track['queueStatus']>, reason?: Track['queueStatusReason']): Track[] {
   if (status === 'playing') {
     for (const item of getQueue()) {
       if (item.queueStatus === 'playing' && trackKey(item) !== trackKey(track)) {
@@ -40,6 +37,6 @@ export function markQueueStatus(track: Track, status: NonNullable<Track['queueSt
       }
     }
   }
-  updateRecommendedTrackStatus(track, status)
+  updateRecommendedTrackStatus(track, status, reason)
   return getQueue()
 }

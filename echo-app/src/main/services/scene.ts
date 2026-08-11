@@ -23,7 +23,7 @@ export const sceneDefinitions: SceneDefinition[] = [
     key: 'sleepy',
     label: '有点困',
     shortLabel: '有点困',
-    line: '把精神提一下,别一下子太猛。',
+    line: '把精神提一下，节奏别太冲。',
     prompt: '有点犯困,帮我找几首提神但别太炸的歌。',
     targetCount: 5,
     moods: ['清醒', '轻快'],
@@ -91,7 +91,7 @@ function cleanupLegacyScenes(): void {
       UPDATE scene_sessions
       SET status = 'ended',
           ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP)
-      WHERE user_id = 1
+      WHERE user_id = current_user_id()
         AND status = 'active'
         AND scene_key NOT IN (${placeholders})
     `)
@@ -141,7 +141,7 @@ function expireOverdueScenes(): void {
       UPDATE scene_sessions
       SET status = 'expired',
           ended_at = COALESCE(ended_at, expires_at)
-      WHERE user_id = 1
+      WHERE user_id = current_user_id()
         AND status = 'active'
         AND datetime(expires_at) <= datetime('now')
     `)
@@ -158,7 +158,7 @@ export function getCurrentScene(): ActiveScene | null {
     .prepare(`
       SELECT id, scene_key, label, started_at, ended_at, expires_at, status
       FROM scene_sessions
-      WHERE user_id = 1 AND status = 'active'
+      WHERE user_id = current_user_id() AND status = 'active'
       ORDER BY started_at DESC, id DESC
       LIMIT 1
     `)
@@ -176,13 +176,13 @@ export function startScene(key: SceneKey): ActiveScene {
       UPDATE scene_sessions
       SET status = 'ended',
           ended_at = CURRENT_TIMESTAMP
-      WHERE user_id = 1 AND status = 'active'
+      WHERE user_id = current_user_id() AND status = 'active'
     `)
     .run()
   const result = database
     .prepare(`
       INSERT INTO scene_sessions (user_id, scene_key, label, expires_at, meta_json)
-      VALUES (1, ?, ?, ?, ?)
+      VALUES (current_user_id(), ?, ?, ?, ?)
     `)
     .run(definition.key, definition.label, expiresAt, JSON.stringify(definition))
   const row = database
@@ -224,7 +224,7 @@ export function hasNewerSceneSession(scene: ActiveScene): boolean {
     .prepare(`
       SELECT id
       FROM scene_sessions
-      WHERE user_id = 1
+      WHERE user_id = current_user_id()
         AND id > ?
         AND datetime(started_at) >= datetime(?)
       ORDER BY id DESC
@@ -249,7 +249,7 @@ export function listTodaySceneSessions(): SceneSessionSummary[] {
     .prepare(`
       SELECT id, scene_key, label, started_at, ended_at, expires_at, status
       FROM scene_sessions
-      WHERE user_id = 1
+      WHERE user_id = current_user_id()
         AND date(started_at, 'localtime') = date('now', 'localtime')
         AND scene_key IN (${placeholders})
       ORDER BY started_at ASC, id ASC

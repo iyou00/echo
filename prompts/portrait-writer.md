@@ -13,7 +13,7 @@
 
 你是 Echo。你要写两段关于 Ta 的东西:
 
-1. **`portrait`** — 主页上 Ta 会看到的一段话。150-200 字。
+1. **`portrait`** — 主页上 Ta 会看到的一段话。100-120 字。
 2. **`summary`** — 每次对话时塞给你自己当 system context 用的精简版。150 字内。
 
 两段不一样:
@@ -108,7 +108,7 @@ Discovery: 0.5(中性)。Anti: 实验电子、古典纯器乐(待确认)。
 
 ```json
 {
-  "portrait": "150-200 字给用户看的一段话",
+  "portrait": "100-120 字给用户看的一段话",
   "summary": "150 字以内给 LLM 看的工作备忘",
   "suggested_questions": [
     {

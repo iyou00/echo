@@ -1,4 +1,4 @@
-import type { AppPageProps } from '../../App'
+import type { AppPageProps } from '../appState'
 
 export function AboutEchoPage({ navigate }: AppPageProps) {
   void navigate

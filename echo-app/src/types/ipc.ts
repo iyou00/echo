@@ -14,6 +14,7 @@ export interface Track {
   durationMs?: number
   recommendedAt?: string
   queueStatus?: 'pending' | 'playing' | 'completed' | 'skipped'
+  queueStatusReason?: 'playback_started' | 'playback_completed' | 'playback_skipped' | 'explicit_feedback' | 'queue_removed' | 'scene_replaced' | 'playback_failed'
   echoNote?: string
   favorited?: boolean
   semantic?: TrackSemantic
@@ -32,10 +33,54 @@ export type ExplicitTrackFeedbackAction = 'more_like_this' | 'not_right'
 export type SceneKey = 'focus' | 'sleepy' | 'relax' | 'irritated' | 'random'
 export type PingType = 'recommend_track' | 'casual_check' | 'voice_invite'
 export type CareFrequency = 'gentle' | 'normal' | 'frequent'
-export type OnboardingStep = 'playlist' | 'done'
-export type AppPageKey = 'chat' | 'profile' | 'yinyi' | 'voice' | 'queue' | 'settings'
-export type ServiceHealthKind = 'llm' | 'netease' | 'tts' | 'weather' | 'scheduler' | 'storage'
+export type OnboardingStep = 'api' | 'playlist' | 'done'
+export type AppPageKey = 'chat' | 'profile' | 'yinyi' | 'voice' | 'queue' | 'settings' | 'about'
+export type ServiceHealthKind =
+  | 'llm'
+  | 'netease'
+  | 'tts'
+  | 'weather'
+  | 'scheduler'
+  | 'scheduler-catchup'
+  | 'scheduler-yinyi'
+  | 'scheduler-taste-structured'
+  | 'scheduler-taste-portrait'
+  | 'scheduler-care-ping'
+  | 'storage'
 export type ServiceHealthStatus = 'ok' | 'degraded' | 'error' | 'unknown'
+export type RuntimeTaskStatus = 'running' | 'succeeded' | 'failed' | 'canceled'
+export type RuntimeTaskVisibility = 'user' | 'internal'
+export type RuntimeErrorKind = 'config' | 'network' | 'auth' | 'rate_limit' | 'server' | 'timeout' | 'canceled' | 'unknown'
+export const RUNTIME_TASK_RECENT_LIMIT = 50
+
+export interface RuntimeTaskSnapshot {
+  id: string
+  parentTaskId?: string
+  kind: string
+  status: RuntimeTaskStatus
+  phase: string
+  current: number
+  total: number
+  startedAt: string
+  updatedAt: string
+  finishedAt?: string
+  sourceName?: string
+  message?: string
+  error?: string
+  errorKind?: RuntimeErrorKind
+  cancellable: boolean
+  visibility: RuntimeTaskVisibility
+}
+
+export interface RuntimeEvent {
+  id: string
+  taskId?: string
+  kind: string
+  channel: string
+  payload: unknown
+  createdAt: string
+  visibility: RuntimeTaskVisibility
+}
 
 export interface ServiceHealth {
   service: ServiceHealthKind
@@ -72,7 +117,7 @@ export interface TrackProfileEvidence {
 }
 
 export type ProfileEvidenceLevel = 'strong' | 'medium' | 'weak'
-export type ProfileEvidenceSource = 'favorite' | 'loop' | 'played' | 'scene' | 'imported' | 'semantic' | 'fallback'
+export type ProfileEvidenceSource = 'favorite' | 'loop' | 'played' | 'scene' | 'imported' | 'semantic' | 'explicit_like' | 'explicit_miss' | 'fallback'
 
 export interface ProfileDisplayModel {
   signatureItems: Array<{ track: Track; note?: string; count?: number; evidenceLevel: ProfileEvidenceLevel; source: ProfileEvidenceSource }>
@@ -123,6 +168,8 @@ export interface ScenePlaybackResult {
 
 export interface ScenePlaybackOptions {
   appendChatMessage?: boolean
+  continueSession?: boolean
+  targetCount?: number
 }
 
 export interface SemanticSummary {
@@ -199,6 +246,12 @@ export interface QueueHistoryDay {
   tracks: Track[]
 }
 
+export interface FavoriteListOptions {
+  limit?: number
+  offset?: number
+  query?: string
+}
+
 export interface ChatMessage {
   id: number
   role: Role
@@ -214,8 +267,10 @@ export interface TasteProfile {
   era_preference?: Record<string, number>
   discovery_appetite: number
   anti_patterns: string[]
+  anti_pattern_meta?: Record<string, string>
   signature_tracks: Track[]
   echo_portrait: string
+  work_summary?: string
   energy_preference?: number
   tempo_preference?: { slow: number; medium: number; fast: number }
   scenes?: Array<{ tag: string; frequency: number }>
@@ -223,9 +278,35 @@ export interface TasteProfile {
   profile_meta?: {
     updatedAt?: string
     structuredUpdatedAt?: string
+    portraitUpdatedAt?: string
     refreshReason?: string
     signalCount?: number
     portraitSignalCount?: number
+    signalUpdatedAt?: string
+    signalRevision?: number
+    structuredSignalRevision?: number
+    portraitSignalRevision?: number
+    statsEvidence?: {
+      importedTrackCount: number
+      semanticTrackCount: number
+      feedbackTrackCount: number
+      positiveEventCount: number
+      eraImportedCount: number
+      eraBehaviorCount: number
+      energyImportedCount: number
+      energyBehaviorCount: number
+      tempoImportedCount: number
+      tempoBehaviorCount: number
+      sceneEventCount: number
+    }
+    incrementalSignals?: Array<{
+      kind: 'like_artist' | 'like_genre' | 'reinforce_vibe' | 'like_track'
+      target: string
+      artist?: string
+      title?: string
+      strength?: number
+      updatedAt: string
+    }>
   }
 }
 
@@ -236,6 +317,39 @@ export interface TasteQuestion {
   status: 'pending' | 'answered' | 'skipped' | 'expired'
   answered_content?: string
   context?: Record<string, unknown>
+}
+
+export type MemoryAuditKind =
+  | 'correction'
+  | 'favorite'
+  | 'loop'
+  | 'played'
+  | 'skip'
+  | 'explicit_like'
+  | 'explicit_miss'
+
+export interface MemoryAuditItem {
+  id: string
+  kind: MemoryAuditKind
+  label: string
+  title: string
+  detail?: string
+  createdAt?: string
+  track?: Track
+  weight?: number
+}
+
+export interface MemoryAuditSummary {
+  updatedAt: string
+  counts: {
+    corrections: number
+    favorites: number
+    explicitLikes: number
+    explicitMisses: number
+    loops: number
+    repeatedSkips: number
+  }
+  items: MemoryAuditItem[]
 }
 
 export interface Settings {
@@ -263,7 +377,7 @@ export interface Settings {
   }
   ui: {
     theme?: 'light' | 'dark' | 'system'
-    closeBehavior?: 'ask' | 'minimize'
+    closeBehavior?: 'ask' | 'minimize' | 'quit'
   }
   window: {
     closeHintShown: boolean
@@ -288,6 +402,42 @@ export interface Settings {
   }
 }
 
+export interface SettingPathValueMap {
+  'llm.baseUrl': string
+  'llm.apiKey': string
+  'llm.model': string
+  'llm.lastTestedAt': string
+  'llm.lastTestedOk': boolean
+  'yinyi.generateAt': string
+  'yinyi.openWithRandom': boolean
+  'carePings.enabled': boolean
+  'carePings.frequency': CareFrequency
+  'carePings.detectFullscreen': boolean
+  'chat.restoreOnStart': boolean
+  'playback.autoPlayNext': boolean
+  'ui.theme': NonNullable<Settings['ui']['theme']>
+  'ui.closeBehavior': NonNullable<Settings['ui']['closeBehavior']>
+  'window.closeHintShown': boolean
+  'user.city': string
+  'tts.baseUrl': string
+  'tts.voice': string
+  'tts.speed': number
+  'tts.pitch': string
+  'meta.schemaVersion': number
+  'meta.firstUsedAt': string
+  'meta.lastViewedYinyiAt': string | undefined
+  'meta.firstRunWelcomeCompletedAt': string | undefined
+  'meta.onboardingCompletedAt': string | undefined
+  'meta.onboardingStep': OnboardingStep
+  'meta.lastPrunedAt': string | undefined
+}
+
+export type SettingPath = keyof SettingPathValueMap
+
+export type SettingUpdatePatch<P extends SettingPath = SettingPath> = {
+  [K in P]: { path: K; value: SettingPathValueMap[K] }
+}[P]
+
 export interface YinyiEntry {
   id?: number
   date: string
@@ -295,8 +445,15 @@ export interface YinyiEntry {
   style: string
   meta?: {
     tracks?: Track[]
+    dismissed_tracks?: Track[]
     status?: 'ok' | 'absent' | 'failed'
     error?: string
+    word_count?: number
+    conversations_count?: number
+    duration_ms?: number
+    model?: string
+    fallback?: boolean
+    fallback_error?: string
   }
   createdAt?: string
 }
@@ -348,6 +505,8 @@ export interface NeteasePlaylistSummary {
 
 export interface ChatHints {
   neteaseAuthRequired?: boolean
+  playbackAlreadyApplied?: boolean
+  runtimeFailure?: boolean
 }
 
 export interface SendChatResult {
@@ -362,9 +521,17 @@ export interface VoiceLine {
 }
 
 export interface EchoApi {
+  runtime: {
+    getTask(id: string): Promise<RuntimeTaskSnapshot | null>
+    getRecentTasks(): Promise<RuntimeTaskSnapshot[]>
+    cancelTask(id: string): Promise<{ ok: boolean }>
+    onTaskChanged(listener: (snapshot: RuntimeTaskSnapshot) => void): () => void
+    onEvent(listener: (event: RuntimeEvent) => void): () => void
+  }
   settings: {
     get(): Promise<Settings>
-    update(path: string, value: unknown): Promise<Settings>
+    update<P extends SettingPath>(path: P, value: SettingPathValueMap[P]): Promise<Settings>
+    updateBatch(updates: SettingUpdatePatch[]): Promise<Settings>
     testLlm(): Promise<LlmTestResult>
     importPlaylist(): Promise<ImportPlaylistResult>
     downloadPlaylistTemplate(): Promise<{ ok: boolean; path?: string; message: string }>
@@ -388,8 +555,11 @@ export interface EchoApi {
   }
   taste: {
     getProfile(): Promise<{ profile: TasteProfile | null; questions: TasteQuestion[] }>
+    getMemoryAudit(): Promise<MemoryAuditSummary>
+    refreshStructuredProfile(): Promise<TasteProfile | null>
     regeneratePortrait(): Promise<TasteProfile | null>
     applySignal(kind: string, payload: Record<string, unknown>): Promise<TasteProfile | null>
+    correctMemory(note: string): Promise<{ ok: boolean; message: string }>
     answerQuestion(id: number, answer: string): Promise<{ ok: boolean }>
   }
   yinyi: {
@@ -406,9 +576,12 @@ export interface EchoApi {
     markStatus(track: Track, status: Track['queueStatus']): Promise<Track[]>
   }
   favorites: {
-    list(): Promise<Track[]>
+    list(options?: FavoriteListOptions): Promise<Track[]>
+    count(query?: string): Promise<number>
+    listKeys(): Promise<string[]>
     toggle(track: Track): Promise<{ favorited: boolean; favorites: Track[] }>
     isFavorite(track: Track): Promise<boolean>
+    onChanged(listener: (payload: { track: Track; favorited: boolean; total: number }) => void): () => void
   }
   feedback: {
     record(track: Track, action: ExplicitTrackFeedbackAction, context?: string): Promise<{ ok: boolean; message: string }>
@@ -446,6 +619,7 @@ export interface EchoApi {
     getVolume(): Promise<number>
     seek(positionMs: number): Promise<PlaybackState>
     removeFromQueue(index: number): Promise<PlaybackState>
+    removeTrackFromQueue(track: Track): Promise<PlaybackState>
     clearQueue(): Promise<PlaybackState>
     reorderQueue(fromIndex: number, toIndex: number): Promise<PlaybackState>
     heartbeat(state: PlaybackHeartbeat): Promise<PlaybackState>
@@ -456,6 +630,7 @@ export interface EchoApi {
     onCookieExpired(listener: (message: string) => void): () => void
   }
   app: {
+    openFeedback(): Promise<{ ok: boolean }>
     minimizeToTray(): Promise<{ ok: boolean }>
     quit(): Promise<{ ok: boolean }>
     onCloseRequested(listener: () => void): () => void
@@ -474,7 +649,17 @@ export interface EchoApi {
     get(city?: string): Promise<{ city: string; condition: string; tempC: number; humidity: number; summary: string } | null>
   }
   listening: {
-    generateSegment(options?: { continuation?: boolean }): Promise<{ text: string; track: Track | null; audioUrl?: string; error?: string; generatedAt: string }>
+    generateSegment(options?: { continuation?: boolean; automatic?: boolean }): Promise<{
+      text: string
+      track: Track | null
+      delivery: 'spoken' | 'silent'
+      density: 'silent' | 'micro' | 'brief' | 'full'
+      sessionId: number
+      audioUrl?: string
+      error?: string
+      generatedAt: string
+    }>
+    endSession(sessionId?: number): Promise<{ ok: boolean }>
   }
   carePings: {
     test(type?: PingType): Promise<{ ok: boolean; message: string }>
@@ -488,6 +673,9 @@ export interface EchoApi {
     getLoginState(): Promise<NeteaseLoginState>
     createQrLogin(): Promise<NeteaseQrLogin>
     checkQrLogin(key: string): Promise<NeteaseQrCheckResult>
+    sendCaptcha(phone: string): Promise<{ ok: boolean; message: string }>
+    loginWithCaptcha(phone: string, captcha: string): Promise<NeteaseLoginState>
+    importCookie(cookie: string): Promise<NeteaseLoginState>
     logout(): Promise<NeteaseLoginState>
     listPlaylists(): Promise<NeteasePlaylistSummary[]>
     importPlaylist(id: string): Promise<ImportPlaylistResult>

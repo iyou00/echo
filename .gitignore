@@ -27,6 +27,7 @@ lerna-debug.log*
 /userData/
 echo-app/data/
 echo-app/userData/
+echo-app/.electron-user-data/
 *.db
 *.db-*
 *.sqlite
@@ -49,3 +50,5 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+myagents_files/
+.claude/plans/myagents/

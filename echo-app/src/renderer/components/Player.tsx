@@ -1,8 +1,9 @@
-import { MouseEvent, PointerEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { KeyboardEvent, MouseEvent, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Pause, Play } from 'lucide-react'
-import type { EchoApi, PlaybackState, PlaybackStatus, Track } from '../../types/ipc'
+import type { ActiveScene, EchoApi, PlaybackState, PlaybackStatus, Track } from '../../types/ipc'
 import { WaveBars } from '../components'
 import { pageLabels } from '../labels'
+import { decidePlaybackCompletionAction } from './playerCompletion'
 
 interface PlayerProps {
   echo: EchoApi
@@ -10,7 +11,9 @@ interface PlayerProps {
   setState: (state: PlaybackState) => void
   refreshQueue: () => Promise<Track[]>
   autoPlayNext: boolean
+  currentScene?: ActiveScene | null
   voiceContinuous?: boolean
+  onSceneTrackEnded?: (scene: ActiveScene) => void | Promise<void>
   onVoiceTrackEnded?: () => void
 }
 
@@ -29,7 +32,7 @@ function trackId(track?: Track | null): string {
 // 避免与正在进行的拖拽、或拖拽完瞬间收到的旧心跳互相打架，造成听感上的来回跳。
 const USER_SEEK_QUIET_MS = 1000
 
-export function Player({ echo, state, setState, refreshQueue, autoPlayNext, voiceContinuous = false, onVoiceTrackEnded }: PlayerProps) {
+export function Player({ echo, state, setState, refreshQueue, autoPlayNext, currentScene = null, voiceContinuous = false, onSceneTrackEnded, onVoiceTrackEnded }: PlayerProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const loadedTrackRef = useRef('')
   const applyingSeekRef = useRef(false)
@@ -38,9 +41,12 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, voic
   const lastHeartbeatRef = useRef(0)
   const draggingSeekRef = useRef(false)
   const lastUserSeekAtRef = useRef(0)
+  const retryCountRef = useRef(0)
+  const lastRetryTimeRef = useRef(0)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [localPlaying, setLocalPlaying] = useState(false)
+  const [playbackError, setPlaybackError] = useState<string | null>(null)
   const current = state.current
   const currentId = trackId(current)
   const displayDuration = duration || (current?.durationMs ? current.durationMs / 1000 : 0)
@@ -48,6 +54,17 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, voic
   const activeSegments = Math.round(progressRatio * 30)
   const canPlayPrevious = state.history.length > 0
   const canPlayNext = state.queue.length > 0
+
+  const handleAudioPlayFailure = useCallback(async (message: string) => {
+    setLocalPlaying(false)
+    setPlaybackError(message)
+    try {
+      const next = await echo.playback.pause()
+      setState(next)
+    } catch {
+      // Keep the local error visible even if the main process is unavailable.
+    }
+  }, [echo, setState])
 
   function isNearEnd(audio: HTMLAudioElement | null) {
     if (!audio || !current) return false
@@ -58,21 +75,28 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, voic
 
   async function completePlayback() {
     if (completingRef.current) return
-    const shouldContinueVoice = Boolean(autoPlayNext && voiceContinuous && current?.sourceContext === 'voice')
+    const completionAction = decidePlaybackCompletionAction({ voiceContinuous, currentScene, current, autoPlayNext })
+    const shouldContinueVoice = completionAction === 'voice_continue'
+    const shouldContinueScene = completionAction === 'scene_continue'
     completingRef.current = true
     endingRef.current = true
     setLocalPlaying(false)
     try {
       await sendHeartbeat(true, 'playing')
-      const next = shouldContinueVoice ? await echo.playback.finishCurrent() : autoPlayNext ? await echo.playback.next() : await echo.playback.finishCurrent()
+      const next = completionAction === 'auto_next' ? await echo.playback.next() : await echo.playback.finishCurrent()
       setState(next)
       await refreshQueue()
       if (shouldContinueVoice) onVoiceTrackEnded?.()
-    } finally {
-      window.setTimeout(() => {
-        endingRef.current = false
+      if (shouldContinueScene && currentScene) await onSceneTrackEnded?.(currentScene)
+      
+      // If the track did not change (e.g., end of queue), reset flags manually since the useEffect won't trigger
+      if (trackId(next.current) === currentId) {
         completingRef.current = false
-      }, 300)
+        endingRef.current = false
+      }
+    } catch (err) {
+      completingRef.current = false
+      endingRef.current = false
     }
   }
 
@@ -84,9 +108,18 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, voic
       const oldPos = audio.currentTime
       audio.src = payload.url
       audio.currentTime = oldPos
-      audio.play().catch(() => undefined)
+      audio.play().catch(() => {
+        void handleAudioPlayFailure('播放恢复失败，请点一下播放重试。')
+      })
     })
-  }, [currentId, echo])
+  }, [currentId, echo, handleAudioPlayFailure])
+
+  useEffect(() => {
+    completingRef.current = false
+    endingRef.current = false
+    retryCountRef.current = 0
+    setPlaybackError(null)
+  }, [currentId])
 
   useEffect(() => {
     const audio = audioRef.current
@@ -111,10 +144,12 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, voic
     }
 
     if (state.status === 'loading' || state.status === 'playing') {
-      audio.play().catch(() => undefined)
+      audio.play().catch(() => {
+        void handleAudioPlayFailure('播放没有启动，请点一下播放重试。')
+      })
     }
     if (state.status === 'paused') audio.pause()
-  }, [current, currentId, state.status])
+  }, [current, currentId, handleAudioPlayFailure, state.status])
 
   useEffect(() => {
     const audio = audioRef.current
@@ -161,8 +196,14 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, voic
 
   async function togglePlayback() {
     if (!current?.playUrl) return
-    const next = state.status === 'playing' || localPlaying ? await echo.playback.pause() : await echo.playback.resume()
+    const shouldPause = state.status === 'playing' || localPlaying
+    const next = shouldPause ? await echo.playback.pause() : await echo.playback.resume()
     setState(next)
+    if (!shouldPause) {
+      await audioRef.current?.play().catch(() => {
+        void handleAudioPlayFailure('播放没有启动，请点一下播放重试。')
+      })
+    }
   }
 
   async function playPrevious() {
@@ -177,14 +218,13 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, voic
     await refreshQueue()
   }
 
-  async function seekFromClientX(clientX: number, target: HTMLDivElement, persist: boolean) {
+  async function seekToSeconds(seconds: number, persist: boolean) {
     if (!current || displayDuration <= 0) return
-    const rect = target.getBoundingClientRect()
-    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
-    const nextPosition = Math.floor(ratio * displayDuration * 1000)
+    const boundedSeconds = Math.min(displayDuration, Math.max(0, seconds))
+    const nextPosition = Math.floor(boundedSeconds * 1000)
     const audio = audioRef.current
-    if (audio) audio.currentTime = nextPosition / 1000
-    setCurrentTime(nextPosition / 1000)
+    if (audio) audio.currentTime = boundedSeconds
+    setCurrentTime(boundedSeconds)
     lastUserSeekAtRef.current = Date.now()
     if (persist) {
       const next = await echo.playback.seek(nextPosition)
@@ -194,8 +234,32 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, voic
     }
   }
 
+  async function seekFromClientX(clientX: number, target: HTMLDivElement, persist: boolean) {
+    if (!current || displayDuration <= 0) return
+    const rect = target.getBoundingClientRect()
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
+    await seekToSeconds(ratio * displayDuration, persist)
+  }
+
   async function seekFromEvent(event: MouseEvent<HTMLDivElement>) {
     await seekFromClientX(event.clientX, event.currentTarget, true)
+  }
+
+  async function seekFromKeyboard(event: KeyboardEvent<HTMLDivElement>) {
+    if (!current || displayDuration <= 0) return
+    const step = event.shiftKey ? 30 : 5
+    const next = (() => {
+      if (event.key === 'ArrowLeft') return currentTime - step
+      if (event.key === 'ArrowRight') return currentTime + step
+      if (event.key === 'PageDown') return currentTime - 30
+      if (event.key === 'PageUp') return currentTime + 30
+      if (event.key === 'Home') return 0
+      if (event.key === 'End') return displayDuration
+      return null
+    })()
+    if (next === null) return
+    event.preventDefault()
+    await seekToSeconds(next, true)
   }
 
   function startSeekDrag(event: PointerEvent<HTMLDivElement>) {
@@ -214,13 +278,28 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, voic
     if (!draggingSeekRef.current) return
     draggingSeekRef.current = false
     event.currentTarget.releasePointerCapture(event.pointerId)
-    seekFromClientX(event.clientX, event.currentTarget, true)
+    seekFromClientX(event.clientX, event.currentTarget, true).catch(() => undefined)
   }
 
   async function recoverUrl() {
     if (!currentId) return
     const audio = audioRef.current
     const oldPos = audio?.currentTime ?? 0
+    const now = Date.now()
+    
+    if (now - lastRetryTimeRef.current > 10000) {
+      retryCountRef.current = 0
+    }
+    lastRetryTimeRef.current = now
+    retryCountRef.current += 1
+    
+    if (retryCountRef.current > 3) {
+      setLocalPlaying(false)
+      setPlaybackError('播放链接失效且重试失败，请检查网络或重新登录。')
+      echo.playback.pause().then(setState).catch(() => undefined)
+      return
+    }
+
     try {
       const result = await echo.playback.refreshUrl(currentId)
       setState(result.state)
@@ -231,6 +310,8 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, voic
       }
     } catch {
       setLocalPlaying(false)
+      setPlaybackError('自动刷新播放链接失败，请重试。')
+      echo.playback.pause().then(setState).catch(() => undefined)
     }
   }
 
@@ -238,14 +319,15 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, voic
     <footer className="mini-player global-player">
       <audio
         ref={audioRef}
-        onPlay={async () => {
+        onPlay={() => {
           setLocalPlaying(true)
-          const next = await echo.playback.heartbeat({
+          setPlaybackError(null)
+          retryCountRef.current = 0
+          echo.playback.heartbeat({
             position: Math.floor((audioRef.current?.currentTime ?? 0) * 1000),
             duration: Math.floor((audioRef.current?.duration || displayDuration) * 1000),
             status: 'playing',
-          })
-          setState(next)
+          }).then(setState).catch(() => undefined)
         }}
         onPause={() => {
           setLocalPlaying(false)
@@ -254,7 +336,7 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, voic
             return
           }
           if (endingRef.current || audioRef.current?.ended) return
-          sendHeartbeat(true, 'paused')
+          sendHeartbeat(true, 'paused').catch(() => undefined)
         }}
         onEnded={() => completePlayback().catch(() => undefined)}
         onError={recoverUrl}
@@ -265,33 +347,49 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, voic
             completePlayback().catch(() => undefined)
             return
           }
-          sendHeartbeat()
+          sendHeartbeat().catch(() => undefined)
         }}
       />
       <WaveBars active={localPlaying} />
       <div className="player-row">
         <div className="player-copy">
           <div className="player-title">{current?.title ?? `还没有${pageLabels.queue}`}</div>
-          <div className="player-artist">{current?.artist ?? '让 Echo 推荐后，这里开始播放'}</div>
+          <div className="player-artist">
+            {playbackError ? (
+              <span className="error-text" style={{ color: '#ff6b6b', fontSize: '0.85em' }}>
+                {playbackError}
+              </span>
+            ) : (
+              current?.artist ?? '让 Echo 推荐后，这里开始播放'
+            )}
+          </div>
         </div>
         <div className="player-controls">
-          <button type="button" onClick={playPrevious} disabled={!canPlayPrevious} title="上一曲">‹</button>
-          <button className="main" type="button" onClick={togglePlayback} disabled={!current?.playUrl}>
+          <button type="button" onClick={() => playPrevious().catch(() => undefined)} disabled={!canPlayPrevious} title="上一曲">‹</button>
+          <button className="main" type="button" onClick={() => togglePlayback().catch(() => undefined)} disabled={!current?.playUrl}>
             {localPlaying ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
           </button>
-          <button type="button" onClick={playNext} disabled={!canPlayNext} title="下一曲">›</button>
+          <button type="button" onClick={() => playNext().catch(() => undefined)} disabled={!canPlayNext} title="下一曲">›</button>
         </div>
       </div>
       <div className="seg-progress">
         <span>{formatClock(currentTime)}</span>
         <div
           className="seg-track"
-          onClick={seekFromEvent}
+          onClick={(e) => seekFromEvent(e).catch(() => undefined)}
           onPointerDown={startSeekDrag}
           onPointerMove={moveSeekDrag}
           onPointerUp={stopSeekDrag}
           onPointerCancel={stopSeekDrag}
-          role="presentation"
+          onKeyDown={(event) => { void seekFromKeyboard(event).catch(() => undefined) }}
+          role="slider"
+          tabIndex={current ? 0 : -1}
+          aria-label="播放进度"
+          aria-valuemin={0}
+          aria-valuemax={Math.max(0, Math.floor(displayDuration))}
+          aria-valuenow={Math.max(0, Math.floor(currentTime))}
+          aria-valuetext={`${formatClock(currentTime)} / ${formatClock(displayDuration)}`}
+          aria-disabled={!current}
         >
           {Array.from({ length: 30 }).map((_, index) => (
             <i key={index} className={index < activeSegments ? 'on' : ''} />

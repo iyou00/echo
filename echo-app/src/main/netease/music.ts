@@ -1,16 +1,45 @@
 import { createRequire } from 'node:module'
 import type { ImportPlaylistResult, NeteasePlaylistSummary, Track } from '../../types/ipc'
-import { importPlaylist as savePlaylist } from '../db/playlists'
+import { getAllImportedTracks, importPlaylist as savePlaylist } from '../db/playlists'
 import { buildInitialProfile } from '../services/taste'
 import { buildSemanticsForTracks } from '../services/semantics'
 import { runImportTask } from '../services/importTasks'
 import { getNeteaseLoginState, readNeteaseCookie } from './auth'
+import { type MusicEntityConstraint, trackMatchesMusicEntity } from '../skills/music/verifier'
+import { recordHealth } from '../services/health'
+import { broadcast } from '../ipc/shared'
 
 const require = createRequire(import.meta.url)
 const netease = require('@neteasecloudmusicapienhanced/api') as typeof import('@neteasecloudmusicapienhanced/api')
+const PLAYABLE_LOOKUP_NOTICE_COOLDOWN_MS = 60_000
+let lastPlayableLookupNoticeAt = 0
 
 type ApiResponse = {
   body?: Record<string, unknown>
+}
+
+class NeteasePlayableLookupError extends Error {
+  constructor(readonly kind: 'auth', message: string) {
+    super(message)
+    this.name = 'NeteasePlayableLookupError'
+  }
+}
+
+function isNeteaseAuthCode(code: number): boolean {
+  return code === 301 || code === 302 || code === 401
+}
+
+function assertNeteaseApiReady(body: Record<string, unknown> | undefined): void {
+  const data = asObject(body)
+  const code = Number(data.code ?? 0)
+  const message = String(data.message ?? data.msg ?? '')
+  if (isNeteaseAuthCode(code) || /登录|cookie|凭证/.test(message)) {
+    throw new NeteasePlayableLookupError('auth', message || '网易云登录已过期')
+  }
+}
+
+function isPlayableLookupAuthError(error: unknown): boolean {
+  return error instanceof NeteasePlayableLookupError && error.kind === 'auth'
 }
 
 function requireLogin(): { cookie: string; userId: number } {
@@ -82,13 +111,13 @@ export async function importNeteasePlaylist(id: string): Promise<ImportPlaylistR
     return { imported: false, count: 0, name, message: '这个歌单没有识别到可导入歌曲' }
   }
 
-  return runImportTask('netease-playlist', name, async (report) => {
-    savePlaylist({ name, tracks, source: 'netease' })
-    const semantics = await buildSemanticsForTracks(tracks, report)
+  return runImportTask('netease-playlist', name, async (report, signal) => {
+    savePlaylist({ name, tracks, source: `netease:${id}` })
+    await buildSemanticsForTracks(tracks, report, { signal })
     report({ phase: 'profile', current: 0, total: 1 })
-    const profile = await buildInitialProfile(tracks)
+    const profile = await buildInitialProfile(getAllImportedTracks())
     report({ phase: 'done', current: 1, total: 1 })
-    return { imported: true, count: tracks.length, name, profile, message: `已从网易云导入 ${tracks.length} 首，新增语义标签 ${semantics.tagged} 首` }
+    return { imported: true, count: tracks.length, name, profile, message: `已从网易云导入 ${tracks.length} 首` }
   })
 }
 
@@ -101,7 +130,14 @@ function compactText(value: string): string {
   return value.toLowerCase().replace(/\s+/g, '').replace(/[《》"'“”·.,，。!！?？()（）-]/g, '')
 }
 
-function searchSongMatches(track: Track, song: Record<string, unknown>): boolean {
+export interface ResolvePlayableTrackOptions {
+  constraint?: MusicEntityConstraint
+  strictArtist?: boolean
+  strictTitle?: boolean
+  signal?: AbortSignal
+}
+
+function searchSongMatches(track: Track, song: Record<string, unknown>, options: ResolvePlayableTrackOptions = {}): boolean {
   const songTitle = compactText(String(song.name ?? ''))
   const targetTitle = compactText(track.title)
   if (!songTitle || !targetTitle) return false
@@ -110,26 +146,45 @@ function searchSongMatches(track: Track, song: Record<string, unknown>): boolean
   const titleHit = songTitle === targetTitle || songTitle.includes(targetTitle) || targetTitle.includes(songTitle)
   if (!titleHit) return false
 
-  // artist 缺省（来自 Echo 文本里只写了《歌名》而没有艺人名）→ 不强制匹配，由调用方接受网易云搜出的第一条相关结果。
+  const artists = asArray(song.ar ?? song.artists)
+    .map((artist) => String(asObject(artist).name ?? ''))
+    .filter(Boolean)
+  if (options.constraint) {
+    return trackMatchesMusicEntity(
+      {
+        title: String(song.name ?? track.title),
+        artist: artists.join(' / ') || track.artist,
+      },
+      options.constraint,
+      { strictArtist: options.strictArtist, strictTitle: options.strictTitle },
+    )
+  }
+
   const targetArtists = compactText(track.artist ?? '')
   if (!targetArtists) return true
-
-  const artists = asArray(song.ar ?? song.artists)
-    .map((artist) => compactText(String(asObject(artist).name ?? '')))
-    .filter(Boolean)
-  return artists.some((artist) => targetArtists.includes(artist) || artist.includes(targetArtists))
+  const artistHit = artists
+    .map(compactText)
+    .some((artist) => targetArtists.includes(artist) || artist.includes(targetArtists))
+  return artistHit
 }
 
-async function findNeteaseSong(track: Track, cookie: string): Promise<Track | null> {
-  if (track.id) return track
+async function findNeteaseSong(track: Track, cookie: string, options: ResolvePlayableTrackOptions = {}): Promise<Track | null> {
+  assertPlayableFilterActive(options.signal)
+  if (track.id) {
+    if (options.constraint && !trackMatchesMusicEntity(track, options.constraint, { strictArtist: options.strictArtist, strictTitle: options.strictTitle })) return null
+    return track
+  }
   const keywords = `${track.title} ${track.artist ?? ''}`.trim()
   if (!keywords) return null
 
-  const result = await netease.cloudsearch({ keywords, type: 1, limit: 5, offset: 0, cookie }) as ApiResponse
+  const result = await netease.cloudsearch({ keywords, type: 1, limit: 5, offset: 0, cookie, signal: options.signal } as never) as ApiResponse
+  assertPlayableFilterActive(options.signal)
+  assertNeteaseApiReady(result.body)
   const resultBody = asObject(result.body?.result)
   const songs = asArray(resultBody.songs).map(asObject)
-  const song = songs.find((item) => searchSongMatches(track, item)) ?? firstSearchSong(result.body)
-  if (!searchSongMatches(track, song)) return null
+  const matchedSong = songs.find((item) => searchSongMatches(track, item, options))
+  const song = matchedSong ?? (options.constraint ? {} : firstSearchSong(result.body))
+  if (!searchSongMatches(track, song, options)) return null
   const id = song.id ? String(song.id) : ''
   if (!id) return null
 
@@ -148,18 +203,30 @@ async function findNeteaseSong(track: Track, cookie: string): Promise<Track | nu
   }
 }
 
-export async function resolvePlayableTrack(track: Track): Promise<Track | null> {
+export async function resolvePlayableTrack(track: Track, options: ResolvePlayableTrackOptions = {}): Promise<Track | null> {
+  assertPlayableFilterActive(options.signal)
   const cookie = readNeteaseCookie()
   if (!cookie) return null
 
-  const song = await findNeteaseSong(track, cookie)
+  const song = await findNeteaseSong(track, cookie, options)
   if (!song?.id) return null
 
   // 修订自 v0.1-fixes 第 1 条:
   // 不要把临时 ref 或展示文案当作播放源。播放 URL 只绑定到完整 Track 的网易云 id。
-  const result = await netease.song_url_v1({ id: song.id, level: 'exhigh' as never, cookie }) as ApiResponse
-  const data = asObject(asArray(result.body?.data)[0])
-  const url = typeof data.url === 'string' ? data.url : ''
+  assertPlayableFilterActive(options.signal)
+  let result = await netease.song_url_v1({ id: song.id, level: 'exhigh', cookie, signal: options.signal } as never) as ApiResponse
+  assertPlayableFilterActive(options.signal)
+  assertNeteaseApiReady(result.body)
+  let data = asObject(asArray(result.body?.data)[0])
+  let url = typeof data.url === 'string' ? data.url : ''
+  if (!url) {
+    assertPlayableFilterActive(options.signal)
+    result = await netease.song_url_v1({ id: song.id, level: 'standard', cookie, signal: options.signal } as never) as ApiResponse
+    assertPlayableFilterActive(options.signal)
+    assertNeteaseApiReady(result.body)
+    data = asObject(asArray(result.body?.data)[0])
+    url = typeof data.url === 'string' ? data.url : ''
+  }
   if (!url) return null
 
   return {
@@ -179,12 +246,72 @@ export async function refreshPlayableUrl(track: Track): Promise<Track | null> {
   return resolvePlayableTrack({ ...track, playUrl: undefined, urlExpiresAt: undefined })
 }
 
-export async function filterPlayableTracks(candidates: Track[], limit = 3): Promise<Track[]> {
+function assertPlayableFilterActive(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException('任务已取消', 'AbortError')
+}
+
+function notifyPlayableLookupDegraded(): void {
+  const now = Date.now()
+  recordHealth('netease', 'degraded', '推荐路径未获得有效播放链接，网易云登录可能已过期。')
+  if (now - lastPlayableLookupNoticeAt < PLAYABLE_LOOKUP_NOTICE_COOLDOWN_MS) return
+  lastPlayableLookupNoticeAt = now
+  broadcast('netease:cookie-expired', '网易云播放链接获取失败，请到设置页重新登录后再试。')
+}
+
+type PlayableResolver = (track: Track) => Promise<Track | null>
+
+async function collectPlayableTracksInOrder(
+  candidates: Track[],
+  limit: number,
+  signal: AbortSignal | undefined,
+  resolveCandidate: PlayableResolver,
+  onError?: (error: unknown) => void,
+): Promise<{ tracks: Track[]; attemptedCount: number; failCount: number }> {
   const playable: Track[] = []
-  for (const candidate of candidates) {
-    if (playable.length >= limit) break
-    const track = await resolvePlayableTrack(candidate).catch(() => null)
-    if (track) playable.push(track)
+  const concurrency = 5
+  let failCount = 0
+  let attemptedCount = 0
+
+  for (let start = 0; start < candidates.length && playable.length < limit; start += concurrency) {
+    const batch = candidates.slice(start, start + concurrency)
+    const resolved = await Promise.all(batch.map(async (candidate) => {
+      assertPlayableFilterActive(signal)
+      attemptedCount++
+      const track = await resolveCandidate(candidate).catch((error) => {
+        assertPlayableFilterActive(signal)
+        onError?.(error)
+        return null
+      })
+      assertPlayableFilterActive(signal)
+      if (!track) failCount++
+      return track
+    }))
+    for (const track of resolved) {
+      if (track && playable.length < limit) playable.push(track)
+    }
   }
-  return playable
+
+  return { tracks: playable.slice(0, limit), attemptedCount, failCount }
+}
+
+export const neteaseMusicTestHelpers = {
+  collectPlayableTracksInOrder,
+}
+
+export async function filterPlayableTracks(candidates: Track[], limit = 3, signal?: AbortSignal): Promise<Track[]> {
+  const result = await collectPlayableTracksInOrder(
+    candidates,
+    limit,
+    signal,
+    (candidate) => resolvePlayableTrack(candidate, { signal }),
+    (error) => {
+      if (isPlayableLookupAuthError(error)) notifyPlayableLookupDegraded()
+    },
+  )
+
+  if (result.tracks.length === 0 && result.attemptedCount > 0 && result.failCount === result.attemptedCount && readNeteaseCookie()) {
+    notifyPlayableLookupDegraded()
+  }
+
+  return result.tracks
 }

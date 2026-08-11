@@ -6,7 +6,7 @@
 > **对应 UI**:`design/yinyi.html`
 > **对应代码模块**:`src/main/services/yinyi.ts`、`src/renderer/pages/Yinyi.tsx`
 > **触发**:每天一次,默认 22:00(从 `settings.yinyi.generateAt` 读)
-> **依赖**:`prompts/yinyi-writer.md`、`samples/yinyi-reference.md`
+> **依赖**:`prompts/yinyi-writer-v5.md`(fallback to `yinyi-writer-v4.md`)、`samples/yinyi-reference.md`
 
 ---
 
@@ -147,7 +147,7 @@ interface Yinyi {
 
 ### 6.1 system prompt 明确"不要这样"
 
-详见 `prompts/yinyi-writer.md`,核心指令:
+详见 `prompts/yinyi-writer-v5.md`,核心指令:
 - 不写流水账("今天用户听了 12 首歌")
 - 不假装人类("我也很疲惫")
 - 不煽情、不讲大道理

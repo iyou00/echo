@@ -127,7 +127,7 @@ echo-app/
 ├─ prompts/                    # System prompt 等(可改不重编译)
 │   ├─ system.md
 │   ├─ scenario-100.md
-│   └─ yinyi-writer.md
+│   └─ yinyi-writer-v5.md
 └─ data/                       # 用户数据(本地持久化)
     └─ echo.db                 # SQLite 文件,可直接备份
 ```

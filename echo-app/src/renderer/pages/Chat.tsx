@@ -1,8 +1,13 @@
 ﻿import { FormEvent, useEffect, useRef, useState } from 'react'
 import { Send, Square } from 'lucide-react'
 import type { ActiveScene, ChatMessage, EchoApi, PlaybackState, SceneDefinition, SceneKey, ScenePlaybackResult, TasteProfile, Track } from '../../types/ipc'
-import type { AppPageProps } from '../../App'
+import type { AppPageProps } from '../appState'
 import { BrandLogo, EmptyState, SceneRail, TrackCard } from '../components'
+import { latestRunningRuntimeTask, useRuntimeTasks } from '../hooks/useRuntimeTasks'
+import { trackIdentity as trackKey } from '../../shared/trackIdentity'
+import { friendlyOperationError } from '../../shared/runtimeRecovery'
+import { pickWaitingLineFor } from './chatWaitingLines'
+import { mergeReturnedTracksIntoMessage } from './chatMessageTracks'
 
 interface ChatPageProps extends AppPageProps {
   echo: EchoApi
@@ -22,55 +27,6 @@ interface ChatPageProps extends AppPageProps {
   focusApiSettings?: () => void
 }
 
-const WAITING_LINES = [
-  '等我翻翻我的宝藏歌单',
-  '让我在旋律里捞一首合适的',
-  '我在听，也在找，稍等呀',
-  '耳朵已经竖起来了，在找了',
-  '音符正在赶来的路上',
-  '这次有点难到我了，让我再琢磨下',
-  '你的心情有点复杂，我需要多听几秒',
-  '这个氛围有点微妙，得仔细挑一首',
-  '我在很认真地感受你说的',
-  '正在把感觉翻译成旋律',
-  '别急，好音乐值得等一小下',
-  '想给你一首，刚好接住你心情的歌',
-  '在脑内开了一场小型试听会',
-  '像翻旧唱片一样，为你找那一轨',
-  '嗯，我听到了',
-  '正在感受你此刻的心情频率',
-  '马上就好，旋律正在加载',
-  '在翻了在翻了，歌单有点长',
-  '等等，我正从耳机里往外掏歌',
-  '脑内点歌台，正在为你连线',
-  '挑歌中，请允许我纠结几秒',
-  '马上，等我抓个旋律塞给你',
-  '稍等，我在心里过一遍前奏',
-  '嗯……这首味道好像对了',
-  '让我猜猜你现在想听什么',
-  '别急，好旋律不怕晚',
-  '感觉要来了，就在下一首',
-  '正在调动我的音乐直觉',
-  '快了，音符排队上车中',
-  '等我，在跟某首歌对个眼神',
-  '耳朵已经忙起来了，马上好',
-]
-
-const CASUAL_WAITING_LINES = [
-  '嗯，我在听',
-  '等我想想怎么接你这句话',
-  '这句我得认真回',
-  '让我慢慢想一下',
-  '我先接住你这句话',
-  '有点懂你的意思了',
-  '我在想怎么说更贴近一点',
-  '等我把话放软一点',
-  '我听见了，等我一下',
-  '这句我想认真想想',
-  '我在心里过一遍',
-  '让我找个更像朋友的说法',
-]
-
 // 让 Echo 看起来像在"打字思考":
 // - DELAY: 接到 result 后先压住至少 2 秒, 让"思考期"明确
 // - TICK 间隔动态算: 短回复放慢看清, 长回复不卡死, 总打字时长目标 ≥ MIN_TOTAL_MS
@@ -80,8 +36,8 @@ const REPLY_MIN_TICK_MS = 90
 const REPLY_MAX_TICK_MS = 600
 const REPLY_MIN_TOTAL_MS = 4500
 const REPLY_CHARS_PER_TICK = 1
-const WAITING_APPEAR_DELAY_MS = 750
 const WAITING_TICK_MS = 55
+const AUTO_SCROLL_BOTTOM_THRESHOLD = 96
 
 function computeTickInterval(totalChars: number): number {
   if (totalChars <= 0) return REPLY_MIN_TICK_MS
@@ -89,22 +45,12 @@ function computeTickInterval(totalChars: number): number {
   return Math.max(REPLY_MIN_TICK_MS, Math.min(REPLY_MAX_TICK_MS, ideal))
 }
 
-function looksLikeMusicRelated(text: string): boolean {
-  return /推|推荐|来几首|听什么|听啥|值得听|适合听|想听|能听|放点|放首|来点|歌|曲|歌单|music|song|慢|快|安静|热闹|循环|舒缓|轻|燃|治愈|怀旧|睡前|通勤|粤语|英文|欧美|韩|日语|kpop|雨天|发呆/i.test(text)
-}
-
-function pickWaitingLineFor(text: string) {
-  const pool = looksLikeMusicRelated(text) ? WAITING_LINES : CASUAL_WAITING_LINES
-  return pool[Math.floor(Math.random() * pool.length)] ?? CASUAL_WAITING_LINES[0]
+function isNearConversationBottom(element: HTMLElement): boolean {
+  return element.scrollHeight - element.scrollTop - element.clientHeight <= AUTO_SCROLL_BOTTOM_THRESHOLD
 }
 
 function timeLabel(value: string) {
   return new Date(value).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-}
-
-function trackKey(track?: Track | null): string {
-  if (!track) return ''
-  return `${track.neteaseId ?? track.id ?? ''}:${track.title}:${track.artist}`
 }
 
 function friendlyChatError(error: unknown) {
@@ -122,15 +68,18 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
-  const [loadingScene, setLoadingScene] = useState<string | null>(null)
+  const [loadingScene, setLoadingScene] = useState<SceneKey | null>(null)
   const [favoriteKeys, setFavoriteKeys] = useState<Set<string>>(new Set())
   const [feedbackMap, setFeedbackMap] = useState<Record<string, 'more_like_this' | 'not_right'>>({})
   const [waitingLines, setWaitingLines] = useState<Record<number, string>>({})
   const [pendingDisplayIds, setPendingDisplayIds] = useState<Set<number>>(new Set())
+  const [chatNotice, setChatNotice] = useState('')
   // 仅会话内有效：标记需要展示"去登录网易云"CTA 的助手消息 id（不持久化）。
   const [authHintIds, setAuthHintIds] = useState<Set<number>>(new Set())
   const activeAssistantId = useRef<number | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const autoScrollPaused = useRef(false)
+  const chatNoticeTimerRef = useRef<number | null>(null)
   const chunkBuffers = useRef<Record<number, string>>({})
   const finalMessages = useRef<Record<number, ChatMessage>>({})
   const delayTimers = useRef<Record<number, number>>({})
@@ -142,6 +91,28 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
   // 已取消的助手消息 id 集合 —— sendMessage 拿到 result 后会用它判断"用户点过取消, 这个 result 不要再展示"。
   const cancelTokens = useRef<Set<number>>(new Set())
   const activeTrackKey = trackKey(playbackState.current)
+  const runtimeTasks = useRuntimeTasks(echo)
+  const sceneTask = latestRunningRuntimeTask(runtimeTasks, ['scene-playback'], { includeChildren: false })
+  const sceneTaskRunning = Boolean(sceneTask)
+  const runtimeSceneSource = sceneTask?.sourceName
+  const runtimeSceneKey = sceneTaskRunning && scenes.some((scene) => scene.key === runtimeSceneSource)
+    ? runtimeSceneSource as SceneKey
+    : null
+  const sceneLoadingKey = loadingScene ?? runtimeSceneKey
+  const inputBusy = sending || sceneTaskRunning
+
+  function actionErrorMessage(error: unknown, fallback: string): string {
+    return friendlyOperationError(error, fallback)
+  }
+
+  function showChatNotice(message: string) {
+    setChatNotice(message)
+    if (chatNoticeTimerRef.current !== null) window.clearTimeout(chatNoticeTimerRef.current)
+    chatNoticeTimerRef.current = window.setTimeout(() => {
+      setChatNotice('')
+      chatNoticeTimerRef.current = null
+    }, 4200)
+  }
 
   function cleanupAssistant(id: number) {
     if (waitingAppearTimers.current[id]) {
@@ -167,11 +138,24 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
 
   useEffect(() => {
     if (initialRestoreOnStart.current) {
-      echo.chat.loadRecent(30).then(setMessages)
+      echo.chat.loadRecent(30).then(setMessages).catch(() => setMessages([]))
     } else {
       setMessages([])
     }
-    echo.favorites.list().then((tracks) => setFavoriteKeys(new Set(tracks.map(trackKey)))).catch(() => setFavoriteKeys(new Set()))
+    echo.favorites.listKeys().then((keys) => setFavoriteKeys(new Set(keys))).catch(() => setFavoriteKeys(new Set()))
+  }, [echo])
+
+  useEffect(() => {
+    return echo.favorites.onChanged((payload) => {
+      setFavoriteKeys((current) => {
+        const next = new Set(current)
+        const key = trackKey(payload.track)
+        if (!key) return next
+        if (payload.favorited) next.add(key)
+        else next.delete(key)
+        return next
+      })
+    })
   }, [echo])
 
   // 不再监听 chat:stream:chunk 累积 buffer。
@@ -194,6 +178,7 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
         if (waitingAppearStore[id]) window.clearTimeout(waitingAppearStore[id])
         if (waitingTypeStore[id]) window.clearInterval(waitingTypeStore[id])
       })
+      if (chatNoticeTimerRef.current !== null) window.clearTimeout(chatNoticeTimerRef.current)
     }
   }, [])
 
@@ -205,14 +190,21 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
 
   useEffect(() => {
     return echo.settings.onChanged((payload) => {
-      if (payload.path === '*') setMessages([])
+      if (payload.path === '*' && payload.value === null) setMessages([])
     })
   }, [echo])
 
   useEffect(() => {
-    if (!scrollRef.current) return
-    scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    const element = scrollRef.current
+    if (!element || autoScrollPaused.current) return
+    element.scrollTop = element.scrollHeight
   }, [messages])
+
+  function handleConversationScroll() {
+    const element = scrollRef.current
+    if (!element) return
+    autoScrollPaused.current = !isNearConversationBottom(element)
+  }
 
   async function sendMessage(event: FormEvent) {
     event.preventDefault()
@@ -221,7 +213,7 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
 
   async function submitText(rawText: string) {
     const text = rawText.trim()
-    if (!text || sending || !hasLlmConfig || currentScene) return
+    if (!text || inputBusy || !hasLlmConfig) return
 
     const userMessage: ChatMessage = {
       id: -Date.now(),
@@ -238,6 +230,7 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
     }
 
     activeAssistantId.current = assistantMessage.id
+    autoScrollPaused.current = false
     cancelTokens.current.delete(assistantMessage.id)
     setDraft('')
     setSending(true)
@@ -251,9 +244,16 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
         cancelTokens.current.delete(assistantMessage.id)
         return
       }
-      finalMessages.current[assistantMessage.id] = result.message
+      const returnedTracks = result.message.tracks?.length ? result.message.tracks : result.tracks
+      const finalMessage = mergeReturnedTracksIntoMessage(result.message, returnedTracks)
+      finalMessages.current[assistantMessage.id] = finalMessage
       // 不再依赖 onChunk 累积, send return 时直接用完整 content 灌满。
-      chunkBuffers.current[assistantMessage.id] = result.message.content
+      chunkBuffers.current[assistantMessage.id] = finalMessage.content
+      if (returnedTracks.length > 0) {
+        setMessages((items) => items.map((item) => (
+          item.id === assistantMessage.id ? { ...item, tracks: returnedTracks } : item
+        )))
+      }
       if (result.hints?.neteaseAuthRequired) {
         // 把按钮挂在最终落地的 message id 上（持久化到 DB 的真实 id），打字结束后会替换占位 message。
         const finalId = result.message.id
@@ -264,12 +264,15 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
         })
       }
       scheduleReplyStart(assistantMessage.id)
-      const returnedTracks = result.message.tracks?.length ? result.message.tracks : result.tracks
       const nextTrack = returnedTracks.find((track) => track.playUrl) ?? null
       if (nextTrack) {
-        const nextState = await echo.playback.play(nextTrack)
+        const nextState = result.hints?.playbackAlreadyApplied
+          ? await echo.playback.getState()
+          : await echo.playback.play(nextTrack)
         setPlaybackState(nextState)
-        await primePlaybackQueue(returnedTracks, nextTrack)
+        if (!result.hints?.playbackAlreadyApplied) {
+          await primePlaybackQueue(returnedTracks, nextTrack)
+        }
       }
       await refreshQueue()
     } catch (error) {
@@ -277,9 +280,7 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
         cancelTokens.current.delete(assistantMessage.id)
         return
       }
-      finalMessages.current[assistantMessage.id] = { ...assistantMessage, content: friendlyChatError(error) }
-      chunkBuffers.current[assistantMessage.id] = friendlyChatError(error)
-      scheduleReplyStart(assistantMessage.id)
+      settleAssistantMessage(assistantMessage.id, { ...assistantMessage, content: friendlyChatError(error) })
     } finally {
       if (activeAssistantId.current === assistantMessage.id) {
         activeAssistantId.current = null
@@ -296,15 +297,28 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
     }, REPLY_DELAY_MS)
   }
 
+  function settleAssistantMessage(id: number, message: ChatMessage) {
+    cleanupAssistant(id)
+    setMessages((items) => items.map((item) => (item.id === id ? message : item)))
+    setPendingDisplayIds((items) => {
+      const next = new Set(items)
+      next.delete(id)
+      return next
+    })
+    setWaitingLines((items) => {
+      if (!(id in items)) return items
+      const next = { ...items }
+      delete next[id]
+      return next
+    })
+  }
+
   function scheduleWaitingLine(id: number, line: string) {
     waitingBuffers.current[id] = line
-    waitingAppearTimers.current[id] = window.setTimeout(() => {
-      delete waitingAppearTimers.current[id]
-      if (finalMessages.current[id] || cancelTokens.current.has(id)) return
-      setWaitingLines((items) => ({ ...items, [id]: '' }))
-      setPendingDisplayIds((items) => new Set(items).add(id))
-      startWaitingTyping(id)
-    }, WAITING_APPEAR_DELAY_MS)
+    if (finalMessages.current[id] || cancelTokens.current.has(id)) return
+    setWaitingLines((items) => ({ ...items, [id]: '' }))
+    setPendingDisplayIds((items) => new Set(items).add(id))
+    startWaitingTyping(id)
   }
 
   function startWaitingTyping(id: number) {
@@ -348,6 +362,12 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
       delete chunkBuffers.current[id]
       delete finalMessages.current[id]
       setMessages((items) => items.map((item) => (item.id === id ? fallback : item)))
+      setWaitingLines((items) => {
+        if (!(id in items)) return items
+        const next = { ...items }
+        delete next[id]
+        return next
+      })
       setPendingDisplayIds((items) => {
         const next = new Set(items)
         next.delete(id)
@@ -360,7 +380,9 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
     const id = activeAssistantId.current
     // 主进程那边告诉它停下，但不 await —— 后端可能还卡在 cloudsearch / song_url 上，
     // 我们让 UI 立刻反馈，后端结果到达时由 cancelTokens 把它丢弃。
-    echo.chat.cancel().catch(() => undefined)
+    echo.chat.cancel().catch((error) => {
+      console.warn('[chat] cancel failed', error)
+    })
     if (!id) {
       setSending(false)
       return
@@ -374,6 +396,12 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
     setPendingDisplayIds((items) => {
       const next = new Set(items)
       next.delete(id)
+      return next
+    })
+    setWaitingLines((items) => {
+      if (!(id in items)) return items
+      const next = { ...items }
+      delete next[id]
       return next
     })
     setAuthHintIds((items) => {
@@ -426,13 +454,27 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
   }
 
   async function enterScene(key: SceneKey) {
-    if (sending || !hasLlmConfig) return
+    if (!hasLlmConfig) return
     // toggle：点击已激活的场景 = 退出
     if (currentScene?.key === key) {
-      await endScene()
+      setLoadingScene(null)
+      try {
+        await endScene()
+      } catch (error) {
+        console.warn('[chat] scene end failed', error)
+        showChatNotice(actionErrorMessage(error, '场景退出失败，可以再试一次。'))
+      }
       return
     }
-    if (!autoPlayNext) await updateAutoPlayNext(true)
+    if (inputBusy) return
+    if (!autoPlayNext) {
+      try {
+        await updateAutoPlayNext(true)
+      } catch (error) {
+        console.warn('[chat] auto play setting failed', error)
+        showChatNotice(actionErrorMessage(error, '自动连播开启失败，本次场景仍会继续播放。'))
+      }
+    }
     setLoadingScene(key)
     setDraft('')
     try {
@@ -444,6 +486,9 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
       }
       setPlaybackState(result.state)
       await refreshQueue()
+    } catch (error) {
+      console.warn('[chat] scene play failed', error)
+      showChatNotice(actionErrorMessage(error, '场景启动失败，可以再试一次。'))
     } finally {
       setLoadingScene(null)
     }
@@ -454,7 +499,9 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
     setFeedbackMap((items) => ({ ...items, [key]: action }))
     try {
       await echo.feedback.record(track, action, 'chat_recommendation_card')
-    } catch {
+    } catch (error) {
+      console.warn('[chat] feedback record failed', error)
+      showChatNotice(actionErrorMessage(error, '反馈保存失败，可以稍后再试。'))
       setFeedbackMap((items) => {
         const next = { ...items }
         delete next[key]
@@ -511,8 +558,14 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
           先填好模型设置，Echo 才能开口。
         </button>
       )}
+      {chatNotice && (
+        <div className="status-ind err chat-notice" role="alert">
+          <span className="status-dot" />
+          {chatNotice}
+        </div>
+      )}
 
-      <div className="conversation" ref={scrollRef}>
+      <div className="conversation" ref={scrollRef} onScroll={handleConversationScroll}>
         {messages.length === 0 ? (
           renderEmptyChat()
         ) : (
@@ -537,6 +590,7 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
                       onPlay={(track) => handleTrackAction(track, message.tracks ?? [])}
                       onToggleFavorite={toggleFavorite}
                       onFeedback={recordTrackFeedback}
+                      onError={(error) => showChatNotice(actionErrorMessage(error, '这次操作失败，可以稍后再试。'))}
                       isCurrent={trackKey(track) === activeTrackKey}
                       playbackStatus={playbackState.status}
                       favorited={favoriteKeys.has(trackKey(track))}
@@ -565,8 +619,13 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
           <SceneRail
             scenes={scenes}
             currentScene={currentScene}
-            loadingKey={loadingScene}
-            onStart={(key) => { void enterScene(key) }}
+            loadingKey={sceneLoadingKey}
+            onStart={(key) => {
+              enterScene(key).catch((error) => {
+                console.warn('[chat] scene action failed', error)
+                showChatNotice(actionErrorMessage(error, '场景启动失败，可以再试一次。'))
+              })
+            }}
             compact
           />
         )}
@@ -574,15 +633,15 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
           <input
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            placeholder={currentScene ? `正在「${currentScene.label}」中…` : hasLlmConfig ? '和 Echo 说点什么...' : '先填好 LLM 才能说话...'}
-            disabled={Boolean(currentScene) || !hasLlmConfig}
+            placeholder={hasLlmConfig ? '和 Echo 说点什么...' : '先填好 LLM 才能说话...'}
+            disabled={!hasLlmConfig || sceneTaskRunning}
           />
           {sending ? (
             <button className="cancel-button" type="button" onClick={cancelMessage} title="让 Echo 先停一下">
               <Square size={13} fill="currentColor" />
             </button>
           ) : (
-            <button type="submit" disabled={!draft.trim() || !hasLlmConfig || Boolean(currentScene)} title="发送">
+            <button type="submit" disabled={!draft.trim() || !hasLlmConfig || sceneTaskRunning} title="发送">
               <Send size={17} />
             </button>
           )}

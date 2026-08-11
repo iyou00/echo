@@ -1,13 +1,23 @@
+import { BrowserWindow } from 'electron'
 import type { ActiveScene, ChatMessage, PlaybackState, SceneKey, ScenePlaybackOptions, Track } from '../../types/ipc'
 import { appendConversation } from '../db/conversations'
-import { appendRecommendedTracks, skipTodayRecommendedTracks } from '../db/tracks'
+import { loadActiveEvents, type ActiveEvent } from '../db/events'
+import { appendRecommendedTracks, loadListenedTrackWindows, loadRecentRecommendedTracks, skipTodayRecommendedTracks } from '../db/tracks'
 import { getDb } from '../db'
 import { getTasteProfile } from '../db/taste'
 import { getSettings } from '../db/settings'
 import { completeChat } from '../llm/client'
-import { recommendFromNetease } from './recommendation'
+import { stripKnownSystemBlocks } from '../llm/outputSanitize'
+import { safePromptJson } from '../llm/promptData'
+import { buildMemoryEvidencePrompt } from './memoryEvidence'
+import { primaryArtist, trackKey, uniqueTracks } from '../skills/music/identity'
+import { isMusicSearchAuthError, searchMusic } from '../skills/music/search'
+import { selectDiverseTracks } from '../skills/music/selection'
+import { buildSoulPolicyPrompt } from '../skills/soul/policy'
 import { clearQueue, enqueue, getState, play } from './playback'
-import { endCurrentScene, hasNewerSceneSession, isSceneSessionCurrent, startScene } from './scene'
+import { markQueueStatus } from './queue'
+import { endCurrentScene, getCurrentScene, isSceneSessionCurrent, startScene } from './scene'
+import { hasExplicitMemorySource, hasMemorySourceLeak } from './memorySourceGuard'
 
 export interface ScenePlaybackResult {
   scene: ActiveScene
@@ -16,17 +26,50 @@ export interface ScenePlaybackResult {
   message?: ChatMessage
 }
 
-function trackKey(track: Track): string {
-  const neteaseId = String(track.neteaseId ?? '').trim()
-  if (neteaseId) return `netease:${neteaseId}`
-  const id = String(track.id ?? '').trim()
-  if (id) return `id:${id}`
-  return `name:${track.title.trim().toLowerCase()}::${track.artist.trim().toLowerCase()}`
+export interface ScenePlaybackRuntimeOptions {
+  signal?: AbortSignal
+  report?: (patch: { phase?: string; current?: number; total?: number; message?: string }) => void
+}
+
+class SceneNoPlayableTrackError extends Error {
+  constructor() {
+    super('Echo 这次没找到能播的歌。')
+    this.name = 'SceneNoPlayableTrackError'
+  }
+}
+
+function shouldPreserveSceneOnPlaybackFailure(options: ScenePlaybackOptions, error: unknown): boolean {
+  return Boolean(options.continueSession && error instanceof SceneNoPlayableTrackError)
+}
+
+function assertScenePlaybackActive(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException('任务已取消', 'AbortError')
+}
+
+function waitForSceneRetry(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('任务已取消', 'AbortError'))
+      return
+    }
+    const cleanup = () => signal?.removeEventListener('abort', onAbort)
+    const onAbort = () => {
+      clearTimeout(timer)
+      cleanup()
+      reject(new DOMException('任务已取消', 'AbortError'))
+    }
+    const timer = setTimeout(() => {
+      cleanup()
+      resolve()
+    }, ms)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 function attachScene(scene: ActiveScene, tracks: Track[]): Track[] {
   return tracks.map((track) => ({
     ...track,
+    sourceContext: 'scene',
     sceneKey: scene.key,
     sceneLabel: scene.label,
     sceneLine: scene.line,
@@ -41,7 +84,103 @@ function attachScene(scene: ActiveScene, tracks: Track[]): Track[] {
 }
 
 function isSuperseded(scene: ActiveScene): boolean {
-  return !isSceneSessionCurrent(scene.id) && hasNewerSceneSession(scene)
+  return !isSceneSessionCurrent(scene.id)
+}
+
+function broadcastChatMessage(message: ChatMessage): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.webContents.send('chat:message-injected', message)
+  }
+}
+
+function recentArtistSet(tracks: Track[]): Set<string> {
+  return new Set(tracks.map((track) => primaryArtist(track.artist)).filter(Boolean))
+}
+
+function pickSceneTracksFromPool(candidates: Track[], targetCount: number, excluded: Track[], avoidArtistTracks: Track[]): Track[] {
+  const strict = selectDiverseTracks(candidates, {
+    targetCount,
+    maxPerArtist: 1,
+    avoidArtists: recentArtistSet(avoidArtistTracks),
+    excludeTracks: excluded,
+    allowAvoidedArtistFallback: true,
+  })
+  if (strict.length > 0) return strict
+
+  return selectDiverseTracks(candidates, {
+    targetCount,
+    maxPerArtist: 2,
+    excludeTracks: excluded,
+    allowAvoidedArtistFallback: true,
+  })
+}
+
+function pickSceneTracks(candidates: Track[], targetCount: number): Track[] {
+  const recentRecommended = loadRecentRecommendedTracks(120)
+  const listenedWindows = loadListenedTrackWindows(24 * 7, 500, 48, 240)
+  return pickSceneTracksFromPool(
+    candidates,
+    targetCount,
+    [...recentRecommended, ...listenedWindows.history],
+    [...recentRecommended.slice(0, 80), ...listenedWindows.recent],
+  )
+}
+
+function hasEnoughSceneTracks(candidates: Track[], targetCount: number): boolean {
+  return pickSceneTracks(candidates, targetCount).length >= targetCount
+}
+
+function sceneFallbackQueries(scene: ActiveScene): string[] {
+  const moodLine = scene.moods.join(' ')
+  switch (scene.key) {
+    case 'focus':
+      return ['安静 舒缓 工作 背景音乐', '轻音乐 放松 专注']
+    case 'sleepy':
+      return ['提神 轻快 流行', '清醒 节奏 明亮']
+    case 'relax':
+      return ['放松 治愈 舒缓', '轻松 清新 华语']
+    case 'irritated':
+      return ['安静 放松 舒缓', '降噪 治愈 慢歌']
+    case 'random':
+      return ['华语流行 轻快', '治愈 流行', '舒服 华语']
+    default:
+      return [`${scene.label} ${moodLine} 歌`, '华语流行']
+  }
+}
+
+async function searchSceneTracks(scene: ActiveScene, targetCount: number, runtime: ScenePlaybackRuntimeOptions): Promise<Track[]> {
+  const queries = Array.from(new Set([scene.prompt, ...sceneFallbackQueries(scene)]))
+  const candidates: Track[] = []
+  const desiredPoolSize = Math.max(targetCount * 8, 12)
+  for (const query of queries) {
+    assertScenePlaybackActive(runtime.signal)
+    const tracks = await searchMusic({
+      query,
+      mode: 'scene',
+      targetCount,
+      candidatePoolSize: Math.max(72, targetCount * 24),
+      respectCooldown: true,
+      signal: runtime.signal,
+      onProgress: (patch) => runtime.report?.({
+        ...patch,
+        phase: patch.phase ? `recommend-${patch.phase}` : 'recommend',
+        current: 1,
+        total: 4,
+      }),
+    }).catch((error) => {
+      assertScenePlaybackActive(runtime.signal)
+      if (isMusicSearchAuthError(error)) throw error
+      console.warn('[scene] search failed', { key: scene.key, query, error })
+      return []
+    })
+    assertScenePlaybackActive(runtime.signal)
+    if (tracks.length > 0) {
+      candidates.push(...tracks)
+      const uniqueCandidates = uniqueTracks(candidates)
+      if (uniqueCandidates.length >= desiredPoolSize && hasEnoughSceneTracks(uniqueCandidates, targetCount)) break
+    }
+  }
+  return uniqueTracks(candidates)
 }
 
 function getTimeLabel(): string {
@@ -57,7 +196,7 @@ function getTimeLabel(): string {
 
 function getLastTrackContext(): string {
   const playbackState = getState()
-  const last = playbackState.history[playbackState.history.length - 1] ?? playbackState.current
+  const last = playbackState.history[0] ?? playbackState.current
   if (!last) return '无'
   const tags = last.semantic?.moods?.slice(0, 2)?.join('/') ?? ''
   return tags ? `《${last.title}》- ${last.artist}，${tags}` : `《${last.title}》- ${last.artist}`
@@ -67,7 +206,7 @@ function getSceneTransition(currentKey: SceneKey): string {
   const row = getDb()
     .prepare(`
       SELECT label, scene_key FROM scene_sessions
-      WHERE user_id = 1 AND status = 'ended'
+      WHERE user_id = current_user_id() AND status = 'ended'
       ORDER BY ended_at DESC, id DESC
       LIMIT 1
     `)
@@ -79,7 +218,9 @@ function getSceneTransition(currentKey: SceneKey): string {
     : `${row.label} → ${currentKey}`
 }
 
-const SCENE_LINE_SYSTEM = `你是 Echo，用户的朋友。你正在帮 TA 开始一个听歌场景。
+const SCENE_LINE_SYSTEM = `${buildSoulPolicyPrompt('scene')}
+
+你是 Echo，用户的朋友。你正在帮 TA 开始一个听歌场景。
 
 要求：
 - 只说一句话，20 字左右，不超过 30 字
@@ -88,37 +229,83 @@ const SCENE_LINE_SYSTEM = `你是 Echo，用户的朋友。你正在帮 TA 开�
 - 不要用"接住""安排""安排上"这类套话
 - 直接输出那句话，不要解释，不要多余内容`
 
-async function generateSceneLine(scene: ActiveScene, first: Track): Promise<string | null> {
+const SCENE_LINE_BANNED_PATTERN = /接住|安排|安排上|稳稳的|治愈的力量|完全理解你的心情|根据你的画像|根据你的轨迹|根据你的数据|用户|画像|轨迹|数据|算法|记忆策略|纠正过|标签|诊断|人格|你其实|你总是|你一直|太满|太猛|上头|燃爆|往里收/
+
+function compactSceneLine(value: string): string {
+  return value.replace(/\s+/g, '').trim().toLowerCase()
+}
+
+function bracketedSceneTitles(value: string): string[] {
+  return Array.from(value.matchAll(/《([^》]{1,80})》/g), (match) => match[1]?.trim() ?? '').filter(Boolean)
+}
+
+function isSceneLineUsable(line: string, first: Track): boolean {
+  const clean = compactSceneLine(line)
+  const expectedTitle = compactSceneLine(first.title)
+  const titles = bracketedSceneTitles(line)
+  if (clean.length < 8 || clean.length > 50) return false
+  if (!titles.some((title) => compactSceneLine(title) === expectedTitle)) return false
+  if (titles.some((title) => compactSceneLine(title) !== expectedTitle)) return false
+  if (SCENE_LINE_BANNED_PATTERN.test(line)) return false
+  if (hasMemorySourceLeak(line, { maxGap: 28, tail: '不喜欢|少推|别总|别老|纠正|画像|数据|轨迹|记忆' })) return false
+  if (hasExplicitMemorySource(line)) return false
+  return true
+}
+
+function buildSceneLineContext(
+  scene: ActiveScene,
+  first: Track,
+  profile: ReturnType<typeof getTasteProfile>,
+  current: { timeLabel?: string; lastTrackContext?: string; sceneTransition?: string; activeEvents?: ActiveEvent[] } = {},
+): string {
+  return [
+    safePromptJson({
+      timeLabel: current.timeLabel ?? getTimeLabel(),
+      lastTrackContext: current.lastTrackContext ?? getLastTrackContext(),
+      sceneTransition: current.sceneTransition ?? getSceneTransition(scene.key),
+      scene: {
+        key: scene.key,
+        label: scene.label,
+        line: scene.line,
+      },
+      firstTrack: {
+        title: first.title,
+        artist: first.artist,
+        album: first.album,
+      },
+      activeEvents: (current.activeEvents ?? loadActiveEvents(6)).map((event) => ({
+        content: event.content,
+        kind: event.kind,
+        scope: event.kind === 'context' ? 'today_context' : 'active_event',
+        weight: event.weight ?? null,
+        confidence: event.confidence ?? null,
+      })),
+      activeEventsContract: 'activeEvents 只表示今天仍在发生的短期状态,只能作为场景文案的当下语气线索,不能写成稳定人格、长期偏好或反复模式。',
+    }),
+    buildMemoryEvidencePrompt(profile),
+  ].filter(Boolean).join('\n')
+}
+
+async function generateSceneLine(scene: ActiveScene, first: Track, signal?: AbortSignal): Promise<string | null> {
   try {
     const settings = getSettings()
     if (!settings.llm.baseUrl || !settings.llm.apiKey || !settings.llm.model) return null
 
     const profile = getTasteProfile()
-    const portrait = profile?.echo_portrait?.trim()
-    const portraitLine = portrait ? `用户画像：${portrait.slice(0, 60)}` : ''
-
-    const lines = [
-      portraitLine,
-      `此刻：${getTimeLabel()}`,
-      `上一首：${getLastTrackContext()}`,
-      `场景切换：${getSceneTransition(scene.key)}`,
-      `场景：${scene.label}——${scene.line}`,
-      `第一首：《${first.title}》- ${first.artist}`,
-    ].filter(Boolean)
+    const context = buildSceneLineContext(scene, first, profile)
 
     const content = await completeChat(
       settings,
       [
         { role: 'system', content: SCENE_LINE_SYSTEM },
-        { role: 'user', content: lines.join('\n') },
+        { role: 'user', content: context },
       ],
-      { temperature: 0.7 },
+      { temperature: 0.7, signal, maxTokens: 80 },
     )
 
-    const trimmed = content.replace(/^[""「]|[""」]$/g, '').trim()
+    const trimmed = stripKnownSystemBlocks(content).replace(/^[""「]|[""」]$/g, '').trim()
     if (!trimmed) return null
-    // 兜底截断：LLM 偶尔会啰嗦
-    if (trimmed.length > 50) return trimmed.slice(0, 50)
+    if (!isSceneLineUsable(trimmed, first)) return null
     return trimmed
   } catch {
     return null
@@ -127,7 +314,7 @@ async function generateSceneLine(scene: ActiveScene, first: Track): Promise<stri
 
 const SCENE_CHAT_TEMPLATES: Record<string, { withTrack: (title: string) => string; noTrack: string }> = {
   focus:     { withTrack: (t) => `好，我把声音放低一点。先听《${t}》，后面几首也排好了。`, noTrack: '好，我先帮你找几首安静的。' },
-  sleepy:    { withTrack: (t) => `给你提一点精神。先听《${t}》，别一下子太猛。`, noTrack: '好，我先帮你找几首提神的。' },
+  sleepy:    { withTrack: (t) => `给你提一点精神。先听《${t}》，节奏别太冲。`, noTrack: '好，我先帮你找几首提神的。' },
   relax:     { withTrack: (t) => `松口气。先听《${t}》，慢慢来。`, noTrack: '好，我先帮你找几首轻松的。' },
   irritated: { withTrack: (t) => `先把外面的声音降下来。先听《${t}》，让脑子缓一缓。`, noTrack: '好，我先帮你找几首安静的。' },
   random:    { withTrack: (t) => `随便来一首？先听《${t}》，后面看心情。`, noTrack: '好，我先从你的口味里捞一首。' },
@@ -143,45 +330,66 @@ function fallbackSceneLine(scene: ActiveScene, tracks: Track[]): string {
   return first ? template.withTrack(first.title) : template.noTrack
 }
 
-async function buildSceneChatLine(scene: ActiveScene, tracks: Track[]): Promise<string> {
+async function buildSceneChatLine(scene: ActiveScene, tracks: Track[], signal?: AbortSignal): Promise<string> {
   const first = tracks.find((track) => track.playUrl) ?? tracks[0]
-  const llmLine = first ? await generateSceneLine(scene, first) : null
+  const llmLine = first ? await generateSceneLine(scene, first, signal) : null
   return llmLine ?? fallbackSceneLine(scene, tracks)
 }
 
-export async function startScenePlayback(key: SceneKey, options: ScenePlaybackOptions = {}): Promise<ScenePlaybackResult> {
-  const scene = startScene(key)
+export async function startScenePlayback(key: SceneKey, options: ScenePlaybackOptions = {}, runtime: ScenePlaybackRuntimeOptions = {}): Promise<ScenePlaybackResult> {
+  assertScenePlaybackActive(runtime.signal)
+  const currentScene = options.continueSession ? getCurrentScene() : null
+  const scene = currentScene?.key === key ? currentScene : startScene(key)
   try {
-    const recommended = await recommendFromNetease(scene.prompt)
+    runtime.report?.({ phase: 'recommend', current: 1, total: 4, message: scene.label })
+    const targetCount = Math.max(1, Math.min(scene.targetCount, options.targetCount ?? scene.targetCount))
+    let recommended: Track[] = []
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      recommended = await searchSceneTracks(scene, targetCount, runtime)
+      if (recommended.length > 0) break
+      if (attempt < 2) {
+        runtime.report?.({
+          phase: 'recommend-retry',
+          current: 1,
+          total: 4,
+          message: `重新找歌 ${attempt + 1}/2`,
+        })
+        await waitForSceneRetry(attempt === 0 ? 800 : 1800, runtime.signal)
+      }
+    }
+    assertScenePlaybackActive(runtime.signal)
     if (isSuperseded(scene)) {
       return { scene, tracks: [], state: getState() }
     }
 
-    const tracks = attachScene(scene, recommended).slice(0, scene.targetCount)
+    const tracks = attachScene(scene, pickSceneTracks(recommended, targetCount))
     if (tracks.length === 0) {
-      throw new Error('Echo 这次没找到能播的歌。')
+      throw new SceneNoPlayableTrackError()
     }
-
-    if (isSuperseded(scene)) {
-      return { scene, tracks: [], state: getState() }
-    }
-
-    // LLM 生成开场白和播放并行执行
-    const chatLinePromise = options.appendChatMessage ? buildSceneChatLine(scene, tracks) : Promise.resolve('')
-
-    clearQueue()
-    skipTodayRecommendedTracks()
-    appendRecommendedTracks(tracks)
 
     if (isSuperseded(scene)) {
       return { scene, tracks: [], state: getState() }
     }
 
     const first = tracks.find((track) => track.playUrl) ?? tracks[0]
+    runtime.report?.({ phase: 'play', current: 2, total: 4, message: `播放《${first.title}》` })
     let state = await play(first)
+    assertScenePlaybackActive(runtime.signal)
     if (isSuperseded(scene)) {
       return { scene, tracks: [], state: getState() }
     }
+
+    runtime.report?.({ phase: 'queue', current: 3, total: 4, message: `准备 ${tracks.length} 首场景歌曲` })
+    clearQueue()
+    skipTodayRecommendedTracks()
+    appendRecommendedTracks(tracks)
+    markQueueStatus(first, 'playing', 'playback_started')
+
+    if (isSuperseded(scene)) {
+      return { scene, tracks: [], state: getState() }
+    }
+
+    const chatLinePromise = options.appendChatMessage ? buildSceneChatLine(scene, tracks, runtime.signal) : Promise.resolve('')
 
     const firstKey = trackKey(first)
     const seen = new Set<string>([firstKey])
@@ -206,10 +414,28 @@ export async function startScenePlayback(key: SceneKey, options: ScenePlaybackOp
     }
 
     const chatLine = await chatLinePromise
+    assertScenePlaybackActive(runtime.signal)
+    runtime.report?.({ phase: 'chat-line', current: 4, total: 4, message: scene.label })
     const message = options.appendChatMessage ? appendConversation('assistant', chatLine, tracks) : undefined
+    if (message) broadcastChatMessage(message)
     return { scene, tracks, state, message }
   } catch (error) {
+    if (shouldPreserveSceneOnPlaybackFailure(options, error) && isSceneSessionCurrent(scene.id)) {
+      runtime.report?.({ phase: 'idle', current: 4, total: 4, message: `${scene.label}还在，下一轮再找。` })
+      return { scene, tracks: [], state: getState() }
+    }
     if (isSceneSessionCurrent(scene.id)) endCurrentScene()
     throw error
   }
+}
+
+export const scenePlaybackTestHelpers = {
+  shouldPreserveSceneOnPlaybackFailure,
+  createNoPlayableTrackError: () => new SceneNoPlayableTrackError(),
+  pickSceneTracksFromPool,
+  hasEnoughSceneTracksFromPool: (candidates: Track[], targetCount: number, excluded: Track[], avoidArtistTracks: Track[]) => (
+    pickSceneTracksFromPool(candidates, targetCount, excluded, avoidArtistTracks).length >= targetCount
+  ),
+  isSceneLineUsable,
+  buildSceneLineContext,
 }

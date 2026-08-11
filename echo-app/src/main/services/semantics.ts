@@ -2,14 +2,16 @@ import type { ImportProgressPayload, SemanticSummary, Track, TrackSemantic } fro
 import { getAllImportedTracks } from '../db/playlists'
 import { getSemanticSummary as readSemanticSummary, splitMissingSemantics, upsertTrackSemantic } from '../db/semantics'
 import { completeChat, LlmError } from '../llm/client'
+import { safePromptJson } from '../llm/promptData'
 import { getSettings } from '../db/settings'
 import { reportStandaloneImportProgress, runImportTask } from './importTasks'
+import { detectMusicLanguage, musicLanguageGenre } from './recommendation/language'
 
 export function broadcastImportProgress(payload: ImportProgressPayload): void {
   reportStandaloneImportProgress(payload)
 }
 
-const GENRES = ['华语流行', '粤语流行', '欧美流行', 'R&B', '民谣', '摇滚', '说唱', '电子', 'K-pop', '日语流行', '轻音乐']
+const GENRES = ['华语流行', '粤语流行', '欧美流行', 'R&B', '民谣', '摇滚', '说唱', '电子', 'K-pop', '日语流行', '法语流行', '德语流行', '西班牙语流行', '俄语流行', '泰语流行', '葡萄牙语流行', '意大利语流行', '轻音乐']
 const MOODS = ['放松', '发呆', '清醒', '治愈', '怀旧', '孤独', '轻快', '热烈', '松弛', '陪伴']
 const SCENES = ['上午', '午休', '下午工作', '通勤', '下班路上', '夜晚', '睡前', '雨天', '独处', '运动']
 
@@ -24,8 +26,12 @@ function hasChinese(text: string): boolean {
 function inferLanguage(track: Track): string {
   const text = `${track.title} ${track.artist} ${track.album ?? ''}`
   if (/陈慧娴|张学友|陈奕迅|Beyond|容祖儿|杨千嬅|粤|广东|香港/.test(text)) return '粤语'
-  if (/newjeans|blackpink|twice|bts|exo|seventeen|stray kids|k-pop|kpop/i.test(text)) return '韩语'
-  if (/yoasobi|aimyon|ado|one ok rock|宇多田|米津|日语|日本/.test(text)) return '日语'
+  if (/[\uac00-\ud7af]/.test(text) || /newjeans|blackpink|twice|bts|exo|seventeen|stray kids|aespa|ive|le sserafim|jennie|taeyang|bigbang|k-pop|kpop/i.test(text)) return '韩语'
+  if (/[\u3040-\u30ff]/.test(text) || /yoasobi|aimyon|ado|one ok rock|宇多田|米津|日语|日本/.test(text)) return '日语'
+  if (/[\u0e00-\u0e7f]/.test(text)) return '泰语'
+  if (/[\u0400-\u04ff]/.test(text)) return '俄语'
+  const explicitLanguage = detectMusicLanguage(text)
+  if (explicitLanguage) return explicitLanguage
   if (hasChinese(text)) return '华语'
   return '英语'
 }
@@ -41,6 +47,8 @@ function inferGenres(track: Track, language: string): string[] {
   if (language === '韩语') return ['K-pop']
   if (language === '日语') return ['日语流行']
   if (language === '英语') return ['欧美流行']
+  const languageGenre = musicLanguageGenre(language)
+  if (languageGenre) return [languageGenre]
   return ['华语流行']
 }
 
@@ -110,7 +118,12 @@ function normalizeSemantic(value: unknown, fallback: TrackSemantic): TrackSemant
   }
 }
 
-async function tagBatchWithLlm(tracks: Track[]): Promise<TrackSemantic[]> {
+function assertSemanticsActive(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException('任务已取消', 'AbortError')
+}
+
+async function tagBatchWithLlm(tracks: Track[], signal?: AbortSignal): Promise<TrackSemantic[]> {
+  assertSemanticsActive(signal)
   const settings = getSettings()
   const fallbacks = tracks.map(inferTrackSemanticFallback)
   try {
@@ -126,9 +139,18 @@ energy/confidence 是 0-1 数字。tempo 是 slow/medium/fast。familiarity 对�
       },
       {
         role: 'user',
-        content: tracks.map((track, index) => `${index + 1}. ${track.title} - ${track.artist}${track.album ? ` / ${track.album}` : ''}${track.year ? ` / ${track.year}` : ''}`).join('\n'),
+        content: safePromptJson({
+          tracks: tracks.map((track, index) => ({
+            index: index + 1,
+            title: track.title,
+            artist: track.artist,
+            album: track.album,
+            year: track.year,
+          })),
+        }),
       },
-    ], { temperature: 0.2 })
+    ], { temperature: 0.2, signal, maxTokens: Math.min(5000, Math.max(900, tracks.length * 180)) })
+    assertSemanticsActive(signal)
     const parsed = parseJsonArray(response)
     if (!parsed || parsed.length !== tracks.length) return fallbacks
     return parsed.map((item, index) => normalizeSemantic(item, fallbacks[index]))
@@ -141,9 +163,14 @@ energy/confidence 是 0-1 数字。tempo 是 slow/medium/fast。familiarity 对�
 export async function buildSemanticsForTracks(
   tracks: Track[],
   reportProgress?: (payload: Omit<ImportProgressPayload, 'startedAt'>) => void,
+  options: { signal?: AbortSignal } = {},
 ): Promise<{ tagged: number; skipped: number }> {
+  assertSemanticsActive(options.signal)
   const valid = tracks.filter((track) => track.title && track.artist)
-  const { missing, skipped } = splitMissingSemantics(valid)
+  const settings = getSettings()
+  const hasLlmConfig = Boolean(settings.llm.baseUrl && settings.llm.apiKey && settings.llm.model)
+  if (!hasLlmConfig) return { tagged: 0, skipped: valid.length }
+  const { missing, skipped } = splitMissingSemantics(valid, { includeLowConfidence: true, confidenceBelow: 0.6 })
   const startedAt = new Date().toISOString()
   const total = missing.length
   let tagged = 0
@@ -160,8 +187,10 @@ export async function buildSemanticsForTracks(
   }
 
   for (let index = 0; index < total; index += 25) {
+    assertSemanticsActive(options.signal)
     const batch = missing.slice(index, index + 25)
-    const semantics = await tagBatchWithLlm(batch)
+    const semantics = await tagBatchWithLlm(batch, options.signal)
+    assertSemanticsActive(options.signal)
     batch.forEach((track, itemIndex) => {
       upsertTrackSemantic(track, semantics[itemIndex] ?? inferTrackSemanticFallback(track))
       tagged += 1
@@ -172,7 +201,7 @@ export async function buildSemanticsForTracks(
 }
 
 export function buildForImportedTracks(): Promise<{ tagged: number; skipped: number }> {
-  return runImportTask('semantic-analysis', '已导入歌曲', (report) => buildSemanticsForTracks(getAllImportedTracks(), report))
+  return runImportTask('semantic-analysis', '已导入歌曲', (report, signal) => buildSemanticsForTracks(getAllImportedTracks(), report, { signal }))
 }
 
 export function getSummary(): SemanticSummary {

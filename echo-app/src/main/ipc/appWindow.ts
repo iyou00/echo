@@ -1,6 +1,12 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, shell } from 'electron'
+
+const FEEDBACK_URL = 'https://wj.qq.com/s2/26976706/2fcf/'
 
 export function registerAppWindowIpc(): void {
+  ipcMain.handle('app:openFeedback', async () => {
+    await shell.openExternal(FEEDBACK_URL)
+    return { ok: true }
+  })
   ipcMain.handle('app:minimizeToTray', () => {
     BrowserWindow.getFocusedWindow()?.hide()
     return { ok: true }
