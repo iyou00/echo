@@ -15,6 +15,7 @@ export interface TodayTrackEvent {
   echoNote?: string
   recommendSource?: string
   reason?: string
+  sourceContext?: Track['sourceContext']
 }
 
 export interface ProfileTrackEvent {
@@ -100,6 +101,7 @@ function toTodayTrackEvent(typed: TrackEventRow): TodayTrackEvent {
     echoNote: parsed?.echoNote ?? parsed?.reason,
     recommendSource: parsed?.recommendSource,
     reason: parsed?.reason,
+    sourceContext: parsed?.sourceContext,
   }
 }
 

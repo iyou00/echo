@@ -1,14 +1,29 @@
 import type { YinyiEntry } from '../../types/ipc'
-import { loadUserConversationsForDate } from '../db/conversations'
+import { loadConversationsForDate, loadUserConversationsForDate } from '../db/conversations'
 import { isExternalListeningSource, loadMeaningfulTrackEventsForDate, type TodayTrackEvent } from '../db/tracks'
 import { getRandomYinyi, getYinyiByDate, getYinyiRange, upsertYinyi } from '../db/yinyi'
 import { getSettings } from '../db/settings'
-import { buildYinyiContext } from '../llm/prompt'
 import { completeChat, LlmError } from '../llm/client'
 import { stripKnownSystemBlocks } from '../llm/outputSanitize'
 import { recordHealth } from './health'
 import { getWeather } from '../weather/client'
 import { hasMemorySourceLeak } from './memorySourceGuard'
+import {
+  buildYinyiCriticMessages,
+  buildYinyiDirectorMessages,
+  buildYinyiEvidenceBundle,
+  buildYinyiWriterMessages,
+  deterministicYinyiIssues,
+  fallbackYinyiWritingBrief,
+  parseYinyiCritique,
+  parseYinyiWritingBrief,
+  selectedYinyiEvidence,
+  verifyYinyiTimeRelations,
+  yinyiStyleSignature,
+  yinyiStyleConflicts,
+  type YinyiStyleSignature,
+  type YinyiWritingBrief,
+} from './yinyiWriting'
 
 function todayIso(): string {
   const date = new Date()
@@ -72,10 +87,10 @@ function hasYinyiQuality(content: string): boolean {
 
 function yinyiQualityRetryInstruction(): string {
   return [
-    '这一版有报告感或过度解读。重写:',
-    '像朋友在台灯下嘀咕,短一点,有自己的想法在里面。',
-    '可以引用今天真实发生的歌和话,不要提画像、轨迹、数据、记忆策略。',
-    '把判断写得轻一点,多用“我猜”“像是”“也许”。',
+    '这一版没有通过风信质量检查，请重写。',
+    '保留 writing_brief 的内在线索，只写 selected_evidence，不补写其他事件。',
+    '用选材、节奏和留白改善表达，不堆意象，也不要机械增加“我猜”“也许”。',
+    '不要提画像、轨迹、数据、记忆策略。',
     '只输出风信正文。',
   ].join('\n')
 }
@@ -98,7 +113,7 @@ function failedEntry(date: string, message: string): YinyiEntry {
   }
 }
 
-function compactLine(value: string, max = 42): string {
+function compactLine(value: string, max = 8): string {
   const clean = value.replace(/\s+/g, ' ').trim()
   return clean.length > max ? `${clean.slice(0, max)}...` : clean
 }
@@ -133,16 +148,20 @@ function fallbackYinyiEntry(date: string, messages: ReturnType<typeof loadUserCo
   const positiveTracks = pickPositiveYinyiTracks(tracks)
   const dismissedTracks = pickDismissedYinyiTracks(tracks)
   const firstTrack = positiveTracks[0]
-  const secondTrack = positiveTracks.find((track) => track.title !== firstTrack?.title || track.artist !== firstTrack?.artist)
   const hasDismissedTracks = tracks.length > 0 && positiveTracks.length === 0
+  const hasExplicitDismissal = dismissedTracks.some((track) => track.queueStatusReason === 'explicit_feedback')
   const opening = lastUserMessage
-    ? `今天先写短一点。你最后留在我这里的一句是“${compactLine(lastUserMessage)}”,像把一天的声音轻轻按住了一下。`
-    : '今天先写短一点。你留下的声音不多,我就按最近这一点余温往下写。'
+    ? `你今天最后留下的一句话是“${compactLine(lastUserMessage)}”。我不替你解释，只把它认真记在这里。`
+    : '你今天留下的话不多。我不替这段安静找理由，只把它记在这里。'
   const musicLine = firstTrack
-    ? `耳边还放着${firstTrack.artist}的《${firstTrack.title}》${secondTrack ? `,后面又接过${secondTrack.artist}的《${secondTrack.title}》` : ''}。我喜欢这种不急着解释的时刻,歌先在旁边放着。`
+    ? isExternalListeningSource(firstTrack.source)
+      ? `你还主动放过${firstTrack.artist}的《${firstTrack.title}》。歌和那句话并排留着，就够了。`
+      : `我今天还放过${firstTrack.artist}的《${firstTrack.title}》。这是我递过去的歌，不替你说明什么。`
     : hasDismissedTracks
-      ? '今天有几首歌来过又被你放下。我会把它们记作路过；有些声音只是擦肩，擦肩也算今天的一部分。'
-    : '今天没有新的歌落下来,但空白也算一种记录。它说明有些时候你只是路过,没有非要把什么说完整。'
+      ? hasExplicitDismissal
+        ? '今天也有歌被你放下。放下就是放下，我不替它添加别的意思。'
+        : '今天也有歌很快停下。停下就是停下，我不替它添加别的意思。'
+      : '今天没有可确认的播放留下来，这封信就停在这句话旁边。'
 
   return {
     date,
@@ -165,6 +184,47 @@ function shouldUseFallback(error: unknown): boolean {
   return error.kind !== 'config' && error.kind !== 'auth'
 }
 
+function recentStyleSignatures(entries: YinyiEntry[]): YinyiStyleSignature[] {
+  return entries.flatMap((entry) => {
+    const value = entry.meta?.style_signature
+    if (!value || typeof value !== 'object') return []
+    return [value as unknown as YinyiStyleSignature]
+  })
+}
+
+async function reviewYinyi(
+  settings: ReturnType<typeof getSettings>,
+  content: string,
+  brief: YinyiWritingBrief,
+  bundle: ReturnType<typeof buildYinyiEvidenceBundle>,
+  relations: ReturnType<typeof verifyYinyiTimeRelations>,
+  recentEntries: YinyiEntry[],
+  signal?: AbortSignal,
+): Promise<string[]> {
+  const selectedBundle = { ...bundle, items: selectedYinyiEvidence(brief, bundle) }
+  const localIssues = deterministicYinyiIssues(content, selectedBundle, relations, recentEntries.map((entry) => entry.content))
+  if (localIssues.length > 0) return localIssues
+  try {
+    const raw = await completeChat(settings, buildYinyiCriticMessages(content, brief, bundle, relations, recentEntries.map((entry) => entry.content)), {
+      temperature: 0.2,
+      maxTokens: 220,
+      signal,
+    })
+    assertYinyiActive(signal)
+    const critique = parseYinyiCritique(raw)
+    if (!critique) {
+      recordHealth('llm', 'degraded', '风信文学质检结果无法解析，将重写或使用事实兜底。')
+      return ['文学质检结果无法解析']
+    }
+    return critique && !critique.passed ? critique.issues.length > 0 ? critique.issues : ['整体仍不像写给一个具体人的观察信'] : []
+  } catch (error) {
+    assertYinyiActive(signal)
+    const message = error instanceof Error ? error.message : '未知错误'
+    recordHealth('llm', 'degraded', '风信文学质检失败，将重写或使用事实兜底。', message)
+    return ['文学质检不可用']
+  }
+}
+
 export async function generateYinyi(date = todayIso(), options: GenerateYinyiOptions = {}): Promise<YinyiEntry> {
   if (!isValidIsoDate(date)) {
     throw new Error('风信日期无效')
@@ -174,7 +234,8 @@ export async function generateYinyi(date = todayIso(), options: GenerateYinyiOpt
   }
   assertYinyiActive(options.signal)
   const recentMessages = loadUserConversationsForDate(date, 20)
-  const recentTracks = loadMeaningfulTrackEventsForDate(date, 20)
+  const allConversations = loadConversationsForDate(date, 40)
+  const recentTracks = loadMeaningfulTrackEventsForDate(date, 60)
   const positiveTracks = pickPositiveYinyiTracks(recentTracks)
   const dismissedTracks = pickDismissedYinyiTracks(recentTracks)
 
@@ -189,32 +250,73 @@ export async function generateYinyi(date = todayIso(), options: GenerateYinyiOpt
       ? await getWeather(settings.user.city, { signal: options.signal })
       : null
     assertYinyiActive(options.signal)
-    const messages = buildYinyiContext(date, weather?.summary)
-    let content = cleanYinyiContent(await completeChat(settings, messages, { temperature: 0.85, signal: options.signal, maxTokens: 800 }))
+    const recentEntries = getYinyiRange(7).filter((entry) => entry.date !== date)
+    const bundle = buildYinyiEvidenceBundle(date, allConversations, recentTracks, weather?.summary)
+    const recentStyles = recentStyleSignatures(recentEntries)
+    const directorMessages = buildYinyiDirectorMessages(bundle, recentStyles)
+    const directorRaw = await completeChat(settings, directorMessages, {
+      temperature: 0.55,
+      signal: options.signal,
+      maxTokens: 520,
+    })
     assertYinyiActive(options.signal)
-    let qualityPassed = Boolean(content && hasYinyiQuality(content))
-    if (content && !qualityPassed) {
+    let brief = parseYinyiWritingBrief(directorRaw, bundle)
+    const styleIssues = brief ? yinyiStyleConflicts(brief, recentStyles) : []
+    if (brief && styleIssues.length > 0) {
+      try {
+        const revisedRaw = await completeChat(settings, [...directorMessages, {
+          role: 'user',
+          content: `上一版写法计划与近期风信重复。只重做写法计划并返回 JSON：\n${styleIssues.map((issue) => `- ${issue}`).join('\n')}`,
+        }], { temperature: 0.55, signal: options.signal, maxTokens: 520 })
+        assertYinyiActive(options.signal)
+        const revised = parseYinyiWritingBrief(revisedRaw, bundle)
+        if (revised && yinyiStyleConflicts(revised, recentStyles).length === 0) brief = revised
+        else brief = null
+      } catch (error) {
+        assertYinyiActive(options.signal)
+        recordHealth('llm', 'degraded', '风信写法去重失败，已使用安全写法计划。', error instanceof Error ? error.message : String(error))
+        brief = null
+      }
+    }
+    brief ??= fallbackYinyiWritingBrief(bundle, recentStyles)
+    const relations = verifyYinyiTimeRelations(brief, bundle)
+    const writerMessages = buildYinyiWriterMessages(brief, bundle, relations)
+    let content = cleanYinyiContent(await completeChat(settings, writerMessages, { temperature: 0.88, signal: options.signal, maxTokens: 800 }))
+    assertYinyiActive(options.signal)
+    let issues = content && hasYinyiQuality(content)
+      ? await reviewYinyi(settings, content, brief, bundle, relations, recentEntries, options.signal)
+      : content
+        ? ['存在报告腔、过度解读、内部信息或禁用套话']
+        : ['模型返回了空正文']
+    let qualityPassed = Boolean(content && issues.length === 0)
+    if (!qualityPassed) {
       try {
         const retry = cleanYinyiContent(await completeChat(settings, [
-          ...messages,
+          ...writerMessages,
           {
             role: 'user',
-            content: yinyiQualityRetryInstruction(),
+            content: `${yinyiQualityRetryInstruction()}\n这次只修复以下问题：\n${issues.map((issue) => `- ${issue}`).join('\n')}`,
           },
         ], { temperature: 0.85, signal: options.signal, maxTokens: 800 }))
         assertYinyiActive(options.signal)
-        if (retry && hasYinyiQuality(retry)) {
+        issues = retry && hasYinyiQuality(retry)
+          ? await reviewYinyi(settings, retry, brief, bundle, relations, recentEntries, options.signal)
+          : ['重写仍未通过基础表达边界']
+        if (retry && issues.length === 0) {
           content = retry
           qualityPassed = true
         }
       } catch (retryError) {
         assertYinyiActive(options.signal)
         if (retryError instanceof LlmError) {
-          recordHealth('llm', retryError.kind === 'auth' || retryError.kind === 'config' ? 'error' : 'degraded', '风信重写失败，已保留第一版。', retryError.message)
+          recordHealth('llm', retryError.kind === 'auth' || retryError.kind === 'config' ? 'error' : 'degraded', '风信重写失败，将使用事实兜底。', retryError.message)
         }
       }
     }
-    if (!content) return upsertYinyi(failedEntry(date, 'LLM 返回空内容'))
+    if (!content) {
+      recordHealth('llm', 'degraded', '风信模型连续返回空正文，已使用事实兜底。', 'LLM 连续返回空内容')
+      return upsertYinyi(fallbackYinyiEntry(date, recentMessages, recentTracks, 'LLM 连续返回空内容'))
+    }
     if (!qualityPassed) return upsertYinyi(fallbackYinyiEntry(date, recentMessages, recentTracks, '风信质量检查未通过'))
 
     return upsertYinyi({
@@ -229,6 +331,9 @@ export async function generateYinyi(date = todayIso(), options: GenerateYinyiOpt
         conversations_count: recentMessages.length,
         duration_ms: Date.now() - started,
         model: settings.llm.model,
+        style_signature: yinyiStyleSignature(brief),
+        evidence_ids: [...brief.anchorEvidenceIds, ...brief.supportingEvidenceIds],
+        verified_time_relations: relations,
       } as YinyiEntry['meta'],
     })
   } catch (error) {

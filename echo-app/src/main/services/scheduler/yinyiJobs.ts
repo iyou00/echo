@@ -1,5 +1,5 @@
 import { BrowserWindow } from 'electron'
-import type { SchedulerCatchupResult } from '../../../types/ipc'
+import type { SchedulerCatchupResult, YinyiEntry } from '../../../types/ipc'
 import { getLatestScheduledJob, insertScheduledJob } from '../../db/scheduledJobs'
 import { getSettings } from '../../db/settings'
 import { recordSchedulerHealth } from '../health'
@@ -39,6 +39,14 @@ export function scheduledYinyiDateForNow(): string {
 export function yinyiCatchupCompletedMessage(date: string, firstUseDate: string, now = new Date()): string {
   if (date >= localIsoDate(now)) return '风信已生成。'
   return date <= firstUseDate ? '风信已生成。' : '已补写最近缺失的风信。'
+}
+
+export function shouldSkipExistingYinyi(entry: YinyiEntry | null): boolean {
+  return Boolean(entry && entry.meta?.status !== 'failed')
+}
+
+export function shouldSkipCompletedYinyiJob(entry: YinyiEntry | null, latestStatus?: string): boolean {
+  return latestStatus === 'completed' && entry?.meta?.status !== 'failed'
 }
 
 function broadcastYinyiGenerated(date: string, status: string): void {
@@ -84,14 +92,14 @@ async function runYinyiCatchupJob(signal?: AbortSignal): Promise<SchedulerCatchu
     return { ok: true, job: 'yinyi_daily', date, status: 'skipped', message: readiness.reason ?? '没有需要补写的风信。' }
   }
   const existing = getByDate(date)
-  if (existing) {
+  if (shouldSkipExistingYinyi(existing)) {
     insertScheduledJob('yinyi_daily', date, 'skipped', '这一天已经有风信了。')
     recordSchedulerHealth('yinyi', 'ok', '运行正常。')
     return { ok: true, job: 'yinyi_daily', date, status: 'skipped', message: '这一天已经有风信了。' }
   }
 
   const latest = getLatestScheduledJob('yinyi_daily', date)
-  if (latest?.status === 'completed') {
+  if (shouldSkipCompletedYinyiJob(existing, latest?.status)) {
     return { ok: true, job: 'yinyi_daily', date, status: 'skipped', message: '补偿任务已经完成过。' }
   }
 

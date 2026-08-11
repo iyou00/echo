@@ -1,5 +1,5 @@
 import type { Track } from '../../types/ipc'
-import { loadRecentConversations } from '../db/conversations'
+import { loadRecentConversations, loadTodayConversations, loadUserConversationsForDate } from '../db/conversations'
 import { getCompanionProfile, loadLatestAssistantResponseStrategy } from '../db/companion'
 import { loadActiveEvents, type ActiveEvent } from '../db/events'
 import { appendListeningSegment, getOrCreateListeningSession, loadListeningSegments } from '../db/listening'
@@ -18,7 +18,7 @@ import { getMostRecentSeal } from './daySeal'
 import { getWeather } from '../weather/client'
 import { recordHealth } from './health'
 import { inferTrackSemanticFallback } from './semantics'
-import { buildMemoryEvidencePrompt } from './memoryEvidence'
+import { buildMemoryEvidencePrompt, buildOperationalTasteSummary } from './memoryEvidence'
 import { hasMemorySourceLeak } from './memorySourceGuard'
 import { chineseDayPeriodLabel } from '../../shared/dayPeriod'
 import { stableDaySeed, stableInt, stableShuffle } from './recommendation/deterministic'
@@ -40,6 +40,23 @@ interface ListeningText {
   text?: string
   selectedIndex?: number
 }
+
+interface ListeningRecommendationBasis {
+  searchQuery: string
+  summary: string
+  canReferenceYesterday: boolean
+  source: 'yesterday' | 'taste' | 'generic'
+}
+
+const SAFE_CONTINUATION_TERMS: ReadonlyMap<string, string> = new Map([
+  ['欢快', '欢快'], ['轻快', '轻快'], ['放松', '放松'], ['安静', '安静'], ['温柔', '温柔'], ['浪漫', '浪漫'],
+  ['伤感', '伤感'], ['忧郁', '忧郁'], ['平静', '平静'], ['热血', '热血'], ['舒缓', '舒缓'], ['清新', '清新'],
+  ['流行', '流行'], ['民谣', '民谣'], ['摇滚', '摇滚'], ['电子', '电子'], ['说唱', '说唱'], ['古典', '古典'],
+  ['爵士', '爵士'], ['乡村', '乡村'], ['轻音乐', '轻音乐'], ['纯音乐', '纯音乐'], ['R&B', 'R&B'],
+  ['华语', '华语'], ['粤语', '粤语'], ['韩语', '韩语'], ['韩国', '韩语'], ['日语', '日语'], ['日本', '日语'], ['英语', '英语'],
+  ['工作', '工作'], ['通勤', '通勤'], ['休息', '休息'], ['睡前', '睡前'], ['运动', '运动'], ['阅读', '阅读'],
+  ['下雨', '下雨'], ['夜晚', '夜晚'], ['清晨', '清晨'],
+])
 
 export interface ListeningSegmentOptions {
   continuation?: boolean
@@ -511,9 +528,11 @@ function rankBySessionDiversity(tracks: Track[], history = recentSegmentSemantic
     .map((item) => item.track)
 }
 
-async function getCandidates(continuation?: boolean, signal?: AbortSignal): Promise<Track[]> {
+async function getCandidates(continuation?: boolean, signal?: AbortSignal, basis?: ListeningRecommendationBasis): Promise<Track[]> {
   const blocked = recentBlockedKeys()
-  const query = continuation && recentSegmentSemantics.length > 0
+  const query = !continuation && basis?.searchQuery
+    ? basis.searchQuery
+    : continuation && recentSegmentSemantics.length > 0
     ? `回声里给我一首${pickUncoveredDimension()}的、适合现在听的歌`
     : '回声里随机给我一首适合现在听的歌'
   const fromNetease = await searchMusic({ query, mode: 'voice', signal }).catch(() => [])
@@ -532,6 +551,98 @@ async function getCandidates(continuation?: boolean, signal?: AbortSignal): Prom
   const fallbackRelaxed = fallback.filter((track) => !hasTrackIdentity(blocked, track))
   const mixed = diversifyByArtist(uniqueTracks([...diversified, ...fallbackFresh, ...fallbackRelaxed]), 1)
   return mixed.slice(0, 5)
+}
+
+function yesterdayDate(now: Date): string {
+  const date = new Date(now)
+  date.setDate(date.getDate() - 1)
+  return date.toLocaleDateString('sv-SE')
+}
+
+function fallbackRecommendationBasis(profile: ReturnType<typeof getTasteProfile>): ListeningRecommendationBasis {
+  const mood = profile?.moods?.[0]?.tag?.trim()
+  const genre = profile?.genres?.[0]?.name?.trim()
+  const artist = profile?.artists?.[0]?.name?.trim()
+  const direction = [mood, genre].filter(Boolean).join('、')
+  if (direction) {
+    return {
+      searchQuery: `推荐一首${direction}、适合现在听的歌`,
+      summary: `参考长期品味中的${direction}`,
+      canReferenceYesterday: false,
+      source: 'taste',
+    }
+  }
+  if (artist) {
+    return {
+      searchQuery: `推荐一首和${artist}听感相近、适合现在听的歌`,
+      summary: `参考长期品味中的常听艺人方向`,
+      canReferenceYesterday: false,
+      source: 'taste',
+    }
+  }
+  return {
+    searchQuery: '推荐一首容易进入、适合现在听的歌',
+    summary: '暂无稳定的昨日或长期品味线索',
+    canReferenceYesterday: false,
+    source: 'generic',
+  }
+}
+
+function normalizeYesterdayRecommendationBasis(
+  value: Record<string, unknown>,
+  fallback: ListeningRecommendationBasis,
+): ListeningRecommendationBasis {
+  const rawTerms = Array.isArray(value.terms) ? value.terms : []
+  const terms = [...new Set(rawTerms.flatMap((term) => {
+    if (typeof term !== 'string') return []
+    const safe = SAFE_CONTINUATION_TERMS.get(term.trim())
+    return safe ? [safe] : []
+  }))].slice(0, 3)
+  if (terms.length === 0) return fallback
+  const canReferenceYesterday = value.canReferenceYesterday === true
+  const direction = terms.join('、')
+  return {
+    searchQuery: `推荐一首${direction}、适合现在听的歌`,
+    summary: canReferenceYesterday ? `承接昨天明确提过的${direction}方向` : `只参考${direction}这一音乐方向`,
+    canReferenceYesterday,
+    source: 'yesterday',
+  }
+}
+
+async function buildRecommendationBasis(input: {
+  settings: ReturnType<typeof getSettings>
+  yesterdayMessages: ReturnType<typeof loadUserConversationsForDate>
+  profile: ReturnType<typeof getTasteProfile>
+  signal?: AbortSignal
+}): Promise<ListeningRecommendationBasis> {
+  const fallback = fallbackRecommendationBasis(input.profile)
+  if (input.yesterdayMessages.length === 0) return fallback
+  try {
+    const response = await completeChat(input.settings, [
+      {
+        role: 'system',
+        content: `你只负责从昨日用户消息中选择今天可延续的音乐标签。
+输出 JSON: {"terms":["标签"],"canReferenceYesterday":true|false}。
+terms 最多 3 个，只能从以下词中选择：${[...new Set(SAFE_CONTINUATION_TERMS.values())].join('、')}。
+明确音乐要求可以设 canReferenceYesterday=true。健康、隐私、关系冲突等敏感内容必须设为 false，且不能出现在 terms。不要输出原话、歌名、人名或解释。`,
+      },
+      {
+        role: 'user',
+        content: safePromptJson({
+          yesterdayUserMessages: input.yesterdayMessages.map((item) => item.content).slice(-12),
+          tasteSummary: buildOperationalTasteSummary(input.profile),
+        }),
+      },
+    ], { temperature: 0.2, signal: input.signal, timeoutMs: 6_000, maxTokens: 180 })
+    assertListeningActive(input.signal)
+    const match = response.match(/\{[\s\S]*\}/)
+    const parsed = match ? JSON.parse(match[0]) as Record<string, unknown> : {}
+    return normalizeYesterdayRecommendationBasis(parsed, fallback)
+  } catch (error) {
+    assertListeningActive(input.signal)
+    recordHealth('llm', 'degraded', '昨日音乐方向提取失败，已改用长期品味。', error instanceof Error ? error.message : String(error))
+    return fallback
+  }
 }
 
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
@@ -657,6 +768,7 @@ function buildContext(input: {
   listeningPlan?: ListeningPlan
   sessionSegments?: ListeningSegmentRecord[]
   companionProfile?: ReturnType<typeof getCompanionProfile>
+  recommendationBasis?: ListeningRecommendationBasis
 }) {
   const now = new Date(input.generatedAt)
   const y = now.getFullYear()
@@ -743,8 +855,15 @@ ${safePromptJson(recent)}
 </recent_conversations>
 
 <yesterday_seal_summary>
-${escapePromptData(input.seal ? input.seal.slice(0, 900) : '(暂无)')}
+${escapePromptData(input.recommendationBasis ? '(本轮使用受控音乐方向，不读取昨日封印)' : input.seal ? input.seal.slice(0, 900) : '(暂无)')}
 </yesterday_seal_summary>
+
+<recommendation_basis>
+${safePromptJson(input.recommendationBasis ?? null)}
+</recommendation_basis>
+<recommendation_basis_contract>
+该字段是内部选曲依据。canReferenceYesterday=true 时才允许自然提到“昨天你提过”; false 时只体现氛围和选曲方向，不复述历史内容。
+</recommendation_basis_contract>
 
 ${buildMemoryEvidencePrompt(input.profile)}
 
@@ -796,7 +915,8 @@ export async function generateListeningSegment(options: ListeningSegmentOptions 
   const settings = getSettings()
   const limit = options?.continuation ? 2 : 5
   options.onProgress?.({ phase: 'context', current: 1, total: 4, message: '整理回声上下文' })
-  const conversations = loadRecentConversations(limit)
+  const todayConversations = loadTodayConversations(limit)
+  const conversations = todayConversations.some((item) => item.role === 'user') ? todayConversations : []
   const latestPersistedAt = sessionSegments[0]?.generatedAt ? new Date(sessionSegments[0].generatedAt).getTime() : 0
   const latestConversationAt = conversations.reduce((latest, item) => {
     const value = item.createdAt ? new Date(item.createdAt).getTime() : 0
@@ -807,6 +927,14 @@ export async function generateListeningSegment(options: ListeningSegmentOptions 
   }
   const seal = getMostRecentSeal()
   const profile = getTasteProfile()
+  const recommendationBasis = !options.continuation && conversations.length === 0
+    ? await buildRecommendationBasis({
+        settings,
+        yesterdayMessages: loadUserConversationsForDate(yesterdayDate(now), 12),
+        profile,
+        signal: options.signal,
+      })
+    : undefined
   const companionProfile = getCompanionProfile()
   const importedTrackCount = getAllImportedTracks().length
   const playedToday = loadRecentTracks(40).filter((track) => track.queueStatus === 'playing' || track.queueStatus === 'completed').length
@@ -845,7 +973,7 @@ export async function generateListeningSegment(options: ListeningSegmentOptions 
     suggestedLength: `${listeningPlan.minChars}-${listeningPlan.maxChars}`,
   }
   options.onProgress?.({ phase: 'candidates', current: 2, total: 4, message: '挑选回声歌曲' })
-  const candidates = await getCandidates(options?.continuation, options.signal)
+  const candidates = await getCandidates(options?.continuation, options.signal, recommendationBasis)
   if (listeningPlan.delivery === 'silent' && candidates.length === 0) {
     listeningPlan = {
       ...listeningPlan,
@@ -896,7 +1024,7 @@ export async function generateListeningSegment(options: ListeningSegmentOptions 
     generatedAt,
     weatherSummary: weather?.summary,
     conversations,
-    seal,
+    seal: recommendationBasis ? '' : seal,
     profile,
     candidates,
     voiceMoment,
@@ -905,6 +1033,7 @@ export async function generateListeningSegment(options: ListeningSegmentOptions 
     listeningPlan,
     sessionSegments,
     companionProfile,
+    recommendationBasis,
   })
   const recentTexts = sessionSegments.map((segment) => segment.text).filter(Boolean)
 
@@ -995,6 +1124,9 @@ export const listeningTestHelpers = {
   alignTextToTrack,
   buildContext,
   fallbackText,
+  fallbackRecommendationBasis,
+  normalizeYesterdayRecommendationBasis,
+  yesterdayDate,
   hasVoiceBehaviorEvidence,
   hasListeningTextQuality,
   hasMechanicalReuse,

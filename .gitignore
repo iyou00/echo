@@ -37,6 +37,7 @@ echo-app/.electron-user-data/
 .env
 .env.*
 *.local
+echo-app/.npmrc
 
 # Local tooling and editor state
 .codex/

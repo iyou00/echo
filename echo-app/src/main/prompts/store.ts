@@ -9,6 +9,7 @@ import sealWriter from '../../../../prompts/seal-writer.md?raw'
 import systemPrompt from '../../../../prompts/system.md?raw'
 import yinyiWriterV4 from '../../../../prompts/yinyi-writer-v4.md?raw'
 import yinyiWriterV5 from '../../../../prompts/yinyi-writer-v5.md?raw'
+import yinyiWriterV6 from '../../../../prompts/yinyi-writer-v6.md?raw'
 
 const EMBEDDED_PROMPTS: Record<string, string> = {
   'prompts/agent-soul.md': agentSoul,
@@ -22,6 +23,7 @@ const EMBEDDED_PROMPTS: Record<string, string> = {
   'prompts/system.md': systemPrompt,
   'prompts/yinyi-writer-v4.md': yinyiWriterV4,
   'prompts/yinyi-writer-v5.md': yinyiWriterV5,
+  'prompts/yinyi-writer-v6.md': yinyiWriterV6,
 }
 
 export const embeddedPromptPaths = Object.freeze(Object.keys(EMBEDDED_PROMPTS))

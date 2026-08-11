@@ -66,6 +66,10 @@ function waitForSceneRetry(ms: number, signal?: AbortSignal): Promise<void> {
   })
 }
 
+function shouldRespectSceneSearchCooldown(attempt: number): boolean {
+  return attempt < 2
+}
+
 function attachScene(scene: ActiveScene, tracks: Track[]): Track[] {
   return tracks.map((track) => ({
     ...track,
@@ -148,7 +152,12 @@ function sceneFallbackQueries(scene: ActiveScene): string[] {
   }
 }
 
-async function searchSceneTracks(scene: ActiveScene, targetCount: number, runtime: ScenePlaybackRuntimeOptions): Promise<Track[]> {
+async function searchSceneTracks(
+  scene: ActiveScene,
+  targetCount: number,
+  runtime: ScenePlaybackRuntimeOptions,
+  respectCooldown = true,
+): Promise<Track[]> {
   const queries = Array.from(new Set([scene.prompt, ...sceneFallbackQueries(scene)]))
   const candidates: Track[] = []
   const desiredPoolSize = Math.max(targetCount * 8, 12)
@@ -159,7 +168,7 @@ async function searchSceneTracks(scene: ActiveScene, targetCount: number, runtim
       mode: 'scene',
       targetCount,
       candidatePoolSize: Math.max(72, targetCount * 24),
-      respectCooldown: true,
+      respectCooldown,
       signal: runtime.signal,
       onProgress: (patch) => runtime.report?.({
         ...patch,
@@ -345,7 +354,7 @@ export async function startScenePlayback(key: SceneKey, options: ScenePlaybackOp
     const targetCount = Math.max(1, Math.min(scene.targetCount, options.targetCount ?? scene.targetCount))
     let recommended: Track[] = []
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      recommended = await searchSceneTracks(scene, targetCount, runtime)
+      recommended = await searchSceneTracks(scene, targetCount, runtime, shouldRespectSceneSearchCooldown(attempt))
       if (recommended.length > 0) break
       if (attempt < 2) {
         runtime.report?.({
@@ -431,6 +440,7 @@ export async function startScenePlayback(key: SceneKey, options: ScenePlaybackOp
 
 export const scenePlaybackTestHelpers = {
   shouldPreserveSceneOnPlaybackFailure,
+  shouldRespectSceneSearchCooldown,
   createNoPlayableTrackError: () => new SceneNoPlayableTrackError(),
   pickSceneTracksFromPool,
   hasEnoughSceneTracksFromPool: (candidates: Track[], targetCount: number, excluded: Track[], avoidArtistTracks: Track[]) => (

@@ -43,6 +43,12 @@ describe('scene playback continuation boundaries', () => {
     expect(picked).toEqual([sameArtistFresh])
   })
 
+  it('widens scene recall only on the final retry', () => {
+    expect(scenePlaybackTestHelpers.shouldRespectSceneSearchCooldown(0)).toBe(true)
+    expect(scenePlaybackTestHelpers.shouldRespectSceneSearchCooldown(1)).toBe(true)
+    expect(scenePlaybackTestHelpers.shouldRespectSceneSearchCooldown(2)).toBe(false)
+  })
+
   it('keeps searching when the raw scene pool is full of recently used tracks', () => {
     const recent: Track[] = [
       { id: 'recent-1', title: '刚听过一', artist: '甲' },

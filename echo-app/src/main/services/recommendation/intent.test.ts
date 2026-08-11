@@ -678,6 +678,15 @@ describe('recommendation intent entity inference boundaries', () => {
     expect(recommendationTestHelpers.shouldAllowCooldownFallback(sceneIntent, { respectCooldown: true })).toBe(false)
   })
 
+  it('treats candidate-pool size as a maximum instead of a minimum result count', () => {
+    const fresh = ['fresh-1', 'fresh-2', 'fresh-3', 'fresh-4', 'fresh-5']
+    const cooled = [...fresh, 'cooled-1']
+
+    expect(recommendationTestHelpers.selectCandidatePool(fresh, cooled, [], 5)).toBe(fresh)
+    expect(recommendationTestHelpers.selectCandidatePool(fresh.slice(0, 3), cooled, [], 5)).toBe(cooled)
+    expect(recommendationTestHelpers.selectCandidatePool(fresh.slice(0, 3), [], [], 5)).toEqual(fresh.slice(0, 3))
+  })
+
   it('extracts related artist ids while excluding the reference artist', () => {
     const ids = recommendationRecallTestHelpers.extractSimilarArtistIds({
       body: {

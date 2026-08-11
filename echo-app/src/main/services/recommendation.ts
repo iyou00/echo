@@ -254,6 +254,13 @@ function shouldAllowCooldownFallback(intent: RecommendationIntent, options: Pick
   return Boolean(intent.seedTitle || intent.artistQuery || intent.sceneKey)
 }
 
+function selectCandidatePool<T>(intentMatched: T[], cooledPool: T[], fallbackPool: T[], targetCount: number): T[] {
+  if (intentMatched.length >= targetCount) return intentMatched
+  if (cooledPool.length >= targetCount) return cooledPool
+  if (fallbackPool.length > 0) return fallbackPool
+  return intentMatched.length > 0 ? intentMatched : cooledPool
+}
+
 function titleMatchesSeed(track: Track, seedTitle?: string): boolean {
   return titleMatchesConstraint(track.title, seedTitle, false)
 }
@@ -320,6 +327,7 @@ export const recommendationTestHelpers = {
   parseIntent,
   scoreCandidate: scoreCandidateForTest,
   shouldAllowCooldownFallback,
+  selectCandidatePool,
   memoryConstraintsFingerprint,
   tasteProfileFingerprint,
   trackIdentitySet,
@@ -452,7 +460,7 @@ export async function recommendFromNetease(text: string, override?: IntentOverri
   const intentMatched = ranked.filter((track) => !hasTrackIdentity(hardCooldownKeys, track) && (matchesSeedTitle(track) || !hasTrackIdentity(recentKeys, track)) && (matchesSeedTitle(track) || matchesIntentFloor(track, intent)))
   const cooledPool = ranked.filter((track) => !hasTrackIdentity(hardCooldownKeys, track) && matchesIntentFloor(track, intent))
   const fallbackPool = allowCooldownFallback ? ranked.filter((track) => matchesIntentFloor(track, intent)) : []
-  const primaryPool = intentMatched.length >= desiredCount ? intentMatched : cooledPool.length >= desiredCount ? cooledPool : fallbackPool
+  const primaryPool = selectCandidatePool(intentMatched, cooledPool, fallbackPool, intent.targetCount)
   const playablePool = await filterPlayableTracks(primaryPool, Math.max(20, desiredCount * 8), options.signal)
   assertRecommendationActive(options.signal)
   const diversifiedPool = diversifyByArtist(playablePool, 2)

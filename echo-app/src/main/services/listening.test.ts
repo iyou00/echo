@@ -7,6 +7,71 @@ vi.mock('./memoryEvidence', () => ({
 }))
 
 describe('listening segment context', () => {
+  it('builds a taste-based recommendation when today has no user conversation', () => {
+    const profile: TasteProfile = {
+      echo_portrait: '偏爱安静的民谣。',
+      artists: [{ name: '陈粒', affinity: 0.8 }],
+      genres: [{ name: '民谣', weight: 0.8, trend: 'steady' }],
+      moods: [{ tag: '放松', frequency: 7 }],
+      signature_tracks: [],
+      anti_patterns: [],
+      discovery_appetite: 0.5,
+      profile_meta: {},
+    }
+
+    const basis = listeningTestHelpers.fallbackRecommendationBasis(profile)
+
+    expect(basis.source).toBe('taste')
+    expect(basis.searchQuery).toContain('放松、民谣')
+    expect(basis.canReferenceYesterday).toBe(false)
+    expect(listeningTestHelpers.yesterdayDate(new Date(2026, 7, 11, 12))).toBe('2026-08-10')
+  })
+
+  it('builds yesterday queries only from allowlisted music terms', () => {
+    const fallback = {
+      searchQuery: '推荐一首放松的歌',
+      summary: '长期品味',
+      canReferenceYesterday: false,
+      source: 'taste' as const,
+    }
+    const basis = listeningTestHelpers.normalizeYesterdayRecommendationBasis({
+      terms: ['韩语', '欢快', '具体疾病名称', '某个人名'],
+      canReferenceYesterday: false,
+      summary: '不应进入下游的隐私原文',
+      searchQuery: '不应采用的自由查询',
+    }, fallback)
+
+    expect(basis.searchQuery).toBe('推荐一首韩语、欢快、适合现在听的歌')
+    expect(basis.summary).toBe('只参考韩语、欢快这一音乐方向')
+    expect(basis.searchQuery).not.toContain('疾病')
+    expect(basis.summary).not.toContain('隐私')
+  })
+
+  it('does not expose the yesterday seal when a safe recommendation basis is used', () => {
+    const profile: TasteProfile = {
+      echo_portrait: '', artists: [], genres: [], moods: [], signature_tracks: [], anti_patterns: [], discovery_appetite: 0.5, profile_meta: {},
+    }
+    const context = listeningTestHelpers.buildContext({
+      generatedAt: '2026-08-11T10:00:00+08:00',
+      conversations: [],
+      seal: '昨日包含不应进入本轮文案的私人内容',
+      profile,
+      candidates: [],
+      voiceMoment: {
+        state: 'daily_first', reason: '无今日对话', playedToday: 0, importedTrackCount: 0,
+        hasRecommendationHistory: false, hasTasteProfile: false, isContinuation: false, suggestedLength: '150-220',
+      },
+      recommendationBasis: {
+        searchQuery: '推荐一首韩语、欢快、适合现在听的歌',
+        summary: '只参考韩语、欢快这一音乐方向',
+        canReferenceYesterday: false,
+        source: 'yesterday',
+      },
+    })
+
+    expect(context).not.toContain('昨日包含不应进入本轮文案的私人内容')
+  })
+
   it('uses stable event ids so later active events remain distinguishable', () => {
     expect(listeningTestHelpers.activeEventKey({ id: 12, kind: 'context', content: '今天很累' })).toBe('event:12')
     expect(listeningTestHelpers.activeEventKey({ id: 13, kind: 'context', content: '今天很累' })).toBe('event:13')
@@ -48,6 +113,12 @@ describe('listening segment context', () => {
         isContinuation: false,
         suggestedLength: '150-220',
       },
+      recommendationBasis: {
+        searchQuery: '推荐一首放松的民谣',
+        summary: '昨天明确问过适合休息时听的歌',
+        canReferenceYesterday: true,
+        source: 'yesterday',
+      },
     })
 
     expect(context).toContain('<memory_evidence_contract>')
@@ -55,6 +126,9 @@ describe('listening segment context', () => {
     expect(context).toContain('<profile_memory>')
     expect(context).toContain('用户明确纠正是最高优先级证据')
     expect(context).not.toContain('<taste_signals_recent>')
+    expect(context).toContain('<recommendation_basis>')
+    expect(context).toContain('canReferenceYesterday')
+    expect(context).toContain('昨天明确问过适合休息时听的歌')
   })
 
   it('passes active short-term context into the long-form voice prompt', () => {

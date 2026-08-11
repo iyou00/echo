@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { SchedulerCatchupResult } from '../../types/ipc'
 import { selectStartupCatchupPrimary } from './scheduler'
-import { yinyiCatchupCompletedMessage } from './scheduler/yinyiJobs'
+import { shouldSkipCompletedYinyiJob, shouldSkipExistingYinyi, yinyiCatchupCompletedMessage } from './scheduler/yinyiJobs'
 
 function result(patch: Partial<SchedulerCatchupResult>): SchedulerCatchupResult {
   return {
@@ -75,6 +75,13 @@ describe('startup catchup result selection', () => {
 })
 
 describe('yinyi startup catchup wording', () => {
+  it('retries failed placeholders instead of treating them as completed letters', () => {
+    expect(shouldSkipExistingYinyi({ date: '2026-06-18', content: '失败占位', style: 'dialogue', meta: { status: 'failed' } })).toBe(false)
+    expect(shouldSkipExistingYinyi({ date: '2026-06-18', content: '正文', style: 'dialogue', meta: { status: 'ok' } })).toBe(true)
+    expect(shouldSkipCompletedYinyiJob({ date: '2026-06-18', content: '失败占位', style: 'dialogue', meta: { status: 'failed' } }, 'completed')).toBe(false)
+    expect(shouldSkipCompletedYinyiJob(null, 'completed')).toBe(true)
+  })
+
   it('uses normal generation wording on the first use date', () => {
     expect(yinyiCatchupCompletedMessage('2026-06-18', '2026-06-18')).toBe('风信已生成。')
   })

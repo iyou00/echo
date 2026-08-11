@@ -454,6 +454,20 @@ export interface YinyiEntry {
     model?: string
     fallback?: boolean
     fallback_error?: string
+    style_signature?: {
+      narrativeShape: 'sentence_echo' | 'object_thread' | 'contrast' | 'single_scene' | 'unfinished_question' | 'casual_letter'
+      echoStance: 'curious' | 'warm' | 'playful' | 'regretful' | 'bright' | 'quiet'
+      openingMode: string
+      endingMode: string
+      imageryFamily?: string
+    }
+    evidence_ids?: string[]
+    verified_time_relations?: Array<{
+      fromEvidenceId: string
+      toEvidenceId: string
+      minutes: number
+      wording: string
+    }>
   }
   createdAt?: string
 }
