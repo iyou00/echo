@@ -4,6 +4,7 @@ import { appendConversation, loadRecentConversations } from '../../db/conversati
 import { getSettings } from '../../db/settings'
 import { getState as getPlaybackState } from '../playback'
 import { getCurrentScene } from '../scene'
+import { attachSceneAdjustmentTracks } from '../sceneJourney'
 import { applyMemorySignal } from '../memoryPolicy'
 import { recordFeedback } from '../feedback'
 import { getWeather } from '../../weather/client'
@@ -150,15 +151,7 @@ function outOfScopeContent(intent: ChatIntent): string {
 function attachSceneToTracks(tracks: Track[]): Track[] {
   const scene = getCurrentScene()
   if (!scene || tracks.length === 0) return tracks
-  return tracks.map((track) => ({
-    ...track,
-    sceneKey: scene.key,
-    sceneLabel: scene.label,
-    sceneLine: scene.line,
-    sceneSessionId: scene.id,
-    reason: track.reason ?? scene.line,
-    echoNote: track.echoNote ?? track.reason ?? scene.line,
-  }))
+  return attachSceneAdjustmentTracks(scene, tracks)
 }
 
 const CHAT_MEMORY_GENRE_TERMS = ['流行', ...MUSIC_LANGUAGE_VALUES, '欧美', '英文', 'R&B', 'r&b', '说唱', '摇滚', '民谣', '电子', '爵士', '古典', '轻音乐']

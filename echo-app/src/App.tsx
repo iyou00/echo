@@ -507,7 +507,7 @@ function App() {
     if (resetAttempts) sceneRetryAttemptsRef.current = 0
   }
 
-  function scheduleSceneContinuationRetry(scene: ActiveScene) {
+  function scheduleSceneContinuationRetry(scene: ActiveScene, enqueueOnly = false) {
     if (sceneRetryTimerRef.current !== null) return
     const attempt = sceneRetryAttemptsRef.current
     const delay = SCENE_CONTINUATION_RETRY_DELAYS_MS[attempt]
@@ -520,7 +520,7 @@ function App() {
     sceneRetryTimerRef.current = window.setTimeout(() => {
       sceneRetryTimerRef.current = null
       if (voiceContinuousRef.current) return
-      continueScene(scene, true).catch((error) => {
+      continueScene(scene, true, enqueueOnly).catch((error) => {
         logAppAsyncError('retry scene continuation', error)
       })
     }, delay)
@@ -530,7 +530,7 @@ function App() {
     clearSceneContinuationRetry()
     voiceContinuousRef.current = false
     dispatch({ voiceContinuous: false })
-    const result = await echo.scene.play(key, { appendChatMessage: true, targetCount: 1 })
+    const result = await echo.scene.play(key, { appendChatMessage: true, targetCount: 3 })
     if (result.tracks.length > 0 || result.message) {
       dispatch(scenePlaybackStatePatch(result.scene))
       setPlaybackState(result.state)
@@ -539,12 +539,17 @@ function App() {
     return result
   }
 
-  async function continueScene(scene: ActiveScene, fromRetry = false) {
+  async function continueScene(scene: ActiveScene, fromRetry = false, enqueueOnly = false) {
     if (voiceContinuousRef.current) return
     if (!fromRetry) clearSceneContinuationRetry()
     const current = await echo.scene.getCurrent()
     if (!current || current.id !== scene.id || current.key !== scene.key) return
-    const result = await echo.scene.play(current.key, { appendChatMessage: true, continueSession: true, targetCount: 1 })
+    const result = await echo.scene.play(current.key, {
+      appendChatMessage: false,
+      continueSession: true,
+      targetCount: enqueueOnly ? 2 : 1,
+      enqueueOnly,
+    })
     if (result.tracks.length > 0 || result.message) {
       clearSceneContinuationRetry()
       dispatch(scenePlaybackStatePatch(result.scene))
@@ -552,7 +557,7 @@ function App() {
       await refreshQueue()
       return
     }
-    scheduleSceneContinuationRetry(current)
+    scheduleSceneContinuationRetry(current, enqueueOnly)
   }
 
   async function endScene() {
@@ -761,8 +766,8 @@ function App() {
             autoPlayNext={settings?.playback.autoPlayNext ?? true}
             currentScene={currentScene}
             voiceContinuous={isVoiceContinuousActive(page, voiceContinuous)}
-            onSceneTrackEnded={(scene) => {
-              continueScene(scene).catch((error) => {
+            onSceneTrackEnded={(scene, mode) => {
+              continueScene(scene, false, mode === 'refill').catch((error) => {
                 showPlaybackNotice(friendlyOperationError(error, '这个场景暂时没找到下一首，已经停下来了。'))
               })
             }}

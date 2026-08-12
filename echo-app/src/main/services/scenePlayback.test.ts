@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ActiveScene, TasteProfile, Track } from '../../types/ipc'
+import { shouldResetSceneDirection } from './sceneJourney'
 
 vi.mock('./memoryEvidence', () => ({
   buildMemoryEvidencePrompt: vi.fn(() => '<profile_memory>\n{"kind":"profile_digest"}\n</profile_memory>'),
@@ -8,6 +9,12 @@ vi.mock('./memoryEvidence', () => ({
 import { scenePlaybackTestHelpers } from './scenePlayback'
 
 describe('scene playback continuation boundaries', () => {
+  it('speaks on scene entry but keeps ordinary continuation and refill quiet', () => {
+    expect(scenePlaybackTestHelpers.shouldAppendSceneChatMessage({ appendChatMessage: true })).toBe(true)
+    expect(scenePlaybackTestHelpers.shouldAppendSceneChatMessage({ appendChatMessage: true, continueSession: true })).toBe(false)
+    expect(scenePlaybackTestHelpers.shouldAppendSceneChatMessage({ appendChatMessage: true, enqueueOnly: true })).toBe(false)
+  })
+
   it('preserves an active scene when continuation search temporarily finds no playable track', () => {
     expect(scenePlaybackTestHelpers.shouldPreserveSceneOnPlaybackFailure(
       { continueSession: true },
@@ -76,6 +83,63 @@ describe('scene playback continuation boundaries', () => {
     expect(scenePlaybackTestHelpers.isSceneLineUsable('先听《沉溺》，再接《Wake Up》。', first)).toBe(false)
   })
 
+  it('allows teasing only for repeated sleepy scenes outside serious context', () => {
+    const sleepy: ActiveScene = {
+      id: 2, key: 'sleepy', label: '有点困', shortLabel: '有点困', line: '提神', prompt: '提神', targetCount: 3,
+      moods: ['清醒'], scenes: ['下午工作'], energy: 'high', tempo: 'medium', familiarity: 'balanced',
+      startedAt: '2026-08-11T07:00:00.000Z', expiresAt: '2026-08-11T09:00:00.000Z', status: 'active',
+    }
+    const first: Track = { title: 'Wake Up', artist: 'Arcade Fire', sceneJourneyRole: 'transition' }
+
+    expect(scenePlaybackTestHelpers.sceneLineBrief(sleepy, first, 2, [])).toMatchObject({ stance: 'playful', mayTease: true })
+    expect(scenePlaybackTestHelpers.sceneLineBrief(sleepy, first, 2, [{ kind: 'context', content: '今天真的撑不住了' }])).toMatchObject({ stance: 'warm', mayTease: false })
+    expect(scenePlaybackTestHelpers.sceneLineBrief(sleepy, first, 2, [{ kind: 'context', content: '家里有些事情要处理' }])).toMatchObject({ stance: 'warm', mayTease: false })
+  })
+
+  it('orders scene outcomes by their actual event time before judging recent misses', () => {
+    const outcomes: Track[] = [
+      { id: 'old-miss-1', title: '旧跳过一', artist: '甲', queueStatus: 'skipped', queueStatusAt: '2026-08-09T08:00:00.000Z' },
+      { id: 'new-complete', title: '刚听完', artist: '乙', queueStatus: 'completed', queueStatusAt: '2026-08-11T08:00:00.000Z' },
+      { id: 'old-miss-2', title: '旧跳过二', artist: '丙', queueStatus: 'skipped', queueStatusAt: '2026-08-09T07:00:00.000Z' },
+      { id: 'new-complete-2', title: '刚听完二', artist: '丁', queueStatus: 'completed', queueStatusAt: '2026-08-11T07:00:00.000Z' },
+    ]
+
+    const ordered = scenePlaybackTestHelpers.orderedUniqueSceneOutcomes(outcomes)
+    expect(ordered.map((track) => track.id)).toEqual([
+      'new-complete', 'new-complete-2', 'old-miss-1', 'old-miss-2',
+    ])
+    expect(shouldResetSceneDirection(ordered)).toBe(false)
+  })
+
+  it('reports no playable continuation when every enqueue fails', async () => {
+    const tracks: Track[] = [
+      { id: '1', title: '一', artist: '甲' },
+      { id: '2', title: '二', artist: '乙' },
+    ]
+    const failed: Track[] = []
+    const enqueued = await scenePlaybackTestHelpers.enqueueSceneTrackBatch(
+      tracks,
+      vi.fn(async () => { throw new Error('unplayable') }),
+      (track) => failed.push(track),
+    )
+
+    expect(enqueued).toEqual([])
+    expect(failed).toEqual(tracks)
+  })
+
+  it('returns only playable tracks when a refill partly succeeds', async () => {
+    const tracks: Track[] = [
+      { id: 'bad', title: '坏链接', artist: '甲' },
+      { id: 'good', title: '能播放', artist: '乙' },
+    ]
+    const enqueueTrack = vi.fn(async (track: Track) => {
+      if (track.id === 'bad') throw new Error('unplayable')
+      return {} as never
+    })
+
+    await expect(scenePlaybackTestHelpers.enqueueSceneTrackBatch(tracks, enqueueTrack, vi.fn())).resolves.toEqual([tracks[1]])
+  })
+
   it('keeps user-facing portrait copy out of scene prompt context', () => {
     const scene: ActiveScene = {
       id: 1,
@@ -114,6 +178,7 @@ describe('scene playback continuation boundaries', () => {
         timeLabel: '上午',
         lastTrackContext: '无',
         sceneTransition: '无 → focus',
+        occurrenceCount: 1,
         activeEvents: [{
           kind: 'context',
           content: '有点烦',

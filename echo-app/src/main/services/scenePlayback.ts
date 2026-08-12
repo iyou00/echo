@@ -2,7 +2,8 @@ import { BrowserWindow } from 'electron'
 import type { ActiveScene, ChatMessage, PlaybackState, SceneKey, ScenePlaybackOptions, Track } from '../../types/ipc'
 import { appendConversation } from '../db/conversations'
 import { loadActiveEvents, type ActiveEvent } from '../db/events'
-import { appendRecommendedTracks, loadListenedTrackWindows, loadRecentRecommendedTracks, skipTodayRecommendedTracks } from '../db/tracks'
+import { appendRecommendedTracks, loadListenedTrackWindows, loadListenedTracksSince, loadRecentRecommendedTracks, skipTodayRecommendedTracks } from '../db/tracks'
+import { listExplicitTrackFeedback } from '../db/feedback'
 import { getDb } from '../db'
 import { getTasteProfile } from '../db/taste'
 import { getSettings } from '../db/settings'
@@ -18,6 +19,7 @@ import { clearQueue, enqueue, getState, play } from './playback'
 import { markQueueStatus } from './queue'
 import { endCurrentScene, getCurrentScene, isSceneSessionCurrent, startScene } from './scene'
 import { hasExplicitMemorySource, hasMemorySourceLeak } from './memorySourceGuard'
+import { arrangeSceneJourneyTracks, sceneJourneyQuery, sceneJourneyStep, scenePreferenceTerms } from './sceneJourney'
 
 export interface ScenePlaybackResult {
   scene: ActiveScene
@@ -31,6 +33,11 @@ export interface ScenePlaybackRuntimeOptions {
   report?: (patch: { phase?: string; current?: number; total?: number; message?: string }) => void
 }
 
+interface SceneTrackHistory {
+  delivered: Track[]
+  outcomes: Track[]
+}
+
 class SceneNoPlayableTrackError extends Error {
   constructor() {
     super('Echo 这次没找到能播的歌。')
@@ -40,6 +47,10 @@ class SceneNoPlayableTrackError extends Error {
 
 function shouldPreserveSceneOnPlaybackFailure(options: ScenePlaybackOptions, error: unknown): boolean {
   return Boolean(options.continueSession && error instanceof SceneNoPlayableTrackError)
+}
+
+function shouldAppendSceneChatMessage(options: ScenePlaybackOptions): boolean {
+  return Boolean(options.appendChatMessage && !options.continueSession && !options.enqueueOnly)
 }
 
 function assertScenePlaybackActive(signal?: AbortSignal): void {
@@ -85,6 +96,41 @@ function attachScene(scene: ActiveScene, tracks: Track[]): Track[] {
       source: track.profileEvidence?.source ?? 'scene',
     },
   }))
+}
+
+function trackEventTime(track: Track): number {
+  const value = track.queueStatusAt ?? track.recommendedAt
+  const parsed = value ? Date.parse(value) : Number.NaN
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function orderedUniqueSceneOutcomes(tracks: Track[]): Track[] {
+  return uniqueTracks([...tracks].sort((a, b) => trackEventTime(b) - trackEventTime(a)))
+}
+
+function sceneTrackHistory(scene: ActiveScene): SceneTrackHistory {
+  const delivered = loadListenedTracksSince(6, 500)
+    .filter((track) => track.sceneSessionId === scene.id)
+  const explicitMisses = listExplicitTrackFeedback(120)
+    .filter((item) => item.action === 'not_right' && item.track.sceneSessionId === scene.id)
+    .map((item) => ({
+      ...item.track,
+      queueStatus: 'skipped' as const,
+      queueStatusReason: 'explicit_feedback' as const,
+      queueStatusAt: item.createdAt,
+    }))
+  const playbackOutcomes = delivered.filter((track) => (
+    track.queueStatus === 'completed'
+    || (track.queueStatus === 'skipped'
+      && (!track.queueStatusReason || track.queueStatusReason === 'playback_skipped' || track.queueStatusReason === 'explicit_feedback'))
+  ))
+  return {
+    delivered,
+    outcomes: orderedUniqueSceneOutcomes([
+      ...explicitMisses,
+      ...playbackOutcomes,
+    ]),
+  }
 }
 
 function isSuperseded(scene: ActiveScene): boolean {
@@ -158,7 +204,12 @@ async function searchSceneTracks(
   runtime: ScenePlaybackRuntimeOptions,
   respectCooldown = true,
 ): Promise<Track[]> {
-  const queries = Array.from(new Set([scene.prompt, ...sceneFallbackQueries(scene)]))
+  const history = sceneTrackHistory(scene)
+  const journeyIndex = history.delivered.length
+  const journey = sceneJourneyStep(scene.key, journeyIndex, history.outcomes)
+  const learnedTerms = scenePreferenceTerms(loadListenedTracksSince(24 * 30, 2000), scene.key)
+  const learnedSuffix = learnedTerms.length > 0 ? ` ${learnedTerms.join(' ')}` : ''
+  const queries = Array.from(new Set([`${sceneJourneyQuery(scene.label, journey)}${learnedSuffix}`, scene.prompt, ...sceneFallbackQueries(scene)]))
   const candidates: Track[] = []
   const desiredPoolSize = Math.max(targetCount * 8, 12)
   for (const query of queries) {
@@ -169,6 +220,16 @@ async function searchSceneTracks(
       targetCount,
       candidatePoolSize: Math.max(72, targetCount * 24),
       respectCooldown,
+      authoritativeIntentSemantics: true,
+      intentOverride: {
+        sceneKey: scene.key,
+        moods: scene.moods,
+        scenes: scene.scenes,
+        energy: journey.energy,
+        tempo: journey.tempo,
+        familiarity: journey.familiarity,
+        targetCount,
+      },
       signal: runtime.signal,
       onProgress: (patch) => runtime.report?.({
         ...patch,
@@ -190,6 +251,12 @@ async function searchSceneTracks(
     }
   }
   return uniqueTracks(candidates)
+}
+
+function prepareSceneTracks(scene: ActiveScene, candidates: Track[], targetCount: number): Track[] {
+  const history = sceneTrackHistory(scene)
+  const freshPool = pickSceneTracks(candidates, Math.max(targetCount * 3, targetCount))
+  return attachScene(scene, arrangeSceneJourneyTracks(scene.key, history.delivered.length, freshPool, targetCount, history.outcomes))
 }
 
 function getTimeLabel(): string {
@@ -234,7 +301,8 @@ const SCENE_LINE_SYSTEM = `${buildSoulPolicyPrompt('scene')}
 要求：
 - 只说一句话，20 字左右，不超过 30 字
 - 必须提到用户给你的第一首歌名，用《》，不要自己编歌名
-- 每次从不同角度切入——关心、调侃、鼓励、反问、陈述，随机选一种
+- 严格遵守 sceneLineBrief.stance；mayTease=false 时禁止调侃
+- 不复述时间、场景次数、标签或内部判断
 - 不要用"接住""安排""安排上"这类套话
 - 直接输出那句话，不要解释，不要多余内容`
 
@@ -261,12 +329,48 @@ function isSceneLineUsable(line: string, first: Track): boolean {
   return true
 }
 
+function sceneLineBrief(scene: ActiveScene, first: Track, occurrenceCount: number, activeEvents: ActiveEvent[]) {
+  const mayTease = scene.key === 'sleepy' && occurrenceCount >= 2 && activeEvents.length === 0
+  return {
+    stance: mayTease ? 'playful' : scene.key === 'irritated' ? 'quiet' : 'warm',
+    mayTease,
+    reason: first.sceneJourneyRole ?? 'transition',
+    mustMentionTrack: true,
+  }
+}
+
+async function enqueueSceneTrackBatch(
+  tracks: Track[],
+  enqueueTrack: (track: Track) => Promise<PlaybackState>,
+  onFailure: (track: Track) => void,
+  canContinue: () => boolean = () => true,
+): Promise<Track[]> {
+  const successful: Track[] = []
+  for (const track of tracks) {
+    if (!canContinue()) break
+    try {
+      await enqueueTrack(track)
+      successful.push(track)
+    } catch {
+      onFailure(track)
+    }
+  }
+  return successful
+}
+
 function buildSceneLineContext(
   scene: ActiveScene,
   first: Track,
   profile: ReturnType<typeof getTasteProfile>,
-  current: { timeLabel?: string; lastTrackContext?: string; sceneTransition?: string; activeEvents?: ActiveEvent[] } = {},
+  current: { timeLabel?: string; lastTrackContext?: string; sceneTransition?: string; activeEvents?: ActiveEvent[]; occurrenceCount?: number } = {},
 ): string {
+  const activeEvents = current.activeEvents ?? loadActiveEvents(6)
+  const occurrenceCount = current.occurrenceCount ?? Number((getDb().prepare(`
+      SELECT COUNT(*) AS total FROM scene_sessions
+      WHERE user_id = current_user_id()
+        AND scene_key = ?
+        AND date(started_at, 'localtime') = date('now', 'localtime')
+    `).get(scene.key) as { total: number } | undefined)?.total ?? 0)
   return [
     safePromptJson({
       timeLabel: current.timeLabel ?? getTimeLabel(),
@@ -281,8 +385,10 @@ function buildSceneLineContext(
         title: first.title,
         artist: first.artist,
         album: first.album,
+        journeyRole: first.sceneJourneyRole,
       },
-      activeEvents: (current.activeEvents ?? loadActiveEvents(6)).map((event) => ({
+      sceneLineBrief: sceneLineBrief(scene, first, occurrenceCount, activeEvents),
+      activeEvents: activeEvents.map((event) => ({
         content: event.content,
         kind: event.kind,
         scope: event.kind === 'context' ? 'today_context' : 'active_event',
@@ -371,9 +477,23 @@ export async function startScenePlayback(key: SceneKey, options: ScenePlaybackOp
       return { scene, tracks: [], state: getState() }
     }
 
-    const tracks = attachScene(scene, pickSceneTracks(recommended, targetCount))
+    const tracks = prepareSceneTracks(scene, recommended, targetCount)
     if (tracks.length === 0) {
       throw new SceneNoPlayableTrackError()
+    }
+
+    if (options.enqueueOnly) {
+      if (isSuperseded(scene)) return { scene, tracks: [], state: getState() }
+      appendRecommendedTracks(tracks)
+      const enqueuedTracks = await enqueueSceneTrackBatch(
+        tracks,
+        enqueue,
+        (track) => markQueueStatus(track, 'skipped', 'playback_failed'),
+        () => !isSuperseded(scene),
+      )
+      if (isSuperseded(scene)) return { scene, tracks: [], state: getState() }
+      if (enqueuedTracks.length === 0) throw new SceneNoPlayableTrackError()
+      return { scene, tracks: enqueuedTracks, state: getState() }
     }
 
     if (isSuperseded(scene)) {
@@ -398,7 +518,8 @@ export async function startScenePlayback(key: SceneKey, options: ScenePlaybackOp
       return { scene, tracks: [], state: getState() }
     }
 
-    const chatLinePromise = options.appendChatMessage ? buildSceneChatLine(scene, tracks, runtime.signal) : Promise.resolve('')
+    const shouldAppendChatMessage = shouldAppendSceneChatMessage(options)
+    const chatLinePromise = shouldAppendChatMessage ? buildSceneChatLine(scene, tracks, runtime.signal) : Promise.resolve('')
 
     const firstKey = trackKey(first)
     const seen = new Set<string>([firstKey])
@@ -425,7 +546,7 @@ export async function startScenePlayback(key: SceneKey, options: ScenePlaybackOp
     const chatLine = await chatLinePromise
     assertScenePlaybackActive(runtime.signal)
     runtime.report?.({ phase: 'chat-line', current: 4, total: 4, message: scene.label })
-    const message = options.appendChatMessage ? appendConversation('assistant', chatLine, tracks) : undefined
+    const message = shouldAppendChatMessage ? appendConversation('assistant', chatLine, tracks) : undefined
     if (message) broadcastChatMessage(message)
     return { scene, tracks, state, message }
   } catch (error) {
@@ -440,7 +561,9 @@ export async function startScenePlayback(key: SceneKey, options: ScenePlaybackOp
 
 export const scenePlaybackTestHelpers = {
   shouldPreserveSceneOnPlaybackFailure,
+  shouldAppendSceneChatMessage,
   shouldRespectSceneSearchCooldown,
+  sceneLineBrief,
   createNoPlayableTrackError: () => new SceneNoPlayableTrackError(),
   pickSceneTracksFromPool,
   hasEnoughSceneTracksFromPool: (candidates: Track[], targetCount: number, excluded: Track[], avoidArtistTracks: Track[]) => (
@@ -448,4 +571,6 @@ export const scenePlaybackTestHelpers = {
   ),
   isSceneLineUsable,
   buildSceneLineContext,
+  orderedUniqueSceneOutcomes,
+  enqueueSceneTrackBatch,
 }
