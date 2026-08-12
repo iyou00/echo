@@ -92,9 +92,12 @@ const echoApi: EchoApi = {
   taste: {
     getProfile: () => invoke('taste:getProfile'),
     getMemoryAudit: () => invoke('taste:getMemoryAudit'),
+    getProfileVersions: () => invoke('taste:getProfileVersions'),
     refreshStructuredProfile: () => invoke('taste:refreshStructuredProfile'),
     regeneratePortrait: () => invoke('taste:regeneratePortrait'),
     applySignal: (kind, payload) => invoke('taste:applySignal', kind, payload),
+    respondToInsight: (insight, action) => invoke('taste:respondToInsight', insight, action),
+    restoreProfileVersion: (id) => invoke('taste:restoreProfileVersion', id),
     correctMemory: (note) => invoke('taste:correctMemory', note),
     answerQuestion: (id, answer) => invoke('taste:answerQuestion', id, answer),
   },

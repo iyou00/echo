@@ -1,4 +1,4 @@
-import type { TasteProfile, TasteQuestion } from '../../types/ipc'
+import type { ProfileInsight, ProfileInsightFeedbackAction, TasteProfile, TasteProfileVersion, TasteQuestion } from '../../types/ipc'
 import { getDb } from './index'
 import { parseJson } from './json'
 import { clearRecommendationCache } from './recommendationCache'
@@ -25,6 +25,105 @@ export function saveTasteProfile(profile: TasteProfile, summary = ''): TasteProf
     .run(JSON.stringify(next), effectiveSummary || profile.echo_portrait)
   clearRecommendationCache()
   return next
+}
+
+export function saveTasteProfileVersion(profile: TasteProfile, summary: string, trigger: string): void {
+  getDb()
+    .prepare(`
+      INSERT INTO taste_profile_versions (
+        user_id, portrait, summary, profile_json, evidence_revision, trigger
+      ) VALUES (current_user_id(), ?, ?, ?, ?, ?)
+    `)
+    .run(
+      profile.echo_portrait,
+      summary,
+      JSON.stringify(profile),
+      profile.profile_meta?.signalRevision ?? 0,
+      trigger,
+    )
+  getDb()
+    .prepare(`
+      DELETE FROM taste_profile_versions
+      WHERE user_id = current_user_id()
+        AND id NOT IN (
+          SELECT id FROM taste_profile_versions
+          WHERE user_id = current_user_id()
+          ORDER BY created_at DESC, id DESC
+          LIMIT 24
+        )
+    `)
+    .run()
+}
+
+export function publishTasteProfile(profile: TasteProfile, summary: string, trigger: string): TasteProfile {
+  const database = getDb()
+  return database.transaction(() => {
+    const saved = saveTasteProfile(profile, summary)
+    saveTasteProfileVersion(saved, summary, trigger)
+    return saved
+  })()
+}
+
+export function listTasteProfileVersions(limit = 12): TasteProfileVersion[] {
+  const safeLimit = Math.max(1, Math.min(24, Math.floor(limit)))
+  const rows = getDb().prepare(`
+    SELECT id, portrait, summary, profile_json, evidence_revision, trigger, created_at
+    FROM taste_profile_versions
+    WHERE user_id = current_user_id()
+    ORDER BY created_at DESC, id DESC
+    LIMIT ?
+  `).all(safeLimit) as Array<Record<string, unknown>>
+  return rows.flatMap((row) => {
+    const profile = parseJson<TasteProfile | null>(String(row.profile_json), null, 'taste_profile_versions.profile_json')
+    if (!profile) return []
+    return [{
+      id: Number(row.id),
+      portrait: String(row.portrait),
+      summary: typeof row.summary === 'string' ? row.summary : undefined,
+      profile,
+      evidenceRevision: Number(row.evidence_revision ?? 0),
+      trigger: typeof row.trigger === 'string' ? row.trigger : undefined,
+      createdAt: String(row.created_at),
+    }]
+  })
+}
+
+export function restoreTasteProfileVersion(id: number): TasteProfile {
+  const row = getDb().prepare(`
+    SELECT summary, profile_json
+    FROM taste_profile_versions
+    WHERE user_id = current_user_id() AND id = ?
+  `).get(id) as { summary?: string; profile_json: string } | undefined
+  if (!row) throw new Error('画像版本不存在或已过期')
+  const profile = parseJson<TasteProfile | null>(row.profile_json, null, 'taste_profile_versions.profile_json')
+  if (!profile) throw new Error('画像版本内容损坏')
+  return publishTasteProfile(profile, row.summary ?? profile.work_summary ?? profile.echo_portrait, 'restore')
+}
+
+export function saveProfileInsightFeedback(insight: ProfileInsight, action: ProfileInsightFeedbackAction): void {
+  const retentionDays = action === 'temporary' ? 14 : 30
+  getDb().prepare(`
+    INSERT INTO taste_profile_insight_feedback (
+      user_id, insight_id, action, kind, subject, direction, statement, expires_at
+    ) VALUES (current_user_id(), ?, ?, ?, ?, ?, ?, datetime('now', ?))
+    ON CONFLICT(user_id, insight_id) DO UPDATE SET
+      action = excluded.action,
+      kind = excluded.kind,
+      subject = excluded.subject,
+      direction = excluded.direction,
+      statement = excluded.statement,
+      created_at = CURRENT_TIMESTAMP,
+      expires_at = excluded.expires_at
+  `).run(insight.id, action, insight.kind, insight.subject, insight.direction, insight.statement, `+${retentionDays} days`)
+}
+
+export function listActiveProfileInsightFeedbackIds(): string[] {
+  const rows = getDb().prepare(`
+    SELECT insight_id
+    FROM taste_profile_insight_feedback
+    WHERE user_id = current_user_id() AND expires_at > CURRENT_TIMESTAMP
+  `).all() as Array<{ insight_id: string }>
+  return rows.map((row) => row.insight_id)
 }
 
 export function addTasteQuestion(kind: string, content: string, context: Record<string, unknown> = {}, expiresAt?: string): void {

@@ -126,6 +126,37 @@ export interface ProfileDisplayModel {
   moodItems: Array<{ tag: string; frequency: number; evidenceLevel: ProfileEvidenceLevel; source: ProfileEvidenceSource }>
 }
 
+export type ProfileInsightKind = 'genre' | 'mood' | 'energy' | 'scene'
+
+export interface ProfileInsight {
+  id: string
+  kind: ProfileInsightKind
+  subject: string
+  statement: string
+  direction: 'up' | 'down'
+  confidence: 'medium' | 'strong'
+  evidenceLabel: string
+}
+
+export type ProfileInsightFeedbackAction = 'confirm' | 'temporary' | 'reject'
+
+export interface ProfileInsights {
+  recentChanges: ProfileInsight[]
+  generatedAt: string
+  eligibleEventCount: number
+  activeDays: number
+}
+
+export interface TasteProfileVersion {
+  id: number
+  portrait: string
+  summary?: string
+  profile: TasteProfile
+  evidenceRevision: number
+  trigger?: string
+  createdAt: string
+}
+
 export interface SceneDefinition {
   key: SceneKey
   label: string
@@ -275,6 +306,7 @@ export interface TasteProfile {
   tempo_preference?: { slow: number; medium: number; fast: number }
   scenes?: Array<{ tag: string; frequency: number }>
   display?: ProfileDisplayModel
+  insights?: ProfileInsights
   profile_meta?: {
     updatedAt?: string
     structuredUpdatedAt?: string
@@ -286,6 +318,8 @@ export interface TasteProfile {
     signalRevision?: number
     structuredSignalRevision?: number
     portraitSignalRevision?: number
+    portraitRefreshOutcome?: 'published' | 'retained'
+    portraitRefreshReason?: string
     statsEvidence?: {
       importedTrackCount: number
       semanticTrackCount: number
@@ -300,7 +334,7 @@ export interface TasteProfile {
       sceneEventCount: number
     }
     incrementalSignals?: Array<{
-      kind: 'like_artist' | 'like_genre' | 'reinforce_vibe' | 'like_track'
+      kind: 'like_artist' | 'like_genre' | 'soften_genre' | 'reinforce_vibe' | 'soften_vibe' | 'raise_energy' | 'lower_energy' | 'reinforce_scene' | 'soften_scene' | 'like_track'
       target: string
       artist?: string
       title?: string
@@ -570,9 +604,12 @@ export interface EchoApi {
   taste: {
     getProfile(): Promise<{ profile: TasteProfile | null; questions: TasteQuestion[] }>
     getMemoryAudit(): Promise<MemoryAuditSummary>
+    getProfileVersions(): Promise<TasteProfileVersion[]>
     refreshStructuredProfile(): Promise<TasteProfile | null>
     regeneratePortrait(): Promise<TasteProfile | null>
     applySignal(kind: string, payload: Record<string, unknown>): Promise<TasteProfile | null>
+    respondToInsight(insight: ProfileInsight, action: ProfileInsightFeedbackAction): Promise<TasteProfile | null>
+    restoreProfileVersion(id: number): Promise<TasteProfile>
     correctMemory(note: string): Promise<{ ok: boolean; message: string }>
     answerQuestion(id: number, answer: string): Promise<{ ok: boolean }>
   }

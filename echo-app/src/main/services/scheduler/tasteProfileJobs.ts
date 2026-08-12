@@ -171,8 +171,9 @@ async function runTastePortraitJob(date: string, signal?: AbortSignal): Promise<
       }
     }
     const profile = await regeneratePortrait({ refreshStructured: false, signal })
-    const status = profile ? 'completed' : 'skipped'
-    const message = profile ? '画像文案已刷新。' : '画像文案暂无可刷新内容。'
+    const retained = profile?.profile_meta?.portraitRefreshOutcome === 'retained'
+    const status = profile && !retained ? 'completed' : 'skipped'
+    const message = retained ? '新画像未通过质量检查，已保留原画像。' : profile ? '画像文案已刷新。' : '画像文案暂无可刷新内容。'
     insertScheduledJob('taste_profile_portrait', date, status, message)
     recordSchedulerHealth('taste-portrait', 'ok', message)
     return { ok: true, job: 'taste_profile_portrait', date, status, message }

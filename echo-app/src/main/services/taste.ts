@@ -1,5 +1,6 @@
-import type { ProfileDisplayModel, ProfileEvidenceLevel, ProfileEvidenceSource, TasteProfile, Track, TrackSemantic } from '../../types/ipc'
+import type { ProfileDisplayModel, ProfileEvidenceLevel, ProfileEvidenceSource, ProfileInsight, ProfileInsightFeedbackAction, TasteProfile, Track, TrackSemantic } from '../../types/ipc'
 import { trackIdentity as trackKey } from '../../shared/trackIdentity'
+import { profileInsightConfirmationSignal } from '../../shared/profileInsight'
 import { getDb } from '../db'
 import { loadRecentConversations, loadTodayConversations } from '../db/conversations'
 import { getFeedbackSignalCount, listProfileTrackFeedback, listTrackFeedback, listTrackFeedbackUpdatedSince, type TrackFeedback } from '../db/feedback'
@@ -12,6 +13,9 @@ import {
   answerTasteQuestion as saveTasteQuestionAnswer,
   getPendingQuestions,
   getTasteProfile,
+  listActiveProfileInsightFeedbackIds,
+  publishTasteProfile,
+  saveProfileInsightFeedback,
   saveTasteProfile,
 } from '../db/taste'
 import { getSettings } from '../db/settings'
@@ -24,6 +28,7 @@ import { inferTrackSemanticFallback } from './semantics'
 import { buildMemoryEvidencePrompt, formatAvoidedPattern } from './memoryEvidence'
 import { parseIntent, type RecommendationIntent } from './recommendation/intent'
 import { musicLanguageGenre } from './recommendation/language'
+import { buildRecentProfileInsights, filterAcknowledgedProfileInsights, profileEventAgencyFactor, profileTrackAgencyFactor } from './profileInsights'
 
 interface ArtistSeed {
   genre?: string[]
@@ -135,8 +140,15 @@ function eventMoods(events: ProfileTrackEvent[]): string[] {
   return events.flatMap((event) => event.track.profileEvidence?.moods ?? [])
 }
 
-function eventScenes(events: ProfileTrackEvent[]): string[] {
-  return events.flatMap((event) => event.track.profileEvidence?.scenes ?? [])
+function repeatedEventScene(events: ProfileTrackEvent[]): string | null {
+  const counts = new Map<string, number>()
+  for (const event of events.filter(isPositiveProfileEvent)) {
+    for (const scene of event.track.profileEvidence?.scenes ?? []) {
+      counts.set(scene, (counts.get(scene) ?? 0) + profileEventAgencyFactor(event))
+    }
+  }
+  const top = topEntries(counts, 1)[0]
+  return top && top[1] >= 2 ? top[0] : null
 }
 
 interface EvidenceNote {
@@ -179,14 +191,23 @@ const PROFILE_WEIGHT = {
 } as const
 const CHAT_SIGNATURE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
 
-function semanticProfileWeight(feedback: TrackFeedback | undefined): number {
-  if (!feedback) return PROFILE_WEIGHT.semanticBase
+function semanticProfileWeight(feedback: TrackFeedback | undefined, track: Track = feedback?.track ?? { title: '', artist: '' }): number {
+  if (!feedback) return PROFILE_WEIGHT.semanticBase * profileTrackAgencyFactor(track)
   const positiveSignals = feedback.playCount + feedback.loopCount + feedback.favoriteCount + feedback.explicitLikeCount
   const negativeSignals = feedback.skipCount + feedback.explicitMissCount
   if (negativeSignals > 0 && positiveSignals === 0 && feedback.score <= 0) return 0
+  const agency = profileTrackAgencyFactor(track)
   const positiveBoost = Math.max(0, Math.min(3, feedback.score))
   const negativeDrag = negativeSignals > positiveSignals ? 0.35 : 1
-  return (PROFILE_WEIGHT.semanticBase + positiveBoost) * negativeDrag
+  return (PROFILE_WEIGHT.semanticBase + positiveBoost) * agency * negativeDrag
+}
+
+function effectiveProfilePlayCount(feedback: TrackFeedback | undefined, events: ProfileTrackEvent[]): number {
+  const feedbackCount = (feedback?.playCount ?? 0) * profileTrackAgencyFactor(feedback?.track ?? {})
+  const eventCount = events
+    .filter(isPositiveProfileEvent)
+    .reduce((sum, event) => sum + profileEventAgencyFactor(event), 0)
+  return Math.max(feedbackCount, eventCount)
 }
 
 function hasLegacyProfileNote(note?: string): boolean {
@@ -197,9 +218,10 @@ function signatureEvidence(feedback: TrackFeedback | undefined, events: ProfileT
   if (feedback?.favoriteCount) return { text: '你主动收藏过,Echo 会把它留在代表曲里。', evidenceLevel: 'strong', source: 'favorite', count: feedback.favoriteCount }
   if ((feedback?.explicitLikeCount ?? 0) > 0) return { text: `主动表达想多听这种 ${feedback?.explicitLikeCount} 次。`, evidenceLevel: 'strong', source: 'explicit_like', count: feedback?.explicitLikeCount }
   if ((feedback?.loopCount ?? 0) >= 2) return { text: `你循环过 ${feedback?.loopCount} 次,属于会回头的声音。`, evidenceLevel: 'strong', source: 'loop', count: feedback?.loopCount }
-  if ((feedback?.playCount ?? 0) >= 3) return { text: `你完整听过 ${feedback?.playCount} 次。`, evidenceLevel: 'strong', source: 'played', count: feedback?.playCount }
+  const effectivePlayCount = effectiveProfilePlayCount(feedback, events)
+  if (effectivePlayCount >= 3) return { text: `你主动留下过这首歌。`, evidenceLevel: 'strong', source: 'played', count: Math.round(effectivePlayCount) }
   if ((feedback?.explicitMissCount ?? 0) > 0) return { text: `主动标记不太合适 ${feedback?.explicitMissCount} 次。`, evidenceLevel: 'medium', source: 'explicit_miss', count: feedback?.explicitMissCount }
-  const scene = mostFrequent(eventScenes(events))
+  const scene = repeatedEventScene(events)
   if (scene) return { text: `${scene}时常出现在播放里。`, evidenceLevel: 'strong', source: 'scene' }
   const mood = mostFrequent(eventMoods(events)) ?? semanticMood
   if (mood) return { text: `「${mood}」线索`, evidenceLevel: 'medium', source: 'semantic' }
@@ -239,7 +261,9 @@ function artistEvidence(stats: ArtistStats, seed?: ArtistSeed): EvidenceNote {
   if (stats.explicitLiked > 0) return { text: `主动想多听 ${stats.explicitLiked} 次`, evidenceLevel: 'strong', source: 'explicit_like' }
   if (stats.explicitMissed >= 2) return { text: `主动标记不合适 ${stats.explicitMissed} 次`, evidenceLevel: 'medium', source: 'explicit_miss' }
   if (stats.played >= 3) return { text: `完整听过 ${stats.played} 次`, evidenceLevel: 'strong', source: 'played' }
-  const scene = mostFrequent(stats.scenes)
+  const sceneCounts = countBy(stats.scenes)
+  const sceneEntry = topEntries(sceneCounts, 1)[0]
+  const scene = sceneEntry && sceneEntry[1] >= 2 ? sceneEntry[0] : null
   if (scene) return { text: `${scene}时常出现`, evidenceLevel: 'strong', source: 'scene' }
   if (stats.skipped >= 3 && stats.played < stats.skipped) return { text: `跳过 ${stats.skipped} 次`, evidenceLevel: 'medium', source: 'explicit_miss' }
   if (stats.imported > 0) return { text: `导入 ${stats.imported} 首`, evidenceLevel: 'medium', source: 'imported' }
@@ -406,7 +430,7 @@ function applyImportedTrackSignals(context: ProfileBuildContext): void {
 function applySemanticTrackSignals(context: ProfileBuildContext): void {
   for (const track of context.semanticTracks) {
     const feedback = context.feedbackByKey.get(trackKey(track))
-    const semanticWeight = semanticProfileWeight(feedback)
+    const semanticWeight = semanticProfileWeight(feedback, track)
     if (semanticWeight <= 0) continue
     const behaviorWeight = Math.max(0, semanticWeight - PROFILE_WEIGHT.semanticBase)
     const hasFeedbackEvidence = Boolean(
@@ -441,15 +465,16 @@ function applyFeedbackSignals(context: ProfileBuildContext): void {
   for (const feedback of context.feedbackRows) {
     const artist = feedback.track.artist
     const semantic = semanticForProfile(context, feedback.track)
-    const positiveWeight = Math.max(0, Math.min(4, feedback.score))
+    const agency = profileTrackAgencyFactor(feedback.track)
+    const positiveWeight = Math.max(0, Math.min(4, feedback.score)) * agency
     const stats = statsFor(context, artist)
-    stats.played += feedback.playCount
+    stats.played += feedback.playCount * agency
     stats.skipped += feedback.skipCount
     stats.looped += feedback.loopCount
     stats.favorited += feedback.favoriteCount
     stats.explicitLiked += feedback.explicitLikeCount
     stats.explicitMissed += feedback.explicitMissCount
-    stats.score += feedback.playCount * PROFILE_WEIGHT.playedFeedback
+    stats.score += feedback.playCount * PROFILE_WEIGHT.playedFeedback * agency
       + feedback.loopCount * PROFILE_WEIGHT.loopFeedback
       + feedback.favoriteCount * PROFILE_WEIGHT.favoriteFeedback
       + feedback.skipCount * PROFILE_WEIGHT.skipFeedback
@@ -480,22 +505,24 @@ function applyProfileEventSignals(context: ProfileBuildContext): void {
     const artist = event.track.artist
     const semantic = semanticForProfile(context, event.track)
     const positiveEvent = isPositiveProfileEvent(event)
-    const eventWeight = event.queueStatus === 'completed'
+    const agency = profileEventAgencyFactor(event)
+    const eventWeight = (event.queueStatus === 'completed'
       ? PROFILE_WEIGHT.completedEventGenre
       : event.queueStatus === 'skipped'
         ? PROFILE_WEIGHT.skippedEventGenre
-        : PROFILE_WEIGHT.neutralEventGenre
+        : PROFILE_WEIGHT.neutralEventGenre) * agency
     const stats = statsFor(context, artist)
-    stats.score += event.queueStatus === 'completed'
+    stats.score += (event.queueStatus === 'completed'
       ? PROFILE_WEIGHT.completedEventArtist
       : event.queueStatus === 'skipped'
         ? PROFILE_WEIGHT.skippedEventArtist
-        : PROFILE_WEIGHT.neutralEventArtist
+        : PROFILE_WEIGHT.neutralEventArtist) * agency
     if (positiveEvent) {
-      stats.scenes.push(...(event.track.profileEvidence?.scenes ?? []))
+      if (agency >= 0.5) stats.scenes.push(...(event.track.profileEvidence?.scenes ?? []))
       for (const mood of event.track.profileEvidence?.moods ?? []) {
-        context.moodCounts.set(mood, (context.moodCounts.get(mood) ?? 0) + PROFILE_WEIGHT.eventMood)
-        addMoodBehaviorEvidence(context, mood, PROFILE_WEIGHT.eventMood)
+        const moodWeight = PROFILE_WEIGHT.eventMood * agency
+        context.moodCounts.set(mood, (context.moodCounts.get(mood) ?? 0) + moodWeight)
+        addMoodBehaviorEvidence(context, mood, moodWeight)
       }
     }
     if (eventWeight > 0) {
@@ -601,9 +628,8 @@ function buildMoodItems(context: ProfileBuildContext, totalMood: number, topArti
 
 function sceneEventWeight(event: ProfileTrackEvent): number {
   if (!isPositiveProfileEvent(event)) return 0
-  if (event.queueStatus === 'completed') return 1
-  if (event.queueStatus === 'playing') return 0.8
-  return 0.55
+  const completionWeight = event.queueStatus === 'completed' ? 1 : event.queueStatus === 'playing' ? 0.8 : 0.55
+  return completionWeight * profileEventAgencyFactor(event)
 }
 
 function sceneItemsFromEvents(
@@ -637,8 +663,9 @@ function buildSceneItems(context: ProfileBuildContext): NonNullable<TasteProfile
 
 function feedbackBehaviorWeight(feedback: TrackFeedback | undefined): number {
   if (!feedback) return 0
+  const agency = profileTrackAgencyFactor(feedback.track)
   const positive =
-    feedback.playCount * 0.45 +
+    feedback.playCount * 0.45 * agency +
     feedback.loopCount * 1.2 +
     feedback.favoriteCount * 1.5 +
     feedback.explicitLikeCount * 1.2
@@ -695,11 +722,12 @@ function buildSonicPreferences(context: ProfileBuildContext): SonicPreferenceBui
 }
 
 function countPositiveSceneEvents(context: ProfileBuildContext): number {
-  return context.profileEvents.filter((event) => {
-    if (!isPositiveProfileEvent(event)) return false
+  return context.profileEvents.reduce((sum, event) => {
+    if (!isPositiveProfileEvent(event)) return sum
     const semantic = semanticForProfile(context, event.track)
-    return Boolean((event.track.profileEvidence?.scenes?.length ?? 0) > 0 || semantic.scenes.length > 0)
-  }).length
+    const hasScene = (event.track.profileEvidence?.scenes?.length ?? 0) > 0 || semantic.scenes.length > 0
+    return sum + (hasScene ? profileEventAgencyFactor(event) : 0)
+  }, 0)
 }
 
 function buildProfileStatsEvidence(context: ProfileBuildContext, sonic: SonicPreferenceBuildResult): ProfileStatsEvidence {
@@ -707,7 +735,7 @@ function buildProfileStatsEvidence(context: ProfileBuildContext, sonic: SonicPre
     importedTrackCount: context.tracks.length,
     semanticTrackCount: context.semanticTracks.length,
     feedbackTrackCount: context.feedbackRows.filter((feedback) => feedbackBehaviorWeight(feedback) > 0).length,
-    positiveEventCount: context.profileEvents.filter(isPositiveProfileEvent).length,
+    positiveEventCount: context.profileEvents.filter(isPositiveProfileEvent).reduce((sum, event) => sum + profileEventAgencyFactor(event), 0),
     eraImportedCount: Array.from(context.eraImportedCounts.values()).reduce((sum, value) => sum + value, 0),
     eraBehaviorCount: Array.from(context.eraBehaviorCounts.values()).reduce((sum, value) => sum + value, 0),
     energyImportedCount: sonic.energyImportedCount,
@@ -721,7 +749,7 @@ function buildProfileStatsEvidence(context: ProfileBuildContext, sonic: SonicPre
 function contextHasBehaviorEvidence(context: ProfileBuildContext): boolean {
   return (
     context.feedbackRows.some((feedback) => feedbackBehaviorWeight(feedback) > 0)
-    || context.profileEvents.some(isPositiveProfileEvent)
+    || context.profileEvents.filter(isPositiveProfileEvent).reduce((sum, event) => sum + profileEventAgencyFactor(event), 0) >= 1
   )
 }
 
@@ -768,14 +796,14 @@ function shouldIncludeSignatureCandidate(
   score: number,
   evidence: { imported?: boolean } = {},
 ): boolean {
-  const positiveEventCount = events.filter(isPositiveProfileEvent).length
+  const positiveEventCount = events.filter(isPositiveProfileEvent).reduce((sum, event) => sum + profileEventAgencyFactor(event), 0)
   const sceneCounts = new Map<string, number>()
   for (const event of events) {
     if (!isPositiveProfileEvent(event)) continue
     for (const scene of event.track.profileEvidence?.scenes ?? []) {
       const tag = scene.trim()
       if (!tag) continue
-      sceneCounts.set(tag, (sceneCounts.get(tag) ?? 0) + 1)
+      sceneCounts.set(tag, (sceneCounts.get(tag) ?? 0) + profileEventAgencyFactor(event))
     }
   }
   const hasRepeatedSceneEvidence = Array.from(sceneCounts.values()).some((count) => count >= 2)
@@ -783,7 +811,7 @@ function shouldIncludeSignatureCandidate(
     (feedback?.favoriteCount ?? 0) > 0
     || (feedback?.explicitLikeCount ?? 0) > 0
     || (feedback?.loopCount ?? 0) > 0
-    || (feedback?.playCount ?? 0) >= 2
+    || (feedback?.playCount ?? 0) * profileTrackAgencyFactor(feedback?.track ?? {}) >= 2
     || positiveEventCount >= 2
     || hasRepeatedSceneEvidence
   )
@@ -807,7 +835,7 @@ function buildSignatureTracks(context: ProfileBuildContext): Track[] {
       const evidence = signatureEvidence(feedback, events, semantic?.moods[0])
       const score =
         (feedback?.score ?? 0) * PROFILE_WEIGHT.signatureFeedback +
-        events.length * PROFILE_WEIGHT.signatureEvent +
+        events.reduce((sum, event) => sum + profileEventAgencyFactor(event), 0) * PROFILE_WEIGHT.signatureEvent +
         (feedback?.favoriteCount ? PROFILE_WEIGHT.signatureFavorite : 0) +
         (feedback?.loopCount ?? 0) * PROFILE_WEIGHT.signatureLoop +
         (semantic?.confidence ?? 0) +
@@ -990,6 +1018,11 @@ function buildProfileFromTracks(tracks: Track[]): TasteProfile {
   const topArtistNames = topArtists.map((artist) => artist.name)
   const topGenreNames = topGenres.map((genre) => genre.name)
   const display = buildProfileDisplay(context, signatureTracks, topArtists, topGenres, moods)
+  const recentInsights = buildRecentProfileInsights(
+    loadProfileTrackEventsBetween(7, 0, 1200),
+    loadProfileTrackEventsBetween(28, 7, 3000),
+    (track) => semanticForProfile(context, track),
+  )
   const profile: TasteProfile = {
     genres: topGenres,
     artists: topArtists,
@@ -999,6 +1032,11 @@ function buildProfileFromTracks(tracks: Track[]): TasteProfile {
     anti_patterns: [] as string[],
     signature_tracks: signatureTracks,
     display,
+    insights: {
+      ...recentInsights,
+      recentChanges: filterAcknowledgedProfileInsights(recentInsights.recentChanges, listActiveProfileInsightFeedbackIds()),
+      generatedAt: new Date().toISOString(),
+    },
     echo_portrait: previous?.echo_portrait ?? buildFallbackPortrait(topArtistNames, topGenreNames, signatureTracks),
     work_summary: previous?.work_summary,
     energy_preference: sonic.energy,
@@ -1309,11 +1347,34 @@ function applyIncrementalSignals(rebuilt: TasteProfile, previous: TasteProfile |
         rebuilt.genres.push({ name: signal.target, weight: clamp(0.3 + strength), trend: 'up', note: '对话里出现过想多听的线索。' })
       }
     }
+    if (signal.kind === 'soften_genre') {
+      const existing = rebuilt.genres.find((genre) => genre.name === signal.target)
+      if (existing) {
+        existing.weight = clamp(existing.weight - Math.max(0.02, strength / 2))
+        existing.trend = 'down'
+      }
+    }
     if (signal.kind === 'reinforce_vibe') {
       upsertMoodPreference(rebuilt, signal.target, strength, {
         baseFrequency: 0.32,
         signatureArtists: rebuilt.artists.slice(0, 3).map((artist) => artist.name),
       })
+    }
+    if (signal.kind === 'soften_vibe') {
+      const existing = rebuilt.moods.find((mood) => mood.tag === signal.target)
+      if (existing) existing.frequency = clamp(existing.frequency - Math.max(0.02, strength / 2))
+    }
+    if (signal.kind === 'raise_energy' || signal.kind === 'lower_energy') {
+      const direction = signal.kind === 'raise_energy' ? 1 : -1
+      rebuilt.energy_preference = clamp((rebuilt.energy_preference ?? 0.5) + direction * strength)
+    }
+    if (signal.kind === 'reinforce_scene' || signal.kind === 'soften_scene') {
+      const direction = signal.kind === 'reinforce_scene' ? 1 : -1
+      const scenes = rebuilt.scenes ?? []
+      const existing = scenes.find((scene) => scene.tag === signal.target)
+      if (existing) existing.frequency = clamp(existing.frequency + direction * strength)
+      else if (direction > 0) scenes.unshift({ tag: signal.target, frequency: clamp(0.35 + strength) })
+      rebuilt.scenes = scenes.filter((scene) => scene.frequency > 0).slice(0, 8)
     }
     if (signal.kind === 'like_track' && signal.title) {
       rememberLikedTrackOnProfile(rebuilt, {
@@ -2070,6 +2131,7 @@ function portraitAvoidedPatterns(profile: TasteProfile): Array<{ scope: 'track' 
 
 function buildPortraitProfileSnapshot(profile: TasteProfile): Record<string, unknown> {
   return {
+    recent_insights: profile.insights?.recentChanges ?? [],
     artists: profile.artists.slice(0, 8).map((artist) => ({
       name: artist.name,
       affinity: artist.affinity,
@@ -2335,7 +2397,26 @@ function shouldUseRetryPortrait(originalIssues: string[], retryIssues: string[])
   return portraitIssueScore(retryIssues) < portraitIssueScore(originalIssues)
 }
 
+function shouldKeepPublishedPortrait(profile: TasteProfile, issues: string[]): boolean {
+  return hasHardPortraitIssues(issues) && hasWrittenPortrait(profile) && Boolean(profile.echo_portrait.trim())
+}
+
+function portraitRegenerationResult(profile: TasteProfile, outcome: 'published' | 'retained', reason?: string): TasteProfile {
+  return {
+    ...profile,
+    profile_meta: {
+      ...(profile.profile_meta ?? {}),
+      portraitRefreshOutcome: outcome,
+      portraitRefreshReason: reason,
+    },
+  }
+}
+
 export const tasteTestHelpers = {
+  effectiveProfilePlayCount,
+  profileTrackAgencyFactor,
+  shouldKeepPublishedPortrait,
+  portraitRegenerationResult,
   buildRelationshipContextText,
   discoveryAppetiteFromTotals,
   semanticProfileWeight,
@@ -2455,7 +2536,9 @@ function mergeIncrementalSignals(rebuilt: TasteProfile, previous: TasteProfile |
   if ((!rebuilt.scenes || rebuilt.scenes.length === 0) && previous.scenes) rebuilt.scenes = previous.scenes
   mergeCarriedStatsEvidence(rebuilt, previous)
   applyIncrementalSignals(rebuilt, previous, now)
-  rebuilt.display = mergeProfileDisplay(rebuilt, previous.display)
+  // A structured rebuild is the evidence authority. Incremental signals have
+  // already been reapplied above, so stale display ranks must be allowed to fall.
+  rebuilt.display = mergeProfileDisplay(rebuilt)
   return rebuilt
 }
 
@@ -2555,6 +2638,9 @@ export async function regeneratePortrait(options: RegeneratePortraitOptions = {}
     let finalParsed = parsed?.portrait ? parsed as PortraitResponse & { portrait: string } : buildLocalPortraitFallback(profile)
     const finalIssues = portraitV2Issues(finalParsed.portrait, profile, portraitEvidence)
     if (hasHardPortraitIssues(finalIssues)) {
+      if (shouldKeepPublishedPortrait(profile, finalIssues)) {
+        return portraitRegenerationResult(profile, 'retained', '新画像没有通过质量检查，已保留原画像。')
+      }
       finalParsed = buildLocalPortraitFallback(profile)
     }
     options.report?.({ phase: 'save', current: 2, total: 3, message: '' })
@@ -2573,11 +2659,12 @@ export async function regeneratePortrait(options: RegeneratePortraitOptions = {}
         portraitSignalRevision: profile.profile_meta?.signalRevision ?? 0,
       },
     }
-    saveTasteProfile(next, finalParsed.summary ?? finalParsed.portrait)
+    const publishedSummary = finalParsed.summary ?? finalParsed.portrait
+    publishTasteProfile(next, publishedSummary, options.refreshStructured === false ? 'scheduled' : 'manual')
     for (const question of finalParsed.suggested_questions ?? []) {
       if (question.content) addTasteQuestion(question.kind ?? 'observation', question.content, question.context ?? {})
     }
-    return next
+    return portraitRegenerationResult(next, 'published')
   } catch (error) {
     assertPortraitActive(options.signal)
     if (options.fallbackOnError) return profile
@@ -2788,6 +2875,7 @@ export async function applySignal(kind: string, payload: Record<string, unknown>
   }
 
   if (kind === 'soften_genre' && target) {
+    recordIncrementalSignal(profile, { kind: 'soften_genre', target, strength })
     const scope: PositiveSignalScope = { kind: 'like_genre', target }
     removeWeakPositiveProfileEvidence(profile, scope)
     const existing = profile.genres.find((genre) => genre.name === target)
@@ -2820,12 +2908,29 @@ export async function applySignal(kind: string, payload: Record<string, unknown>
   }
 
   if (kind === 'soften_vibe' && target) {
+    recordIncrementalSignal(profile, { kind: 'soften_vibe', target, strength })
     const scope: PositiveSignalScope = { kind: 'reinforce_vibe', target }
     removeWeakPositiveProfileEvidence(profile, scope)
     const existing = profile.moods.find((mood) => mood.tag === target)
     if (existing) existing.frequency = clamp(existing.frequency - Math.max(0.02, strength / 2))
     rememberAntiPattern(`少推:${target}`)
     shiftDiscoveryAppetite(profile, 0.015)
+  }
+
+  if ((kind === 'raise_energy' || kind === 'lower_energy') && target) {
+    recordIncrementalSignal(profile, { kind, target, strength })
+    const direction = kind === 'raise_energy' ? 1 : -1
+    profile.energy_preference = clamp((profile.energy_preference ?? 0.5) + direction * strength)
+  }
+
+  if ((kind === 'reinforce_scene' || kind === 'soften_scene') && target) {
+    recordIncrementalSignal(profile, { kind, target, strength })
+    const direction = kind === 'reinforce_scene' ? 1 : -1
+    const scenes = profile.scenes ?? []
+    const existing = scenes.find((scene) => scene.tag === target)
+    if (existing) existing.frequency = clamp(existing.frequency + direction * strength)
+    else if (direction > 0) scenes.unshift({ tag: target, frequency: clamp(0.35 + strength) })
+    profile.scenes = scenes.filter((scene) => scene.frequency > 0).slice(0, 8)
   }
 
   if (kind === 'played') {
@@ -2960,6 +3065,32 @@ export async function applySignal(kind: string, payload: Record<string, unknown>
     signalRevision: (profile.profile_meta?.signalRevision ?? 0) + 1,
   }
   return saveTasteProfile(profile, profile.echo_portrait)
+}
+
+export async function respondToProfileInsight(insight: ProfileInsight, action: ProfileInsightFeedbackAction): Promise<TasteProfile | null> {
+  let profile = getTasteProfile()
+  if (action === 'confirm') {
+    const signal = profileInsightConfirmationSignal(insight)
+    profile = await applySignal(signal.kind, signal.payload)
+  } else if (action === 'temporary') {
+    profile = await applySignal('event_started', {
+      target: insight.statement,
+      confidence: 0.72,
+      weight: 0.45,
+    })
+  }
+  saveProfileInsightFeedback(insight, action)
+  if (profile?.insights) {
+    profile = {
+      ...profile,
+      insights: {
+        ...profile.insights,
+        recentChanges: profile.insights.recentChanges.filter((item) => item.id !== insight.id),
+      },
+    }
+    profile = saveTasteProfile(profile, profile.echo_portrait)
+  }
+  return profile
 }
 
 export async function answerQuestion(id: number, answer: string): Promise<{ ok: boolean }> {

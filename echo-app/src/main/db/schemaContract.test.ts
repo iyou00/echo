@@ -52,6 +52,21 @@ describe('database schema contract', () => {
     expect(settingsSource).toContain('new Date().toISOString()')
   })
 
+  it('keeps accepted portrait versions for rollback and review', () => {
+    const indexSource = readDbFile('index.ts')
+    const tasteSource = readDbFile('taste.ts')
+
+    expect(indexSource).toContain('CREATE TABLE IF NOT EXISTS taste_profile_versions')
+    expect(indexSource).toContain('CREATE TABLE IF NOT EXISTS taste_profile_insight_feedback')
+    expect(indexSource).toContain('DELETE FROM taste_profile_versions')
+    expect(tasteSource).toContain('INSERT INTO taste_profile_versions')
+    expect(tasteSource).toContain('LIMIT 24')
+    expect(tasteSource).toContain('export function publishTasteProfile')
+    expect(tasteSource).toContain('database.transaction')
+    expect(tasteSource).toContain('export function listTasteProfileVersions')
+    expect(tasteSource).toContain('export function restoreTasteProfileVersion')
+  })
+
   it('keeps semantic backfill on the import runtime adapter', () => {
     const recommendationIpcSource = readDbFile('../ipc/recommendation.ts')
     const semanticsSource = readDbFile('../services/semantics.ts')

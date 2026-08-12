@@ -5,6 +5,32 @@ import { tasteTestHelpers } from './taste'
 import { LlmError } from '../llm/client'
 
 describe('taste portrait boundaries', () => {
+  it('keeps passive Echo playback weak until the user gives an active signal', () => {
+    expect(tasteTestHelpers.profileTrackAgencyFactor({ sourceContext: 'voice' })).toBe(0.15)
+    expect(tasteTestHelpers.profileTrackAgencyFactor({ sourceContext: 'scene' })).toBe(0.35)
+    expect(tasteTestHelpers.profileTrackAgencyFactor({ sourceContext: 'favorite' })).toBe(1)
+    expect(tasteTestHelpers.profileTrackAgencyFactor({}, 'recommended_by_echo')).toBe(0.4)
+  })
+
+  it('keeps the last published portrait when a replacement has hard issues', () => {
+    const profile = {
+      echo_portrait: '这是已经发布且通过检查的画像。',
+      profile_meta: { portraitUpdatedAt: '2026-08-10T10:00:00.000Z' },
+    } as TasteProfile
+
+    expect(tasteTestHelpers.shouldKeepPublishedPortrait(profile, ['出现过度判断表达'])).toBe(true)
+    expect(tasteTestHelpers.shouldKeepPublishedPortrait({ ...profile, profile_meta: {} }, ['出现过度判断表达'])).toBe(false)
+    expect(tasteTestHelpers.shouldKeepPublishedPortrait(profile, ['字数略短'])).toBe(false)
+  })
+
+  it('returns an explicit retained outcome without mutating the stored profile shape', () => {
+    const profile = { echo_portrait: '旧画像', profile_meta: { portraitUpdatedAt: '2026-08-10T10:00:00.000Z' } } as TasteProfile
+    const result = tasteTestHelpers.portraitRegenerationResult(profile, 'retained', '保留旧画像')
+
+    expect(result.profile_meta).toMatchObject({ portraitRefreshOutcome: 'retained', portraitRefreshReason: '保留旧画像' })
+    expect(profile.profile_meta?.portraitRefreshOutcome).toBeUndefined()
+  })
+
   it('maps portrait LLM failures to stable product errors', () => {
     expect(tasteTestHelpers.portraitRegenerationErrorFor(new LlmError('LLM 配置还没填完整', 'config')).message)
       .toBe('模型配置还没准备好，画像文案没有刷新。')
@@ -362,6 +388,53 @@ describe('taste portrait boundaries', () => {
     expect(merged.genres.some((genre) => genre.name === '民谣')).toBe(true)
     expect(merged.moods.some((mood) => mood.tag === '人声')).toBe(true)
     expect(merged.signature_tracks.some((track) => track.title === '冷夜' && track.artist === '陈奕迅')).toBe(true)
+  })
+
+  it('lets a structured rebuild downgrade stale strong playback evidence', () => {
+    const track = { title: '旧代表', artist: '某歌手', source: 'imported', reason: '来自导入歌单的稳定坐标。' }
+    const rebuilt: TasteProfile = {
+      echo_portrait: '我还在观察你。',
+      genres: [],
+      artists: [],
+      moods: [],
+      discovery_appetite: 0.5,
+      anti_patterns: [],
+      signature_tracks: [track],
+      profile_meta: {},
+    }
+    const previous: TasteProfile = {
+      ...rebuilt,
+      display: {
+        signatureItems: [{ track, note: '完整听过 3 次', count: 3, evidenceLevel: 'strong', source: 'played' }],
+        genreItems: [],
+        artistItems: [],
+        moodItems: [],
+      },
+    }
+
+    const merged = tasteTestHelpers.mergeIncrementalSignals(rebuilt, previous, Date.now())
+
+    expect(merged.display?.signatureItems[0]).toMatchObject({ source: 'imported', evidenceLevel: 'weak' })
+  })
+
+  it('carries confirmed energy and scene changes through structured rebuilds', () => {
+    const now = Date.now()
+    const rebuilt: TasteProfile = {
+      echo_portrait: '我还在观察你。', genres: [], artists: [], moods: [], discovery_appetite: 0.5,
+      anti_patterns: [], signature_tracks: [], energy_preference: 0.5, scenes: [{ tag: '通勤', frequency: 0.4 }], profile_meta: {},
+    }
+    const previous: TasteProfile = {
+      ...rebuilt,
+      profile_meta: { incrementalSignals: [
+        { kind: 'raise_energy', target: '音乐能量', strength: 0.06, updatedAt: new Date(now).toISOString() },
+        { kind: 'soften_scene', target: '通勤', strength: 0.08, updatedAt: new Date(now).toISOString() },
+      ] },
+    }
+
+    const merged = tasteTestHelpers.mergeIncrementalSignals(rebuilt, previous, now)
+
+    expect(merged.energy_preference).toBeCloseTo(0.56)
+    expect(merged.scenes?.[0].frequency).toBeCloseTo(0.32)
   })
 
   it('derives weak artist affinity from a chat-liked track during structured rebuilds', () => {
@@ -1266,6 +1339,35 @@ describe('taste portrait boundaries', () => {
       explicitMissCount: 1,
       score: -5.6,
     })).toBe(0)
+  })
+
+  it('keeps passive Echo playback below imported semantic evidence', () => {
+    const imported = tasteTestHelpers.semanticProfileWeight(undefined, { title: '导入', artist: '用户歌单' })
+    const passive = tasteTestHelpers.semanticProfileWeight(undefined, { title: '回声', artist: 'Echo', sourceContext: 'voice' })
+
+    expect(passive).toBeLessThan(imported)
+    expect(passive).toBeCloseTo(imported * 0.15)
+  })
+
+  it('does not count the same completed playback from feedback and history twice', () => {
+    const track = { title: '同一首歌', artist: '同一歌手' }
+    const feedback = {
+      trackKey: 'same-track',
+      track,
+      playCount: 2,
+      skipCount: 0,
+      loopCount: 0,
+      favoriteCount: 0,
+      explicitLikeCount: 0,
+      explicitMissCount: 0,
+      score: 2.2,
+    }
+    const events = [
+      { track, listenedAt: '2026-08-10T10:00:00.000Z', queueStatus: 'completed' as const },
+      { track, listenedAt: '2026-08-11T10:00:00.000Z', queueStatus: 'completed' as const },
+    ]
+
+    expect(tasteTestHelpers.effectiveProfilePlayCount(feedback, events)).toBe(2)
   })
 
   it('keeps mixed semantic evidence but lowers it when negative feedback dominates', () => {

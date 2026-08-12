@@ -59,6 +59,34 @@ export function initializeDatabase(database = getDb()): void {
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
 
+    CREATE TABLE IF NOT EXISTS taste_profile_versions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      portrait TEXT NOT NULL,
+      summary TEXT,
+      profile_json TEXT NOT NULL,
+      evidence_revision INTEGER DEFAULT 0,
+      trigger TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_taste_profile_versions_user_created
+      ON taste_profile_versions(user_id, created_at DESC, id DESC);
+
+    CREATE TABLE IF NOT EXISTS taste_profile_insight_feedback (
+      user_id INTEGER NOT NULL,
+      insight_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      direction TEXT NOT NULL,
+      statement TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      expires_at DATETIME NOT NULL,
+      PRIMARY KEY (user_id, insight_id),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+
     CREATE TABLE IF NOT EXISTS events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER,
@@ -362,6 +390,8 @@ export function resetDatabase(): void {
         DELETE FROM conversation_summaries;
         DELETE FROM conversations;
         DELETE FROM events;
+        DELETE FROM taste_profile_insight_feedback;
+        DELETE FROM taste_profile_versions;
         DELETE FROM taste_profile;
         UPDATE netease_auth SET cookie_encrypted = '', profile_json = '{}', updated_at = CURRENT_TIMESTAMP WHERE id = 1;
       `)

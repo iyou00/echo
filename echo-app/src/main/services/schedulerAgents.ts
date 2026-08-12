@@ -54,7 +54,9 @@ export const tastePortraitRefreshAgent: EchoAgent<undefined, TasteProfile | null
       phase: 'done',
       current: 3,
       total: 3,
-      message: profile ? '已刷新。' : '暂无可刷新画像。',
+      message: profile?.profile_meta?.portraitRefreshOutcome === 'retained'
+        ? '新画像未通过质量检查，已保留原画像。'
+        : profile ? '已刷新。' : '暂无可刷新画像。',
     })
     return profile
   },

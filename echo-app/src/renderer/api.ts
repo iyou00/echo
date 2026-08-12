@@ -683,6 +683,17 @@ const mockEcho: EchoApi = {
       }
       return structuredClone(audit)
     },
+    async getProfileVersions() {
+      return profileState ? [{
+        id: 1,
+        portrait: profileState.echo_portrait,
+        summary: profileState.work_summary,
+        profile: structuredClone(profileState),
+        evidenceRevision: profileState.profile_meta?.signalRevision ?? 0,
+        trigger: 'manual',
+        createdAt: profileState.profile_meta?.portraitUpdatedAt ?? now,
+      }] : []
+    },
     async refreshStructuredProfile() {
       profileState = {
         ...(profileState ?? structuredClone(mockProfile)),
@@ -707,6 +718,16 @@ const mockEcho: EchoApi = {
       })
     },
     async applySignal() {
+      return structuredClone(profileState)
+    },
+    async respondToInsight(insight) {
+      profileState = profileState?.insights
+        ? { ...profileState, insights: { ...profileState.insights, recentChanges: profileState.insights.recentChanges.filter((item) => item.id !== insight.id) } }
+        : profileState
+      return structuredClone(profileState)
+    },
+    async restoreProfileVersion() {
+      profileState = structuredClone(mockProfile)
       return structuredClone(profileState)
     },
     async correctMemory(note) {
