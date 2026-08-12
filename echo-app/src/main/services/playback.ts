@@ -6,6 +6,7 @@ import { refreshPlayableUrl } from '../netease/music'
 import { recordHealth } from './health'
 import { recordTrackFeedback } from '../db/feedback'
 import { applyMemorySignal } from './memoryPolicy'
+import { sceneQueueAfterAdjustment } from './sceneJourney'
 
 const state: PlaybackState = {
   current: null,
@@ -168,10 +169,12 @@ async function ensurePlayable(track: Track): Promise<Track> {
 
 export async function play(track: Track, options: InternalPlaybackPlayOptions = {}): Promise<PlaybackState> {
   const pushHistory = options.pushHistory ?? true
-  const previousQueue = state.queue
+  const playable = await ensurePlayable(track)
+  const adjustedQueue = sceneQueueAfterAdjustment(state.queue, track)
+  for (const replaced of adjustedQueue.replaced) markQueueStatus(replaced, 'skipped', 'scene_replaced')
+  const previousQueue = adjustedQueue.kept
   const previousCurrent = state.current
   const previousCompletionRate = currentCompletionRate(0)
-  const playable = await ensurePlayable(track)
   const currentKey = trackKey(previousCurrent)
   const nextKey = trackKey(playable)
 

@@ -13,6 +13,7 @@ export interface Track {
   urlExpiresAt?: string
   durationMs?: number
   recommendedAt?: string
+  queueStatusAt?: string
   queueStatus?: 'pending' | 'playing' | 'completed' | 'skipped'
   queueStatusReason?: 'playback_started' | 'playback_completed' | 'playback_skipped' | 'explicit_feedback' | 'queue_removed' | 'scene_replaced' | 'playback_failed'
   echoNote?: string
@@ -24,6 +25,9 @@ export interface Track {
   sceneLabel?: string
   sceneLine?: string
   sceneSessionId?: number
+  sceneJourneyRole?: 'transition' | 'lift' | 'hold' | 'settle' | 'explore' | 'reset'
+  sceneJourneyIndex?: number
+  sceneAdjustmentBatchId?: string
   sourceContext?: 'chat' | 'voice' | 'scene' | 'queue' | 'favorite' | 'history' | 'care'
 }
 
@@ -157,6 +161,9 @@ export interface SceneSessionSummary {
   expiresAt: string
   status: 'active' | 'ended' | 'expired'
   durationMinutes: number
+  playedTrackCount?: number
+  completedTrackCount?: number
+  skippedTrackCount?: number
 }
 
 export interface ScenePlaybackResult {
@@ -170,6 +177,7 @@ export interface ScenePlaybackOptions {
   appendChatMessage?: boolean
   continueSession?: boolean
   targetCount?: number
+  enqueueOnly?: boolean
 }
 
 export interface SemanticSummary {

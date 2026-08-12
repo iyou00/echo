@@ -13,7 +13,7 @@ interface PlayerProps {
   autoPlayNext: boolean
   currentScene?: ActiveScene | null
   voiceContinuous?: boolean
-  onSceneTrackEnded?: (scene: ActiveScene) => void | Promise<void>
+  onSceneTrackEnded?: (scene: ActiveScene, mode: 'continue' | 'refill') => void | Promise<void>
   onVoiceTrackEnded?: () => void
 }
 
@@ -75,19 +75,21 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
 
   async function completePlayback() {
     if (completingRef.current) return
-    const completionAction = decidePlaybackCompletionAction({ voiceContinuous, currentScene, current, autoPlayNext })
+    const completionAction = decidePlaybackCompletionAction({ voiceContinuous, currentScene, current, queue: state.queue, autoPlayNext })
     const shouldContinueVoice = completionAction === 'voice_continue'
-    const shouldContinueScene = completionAction === 'scene_continue'
     completingRef.current = true
     endingRef.current = true
     setLocalPlaying(false)
     try {
       await sendHeartbeat(true, 'playing')
-      const next = completionAction === 'auto_next' ? await echo.playback.next() : await echo.playback.finishCurrent()
+      const next = completionAction === 'auto_next' || completionAction === 'scene_next'
+        ? await echo.playback.next()
+        : await echo.playback.finishCurrent()
       setState(next)
       await refreshQueue()
       if (shouldContinueVoice) onVoiceTrackEnded?.()
-      if (shouldContinueScene && currentScene) await onSceneTrackEnded?.(currentScene)
+      if (completionAction === 'scene_continue' && currentScene) await onSceneTrackEnded?.(currentScene, 'continue')
+      if (completionAction === 'scene_next' && currentScene && next.queue.length < 2) await onSceneTrackEnded?.(currentScene, 'refill')
       
       // If the track did not change (e.g., end of queue), reset flags manually since the useEffect won't trigger
       if (trackId(next.current) === currentId) {

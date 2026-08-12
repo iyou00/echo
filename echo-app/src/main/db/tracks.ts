@@ -208,7 +208,12 @@ export function skipTodayRecommendedTracks(reason: Track['queueStatusReason'] = 
       if (!row.meta_json) continue
       const parsed = parseJson<Track | null>(row.meta_json, null, 'tracks_listened.meta_json')
       if (!shouldMarkRecommendedTrackSkippedOnReplace(parsed)) continue
-      update.run(JSON.stringify({ ...parsed, queueStatus: 'skipped', queueStatusReason: reason }), row.id)
+      update.run(JSON.stringify({
+        ...parsed,
+        queueStatus: 'skipped',
+        queueStatusReason: reason,
+        queueStatusAt: new Date().toISOString(),
+      }), row.id)
     }
   })
   write(rows)
@@ -475,8 +480,8 @@ export function updateRecommendedTrackStatus(track: Track, status: NonNullable<T
       FROM tracks_listened
       WHERE user_id = current_user_id()
         AND source = 'recommended_by_echo'
-        AND date(listened_at, 'localtime') = date('now', 'localtime')
       ORDER BY listened_at DESC, id DESC
+      LIMIT 500
     `)
     .all() as Array<{ id: number; meta_json?: string }>
 
@@ -492,6 +497,7 @@ export function updateRecommendedTrackStatus(track: Track, status: NonNullable<T
     ...parsed,
     queueStatus: status,
     queueStatusReason: reason,
+    queueStatusAt: new Date().toISOString(),
   }
   getDb().prepare('UPDATE tracks_listened SET meta_json = ? WHERE id = ?').run(JSON.stringify(next), target.id)
 }

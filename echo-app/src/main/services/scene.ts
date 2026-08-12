@@ -1,6 +1,8 @@
 import type { ActiveScene, SceneDefinition, SceneKey, SceneSessionSummary } from '../../types/ipc'
 import type { IntentOverride } from './recommendation'
 import { getDb } from '../db'
+import { loadRecentTracks } from '../db/tracks'
+import { sceneOutcomeCounts } from './sceneJourney'
 
 const SCENE_TTL_MS = 2 * 60 * 60 * 1000
 const sceneListeners = new Set<(scene: ActiveScene | null) => void>()
@@ -255,8 +257,10 @@ export function listTodaySceneSessions(): SceneSessionSummary[] {
       ORDER BY started_at ASC, id ASC
     `)
     .all(...keys) as Array<Parameters<typeof rowToScene>[0]>
+  const recentTracks = loadRecentTracks(500)
   return rows.map((row) => {
     const scene = rowToScene(row)
+    const outcomes = sceneOutcomeCounts(recentTracks.filter((track) => track.sceneSessionId === scene.id))
     return {
       id: scene.id,
       key: scene.key,
@@ -266,6 +270,9 @@ export function listTodaySceneSessions(): SceneSessionSummary[] {
       expiresAt: scene.expiresAt,
       status: scene.status,
       durationMinutes: durationMinutes(scene.startedAt, scene.endedAt, scene.expiresAt),
+      playedTrackCount: outcomes.played,
+      completedTrackCount: outcomes.completed,
+      skippedTrackCount: outcomes.skipped,
     }
   })
 }
@@ -303,8 +310,11 @@ export function buildTodaySceneContext(): string {
 ${scenes.map((scene) => {
   const start = new Date(scene.startedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
   const end = scene.endedAt ? new Date(scene.endedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }) : '现在'
-  return `- ${scene.label} ${start}-${end} · ${scene.status} · ${scene.durationMinutes} 分钟`
+  const outcome = scene.playedTrackCount
+    ? ` · 播放${scene.playedTrackCount}首 · 听完${scene.completedTrackCount ?? 0}首 · 跳过${scene.skippedTrackCount ?? 0}首`
+    : ''
+  return `- ${scene.label} ${start}-${end} · ${scene.status} · ${scene.durationMinutes} 分钟${outcome}`
 }).join('\n')}
-写风信时可以自然带过这些状态,像朋友回想今天一起听过的时间。不要机械复述场景名,不要写成数据总结。
+这些是场景使用事实。可以自然带过一起听过的时间,但不能仅凭场景名推断用户整天的情绪,也不要机械复述数字或写成数据总结。
 </today_scene_context>`
 }
