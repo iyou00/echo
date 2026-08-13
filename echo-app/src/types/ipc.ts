@@ -103,6 +103,8 @@ export interface AgentActionSummary {
   stageContextRevision?: number
   plannedAt: string
   finishedAt?: string
+  decisionCode?: string
+  eligibleAt?: string
   outcomes: Array<{ type: AgentActionOutcomeType; polarity: AgentActionOutcomePolarity; strength: AgentActionOutcomeStrength; occurredAt: string }>
 }
 
@@ -487,6 +489,12 @@ export interface Settings {
     enabled: boolean
     frequency: CareFrequency
     detectFullscreen: boolean
+    quietHours: {
+      enabled: boolean
+      start: string
+      end: string
+    }
+    pausedUntil?: string
   }
   chat: {
     restoreOnStart: boolean
@@ -532,6 +540,10 @@ export interface SettingPathValueMap {
   'carePings.enabled': boolean
   'carePings.frequency': CareFrequency
   'carePings.detectFullscreen': boolean
+  'carePings.quietHours.enabled': boolean
+  'carePings.quietHours.start': string
+  'carePings.quietHours.end': string
+  'carePings.pausedUntil': string
   'chat.restoreOnStart': boolean
   'playback.autoPlayNext': boolean
   'ui.theme': NonNullable<Settings['ui']['theme']>
@@ -736,7 +748,7 @@ export interface EchoApi {
     end(): Promise<StageContext | null>
     correct(input: StageContextCorrection): Promise<StageContext | null>
     delete(id: string): Promise<{ ok: boolean }>
-    recentActions(limit?: number): Promise<AgentActionSummary[]>
+    recentActions(limit?: number, origin?: AgentActionOrigin): Promise<AgentActionSummary[]>
   }
   semantics: {
     buildForImportedTracks(): Promise<{ tagged: number; skipped: number }>
@@ -807,7 +819,8 @@ export interface EchoApi {
   }
   carePings: {
     test(type?: PingType): Promise<{ ok: boolean; message: string }>
-    muteToday(): Promise<{ ok: boolean; message: string }>
+    muteToday(carePingId?: number): Promise<{ ok: boolean; message: string }>
+    pause(mode: 'today' | 'week' | 'resume'): Promise<{ ok: boolean; message: string; settings: Settings }>
     schedule(): Promise<CarePingScheduleItem[]>
   }
   voice: {

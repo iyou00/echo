@@ -151,7 +151,7 @@ const echoApi: EchoApi = {
     end: () => invoke('stageContext:end'),
     correct: (input) => invoke('stageContext:correct', input),
     delete: (id) => invoke('stageContext:delete', id),
-    recentActions: (limit) => invoke('stageContext:recentActions', limit),
+    recentActions: (limit, origin) => invoke('stageContext:recentActions', limit, origin),
   },
   semantics: {
     buildForImportedTracks: () => invoke('semantics:buildForImportedTracks'),
@@ -244,7 +244,8 @@ const echoApi: EchoApi = {
   },
   carePings: {
     test: (type) => invoke('carePings:test', type),
-    muteToday: () => invoke('carePings:muteToday'),
+    muteToday: (carePingId?: number) => invoke('carePings:muteToday', carePingId),
+    pause: (mode: 'today' | 'week' | 'resume') => invoke('carePings:pause', mode),
     schedule: () => invoke('carePings:schedule'),
   },
   netease: {

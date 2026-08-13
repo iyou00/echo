@@ -21,6 +21,10 @@ interface SettingsPageState {
   ttsTestState: TestState
   careEnabled: boolean
   careFrequency: CareFrequency
+  careDetectFullscreen: boolean
+  careQuietEnabled: boolean
+  careQuietStart: string
+  careQuietEnd: string
   careStatus: string
   modelStatus: string
   yinyiStatus: string
@@ -70,6 +74,10 @@ const initialSettingsPageState: SettingsPageState = {
   ttsTestState: 'idle',
   careEnabled: false,
   careFrequency: 'normal',
+  careDetectFullscreen: true,
+  careQuietEnabled: true,
+  careQuietStart: '22:30',
+  careQuietEnd: '08:30',
   careStatus: '',
   modelStatus: '',
   yinyiStatus: '',
@@ -131,6 +139,10 @@ export function useSettingsPageState() {
     setTtsTestState: setter(dispatch, 'ttsTestState'),
     setCareEnabled: setter(dispatch, 'careEnabled'),
     setCareFrequency: setter(dispatch, 'careFrequency'),
+    setCareDetectFullscreen: setter(dispatch, 'careDetectFullscreen'),
+    setCareQuietEnabled: setter(dispatch, 'careQuietEnabled'),
+    setCareQuietStart: setter(dispatch, 'careQuietStart'),
+    setCareQuietEnd: setter(dispatch, 'careQuietEnd'),
     setCareStatus: setter(dispatch, 'careStatus'),
     setModelStatus: setter(dispatch, 'modelStatus'),
     setYinyiStatus: setter(dispatch, 'yinyiStatus'),

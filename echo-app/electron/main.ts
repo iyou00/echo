@@ -20,6 +20,7 @@ import { recordSchedulerHealth } from '../src/main/services/health'
 import { warmRootFileCache } from '../src/main/utils/paths'
 import { loadActiveStageContext } from '../src/main/domain/stageContext/repository'
 import { recoverInterruptedAgentActions } from '../src/main/domain/agentAction/repository'
+import { reconcileCarePingOutcomes } from '../src/main/services/carePings'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -399,6 +400,7 @@ if (gotSingleInstanceLock) {
         upgradeLegacyNeteaseSecret()
         loadActiveStageContext()
         recoverInterruptedAgentActions()
+        reconcileCarePingOutcomes()
         registerIpc()
         pruneOldData()
         registerScheduler()

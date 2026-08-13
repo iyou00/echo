@@ -19,8 +19,16 @@ describe('taste portrait boundaries', () => {
       { track: { title: '明确跳过', artist: 'Echo', agentActionItemId: 'skipped-item' }, listenedAt: '2026-08-12T10:20:00.000Z', source: 'recommended_by_echo', queueStatus: 'skipped' },
       { track: { title: '升级前历史', artist: 'Echo' }, listenedAt: '2026-08-11T10:00:00.000Z', source: 'recommended_by_echo', queueStatus: 'completed' },
     ]
-    const filtered = tasteTestHelpers.filterProfileEventsByActionOutcome(events, new Set(['completed-item']))
+    const filtered = tasteTestHelpers.filterProfileEventsByActionOutcome(events, new Set(['completed-item', 'skipped-item']))
     expect(filtered.map((event) => event.track.title)).toEqual(['真实听完', '明确跳过', '升级前历史'])
+  })
+
+  it('does not turn a system playback failure into negative profile evidence', () => {
+    const events: ProfileTrackEvent[] = [
+      { track: { title: '链接失效', artist: 'Echo', agentActionItemId: 'failed-item' }, listenedAt: '2026-08-12T10:00:00.000Z', source: 'recommended_by_echo', queueStatus: 'skipped', queueStatusReason: 'playback_skipped' },
+    ]
+
+    expect(tasteTestHelpers.filterProfileEventsByActionOutcome(events, new Set())).toEqual([])
   })
 
   it('keeps the last published portrait when a replacement has hard issues', () => {

@@ -1,4 +1,5 @@
 import type { PingType, Track } from '../../types/ipc'
+import type Database from 'better-sqlite3'
 import { getDb } from './index'
 import { parseJson } from './json'
 
@@ -16,7 +17,10 @@ export interface CarePingRecord {
   body: string
   payload: CarePingPayload
   triggeredAt: string
+  shownAt?: string | null
+  observationDueAt?: string | null
   clickedAt?: string | null
+  dismissedAt?: string | null
 }
 
 function todayIso(): string {
@@ -38,7 +42,10 @@ function toRecord(row: {
   body: string
   payload_json?: string | null
   triggered_at: string
+  shown_at?: string | null
+  observation_due_at?: string | null
   clicked_at?: string | null
+  dismissed_at?: string | null
 }): CarePingRecord {
   return {
     id: row.id,
@@ -47,7 +54,10 @@ function toRecord(row: {
     body: row.body,
     payload: parseJson<CarePingPayload>(row.payload_json, { type: row.type }, 'care_pings.payload_json'),
     triggeredAt: row.triggered_at,
+    shownAt: row.shown_at,
+    observationDueAt: row.observation_due_at,
     clickedAt: row.clicked_at,
+    dismissedAt: row.dismissed_at,
   }
 }
 
@@ -59,8 +69,63 @@ export function insertCarePing(type: PingType, title: string, body: string, payl
   return toRecord(row)
 }
 
-export function markCarePingClicked(id: number): void {
-  getDb().prepare('UPDATE care_pings SET clicked_at = ? WHERE id = ?').run(localTimestamp(), id)
+export function getCarePingById(id: number, database: Database.Database = getDb()): CarePingRecord | null {
+  const row = database.prepare('SELECT * FROM care_pings WHERE id = ?').get(id) as Parameters<typeof toRecord>[0] | undefined
+  return row ? toRecord(row) : null
+}
+
+export function markCarePingShown(
+  id: number,
+  shownAt = new Date(),
+  database: Database.Database = getDb(),
+): void {
+  const observationDueAt = new Date(shownAt.getTime() + 4 * 60 * 60 * 1000)
+  database.prepare(`
+    UPDATE care_pings
+    SET shown_at = ?, observation_due_at = ?
+    WHERE id = ? AND shown_at IS NULL
+  `).run(shownAt.toISOString(), observationDueAt.toISOString(), id)
+}
+
+export function markCarePingClicked(
+  id: number,
+  at = new Date(),
+  database: Database.Database = getDb(),
+): void {
+  database.prepare('UPDATE care_pings SET clicked_at = ? WHERE id = ?').run(at.toISOString(), id)
+}
+
+export function markCarePingDismissed(
+  id: number,
+  at = new Date(),
+  database: Database.Database = getDb(),
+): void {
+  database.prepare('UPDATE care_pings SET dismissed_at = ? WHERE id = ?').run(at.toISOString(), id)
+}
+
+export function markCarePingDeliveryFailed(id: number, database: Database.Database = getDb()): void {
+  database.prepare(`
+    UPDATE care_pings
+    SET shown_at = NULL, observation_due_at = NULL
+    WHERE id = ? AND clicked_at IS NULL AND dismissed_at IS NULL
+  `).run(id)
+}
+
+export function listDueCarePingObservations(
+  now = new Date(),
+  database: Database.Database = getDb(),
+): CarePingRecord[] {
+  const rows = database.prepare(`
+    SELECT *
+    FROM care_pings
+    WHERE shown_at IS NOT NULL
+      AND observation_due_at IS NOT NULL
+      AND observation_due_at <= ?
+      AND clicked_at IS NULL
+      AND dismissed_at IS NULL
+    ORDER BY observation_due_at ASC, id ASC
+  `).all(now.toISOString()) as Array<Parameters<typeof toRecord>[0]>
+  return rows.map(toRecord).filter((record) => Boolean(record.payload.agentActionId))
 }
 
 export function getLastCarePingAt(): string | null {
@@ -90,6 +155,10 @@ export function getRecentCarePingTracks(limit = 20): Track[] {
 
 export function muteCarePingsToday(): void {
   getDb().prepare('INSERT OR IGNORE INTO care_pings_mute (date) VALUES (?)').run(todayIso())
+}
+
+export function unmuteCarePingsToday(): void {
+  getDb().prepare('DELETE FROM care_pings_mute WHERE date = ?').run(todayIso())
 }
 
 export function isCarePingsMutedToday(): boolean {

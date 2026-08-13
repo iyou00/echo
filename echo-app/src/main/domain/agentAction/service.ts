@@ -1,3 +1,4 @@
+import type { Track } from '../../../types/ipc'
 import type { AgentActionPlan, AgentActionRecord } from './contracts'
 import {
   createAgentAction,
@@ -9,6 +10,20 @@ import {
 
 export function beginAgentAction(plan: AgentActionPlan): AgentActionRecord {
   return createAgentAction(plan)
+}
+
+export function attributeTracksToAgentAction(action: AgentActionRecord, tracks: Track[]): Track[] {
+  const trackItems = action.items.filter((item) => item.itemType === 'track')
+  return tracks.map((track, index) => {
+    const item = trackItems[index]
+    if (!item) return track
+    return {
+      ...track,
+      agentActionId: action.id,
+      agentActionItemId: item.id,
+      stageContextId: action.stageContextId,
+    }
+  })
 }
 
 export function completeAgentAction(action: AgentActionRecord): void {

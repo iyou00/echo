@@ -246,6 +246,27 @@ const migrations: DbMigration[] = [
       `)
     },
   },
+  {
+    version: 11,
+    name: 'proactive_budget_schedule_defer',
+    up(database) {
+      database.exec(`
+        ALTER TABLE care_ping_schedule ADD COLUMN eligible_after TEXT;
+        ALTER TABLE care_ping_schedule ADD COLUMN defer_count INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE care_ping_schedule ADD COLUMN decision_code TEXT;
+      `)
+    },
+  },
+  {
+    version: 12,
+    name: 'care_ping_observation_window',
+    up(database) {
+      database.exec(`
+        ALTER TABLE care_pings ADD COLUMN shown_at TEXT;
+        ALTER TABLE care_pings ADD COLUMN observation_due_at TEXT;
+      `)
+    },
+  },
 ]
 
 function backfillSettingsFirstUsedAt(database: Database.Database): void {

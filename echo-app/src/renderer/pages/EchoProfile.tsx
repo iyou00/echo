@@ -293,7 +293,14 @@ export function EchoProfilePage({ echo, navigate, profile, playbackState, setPla
     playingKeyRef.current = key
     setPlayingKey(key)
     try {
-      const next = await echo.playback.play(track)
+      const next = await echo.playback.play({
+        ...track,
+        sourceContext: 'history',
+        agentActionId: undefined,
+        agentActionItemId: undefined,
+        stageContextId: undefined,
+        playbackInstanceId: undefined,
+      })
       setPlaybackState(next)
       await refreshQueue()
     } catch (error) {

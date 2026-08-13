@@ -102,6 +102,29 @@ const actionTypeLabels: Record<AgentActionSummary['actionType'], string> = {
 const actionOutcomeLabels: Record<AgentActionSummary['outcomes'][number]['type'], string> = {
   playback_started: '已开始播放', quick_skip: '很快切走', effective_listen: '听了一会儿', completed: '听完了', favorite: '已收藏', explicit_like: '明确喜欢', explicit_miss: '明确不合适', replay: '又听了一次', opened: '点开了', system_failure: '执行失败', user_stop: '主动停止', app_closed: '随应用结束', dismissed: '已收起', ignored: '没有回应',
 }
+const proactiveDecisionLabels: Record<string, string> = {
+  eligible: '当时适合轻轻出现',
+  disabled: '主动关心已关闭',
+  paused: '正在按你的设置暂停',
+  muted_today: '今天先不打扰',
+  quiet_hours: '现在是安静时段',
+  daily_budget_exhausted: '今天出现的次数已经够了',
+  cooldown: '离上次出现还太近',
+  recent_negative_feedback: '最近几次没有得到回应，先安静一阵',
+  recent_user_activity: '你刚和 Echo 聊过，先不额外打扰',
+  active_session: '正在陪伴中，不重复打扰',
+  fullscreen_blocked: '检测到全屏，先不打扰',
+  stage_prefers_quiet: '此刻更适合安静陪着',
+  safety_caution: '此刻需要更谨慎地陪伴',
+  insufficient_evidence: '还在积累足够的相处线索',
+}
+
+function careActionExplanation(action: AgentActionSummary): string {
+  const decision = action.decisionCode ? proactiveDecisionLabels[action.decisionCode] : ''
+  const outcome = action.outcomes[0] ? actionOutcomeLabels[action.outcomes[0].type] : ''
+  if (decision && outcome) return `${decision} · ${outcome}`
+  return decision || outcome || (action.status === 'failed' ? '这次没有完成' : '已经完成')
+}
 
 function formatSemanticSummary(summary: SemanticSummary | null): string {
   if (!summary) return '正在读取语义统计...'
@@ -200,6 +223,14 @@ export function SettingsPage({
     setCareEnabled,
     careFrequency,
     setCareFrequency,
+    careDetectFullscreen,
+    setCareDetectFullscreen,
+    careQuietEnabled,
+    setCareQuietEnabled,
+    careQuietStart,
+    setCareQuietStart,
+    careQuietEnd,
+    setCareQuietEnd,
     careStatus,
     setCareStatus,
     modelStatus,
@@ -271,6 +302,7 @@ export function SettingsPage({
   const [neteaseCookieInput, setNeteaseCookieInput] = useState('')
   const [stageContext, setStageContext] = useState<StageContext | null>(null)
   const [recentAgentActions, setRecentAgentActions] = useState<AgentActionSummary[]>([])
+  const [recentCareActions, setRecentCareActions] = useState<AgentActionSummary[]>([])
   const [stageContextStatus, setStageContextStatus] = useState('')
 
   function switchProvider(key: string) {
@@ -397,6 +429,10 @@ export function SettingsPage({
       ttsSpeed: settings.tts.speed,
       careEnabled: settings.carePings.enabled,
       careFrequency: settings.carePings.frequency,
+      careDetectFullscreen: settings.carePings.detectFullscreen,
+      careQuietEnabled: settings.carePings.quietHours.enabled,
+      careQuietStart: settings.carePings.quietHours.start,
+      careQuietEnd: settings.carePings.quietHours.end,
     })
     setTtsEditingCustom(false)
   }, [patchSettingsPageState, settings])
@@ -436,12 +472,14 @@ export function SettingsPage({
 
   const refreshAgentContext = useCallback(async () => {
     try {
-      const [context, actions] = await Promise.all([
+      const [context, actions, careActions] = await Promise.all([
         echo.stageContext.getActive(),
         echo.stageContext.recentActions(8),
+        echo.stageContext.recentActions(3, 'care'),
       ])
       setStageContext(context)
       setRecentAgentActions(actions)
+      setRecentCareActions(careActions)
     } catch (error) {
       console.warn('[settings] agent context failed', error)
     }
@@ -637,6 +675,10 @@ export function SettingsPage({
         { path: 'tts.speed', value: ttsSpeed },
         { path: 'carePings.enabled', value: careEnabled },
         { path: 'carePings.frequency', value: careFrequency },
+        { path: 'carePings.detectFullscreen', value: careDetectFullscreen },
+        { path: 'carePings.quietHours.enabled', value: careQuietEnabled },
+        { path: 'carePings.quietHours.start', value: careQuietStart },
+        { path: 'carePings.quietHours.end', value: careQuietEnd },
       ])
       commitSettings(next)
       setHealth(await echo.health.get().catch(() => health))
@@ -979,6 +1021,54 @@ export function SettingsPage({
     }
   }
 
+  async function updateCareDetectFullscreen(value: boolean) {
+    const previous = careDetectFullscreen
+    setCareDetectFullscreen(value)
+    try {
+      commitSettings(await echo.settings.update('carePings.detectFullscreen', value))
+      setCareStatus('已保存')
+    } catch (error) {
+      setCareDetectFullscreen(previous)
+      setCareStatus(friendlyOperationError(error, '设置没有保存，请稍后再试。'))
+    }
+  }
+
+  async function updateCareQuietEnabled(value: boolean) {
+    const previous = careQuietEnabled
+    setCareQuietEnabled(value)
+    try {
+      commitSettings(await echo.settings.update('carePings.quietHours.enabled', value))
+      setCareStatus('已保存')
+    } catch (error) {
+      setCareQuietEnabled(previous)
+      setCareStatus(friendlyOperationError(error, '设置没有保存，请稍后再试。'))
+    }
+  }
+
+  async function saveCareQuietTime(path: 'carePings.quietHours.start' | 'carePings.quietHours.end', value: string) {
+    const previousStart = settings?.carePings.quietHours.start ?? careQuietStart
+    const previousEnd = settings?.carePings.quietHours.end ?? careQuietEnd
+    try {
+      commitSettings(await echo.settings.update(path, value))
+      setCareStatus('已保存')
+    } catch (error) {
+      setCareQuietStart(previousStart)
+      setCareQuietEnd(previousEnd)
+      setCareStatus(friendlyOperationError(error, '安静时段没有保存，请检查时间。'))
+    }
+  }
+
+  async function updateCarePause(mode: 'today' | 'week' | 'resume') {
+    try {
+      const result = await echo.carePings.pause(mode)
+      commitSettings(result.settings)
+      setCareStatus(result.message)
+      await refreshAgentContext()
+    } catch (error) {
+      setCareStatus(friendlyOperationError(error, '暂停设置没有保存，请稍后再试。'))
+    }
+  }
+
   async function startNeteaseLogin() {
     setNeteaseBusy(true)
     setNeteaseQrStatus('正在生成二维码...')
@@ -1171,7 +1261,11 @@ export function SettingsPage({
     settings.tts.voice === ttsVoice &&
     settings.tts.speed === ttsSpeed &&
     settings.carePings.enabled === careEnabled &&
-    settings.carePings.frequency === careFrequency
+    settings.carePings.frequency === careFrequency &&
+    settings.carePings.detectFullscreen === careDetectFullscreen &&
+    settings.carePings.quietHours.enabled === careQuietEnabled &&
+    settings.carePings.quietHours.start === careQuietStart &&
+    settings.carePings.quietHours.end === careQuietEnd
   const modelStatusText = testState === 'testing'
     ? '正在测试连接...'
     : modelStatus
@@ -1220,6 +1314,9 @@ export function SettingsPage({
       ? '正在补齐歌曲语义'
       : ''
   const neteaseCaptchaSent = neteaseCaptchaCooldown > 0 || (neteaseLoginStatusState === 'ok' && /验证码|发送/.test(neteaseLoginStatus))
+  const carePausedUntil = settings.carePings.pausedUntil && Date.parse(settings.carePings.pausedUntil) > Date.now()
+    ? new Date(settings.carePings.pausedUntil)
+    : null
   return (
     <div className="phone-surface settings-page">
       {/* Tabs Header */}
@@ -1656,9 +1753,9 @@ export function SettingsPage({
                   <div className="field-label">频率</div>
                   <div className="care-frequency-row">
                     {[
-                      ['gentle', '克制', '每天 2 条'],
-                      ['normal', '适中', '每天 3 条'],
-                      ['frequent', '频繁', '每天 4 条'],
+                      ['gentle', '克制', '每天最多 1 次'],
+                      ['normal', '适中', '每天最多 2 次'],
+                      ['frequent', '频繁', '每天最多 3 次'],
                     ].map(([value, label, count]) => (
                       <button
                         className={careFrequency === value ? 'care-frequency-pill active' : 'care-frequency-pill'}
@@ -1673,7 +1770,72 @@ export function SettingsPage({
                   </div>
                 </div>
 
-                <p className="care-copy">Echo 会在合适的时候轻轻出现一下。你点开后，它会带你回到{pageLabels.chat}、播放推荐，或进入{pageLabels.voice}。</p>
+                <label className="toggle-row care-guard-row">
+                  <div className="toggle-text">
+                    <div className="t1">安静时段</div>
+                    <div className="t2">这段时间不发主动通知。</div>
+                  </div>
+                  <input type="checkbox" checked={careQuietEnabled} onChange={(event) => { void updateCareQuietEnabled(event.target.checked) }} />
+                </label>
+                <div className="care-time-row" aria-disabled={!careQuietEnabled}>
+                  <label>
+                    <span>开始</span>
+                    <input
+                      className="input"
+                      type="time"
+                      value={careQuietStart}
+                      disabled={!careQuietEnabled}
+                      onChange={(event) => setCareQuietStart(event.target.value)}
+                      onBlur={(event) => { void saveCareQuietTime('carePings.quietHours.start', event.target.value) }}
+                    />
+                  </label>
+                  <span className="care-time-arrow">到</span>
+                  <label>
+                    <span>结束</span>
+                    <input
+                      className="input"
+                      type="time"
+                      value={careQuietEnd}
+                      disabled={!careQuietEnabled}
+                      onChange={(event) => setCareQuietEnd(event.target.value)}
+                      onBlur={(event) => { void saveCareQuietTime('carePings.quietHours.end', event.target.value) }}
+                    />
+                  </label>
+                </div>
+
+                <label className="toggle-row care-guard-row">
+                  <div className="toggle-text">
+                    <div className="t1">Echo 全屏时不打扰</div>
+                    <div className="t2">Echo 窗口进入全屏时保持安静。</div>
+                  </div>
+                  <input type="checkbox" checked={careDetectFullscreen} onChange={(event) => { void updateCareDetectFullscreen(event.target.checked) }} />
+                </label>
+
+                <div className="care-pause-block">
+                  <div className="field-label">暂停主动关心</div>
+                  <div className="care-pause-row">
+                    <button className="btn sec" type="button" onClick={() => { void updateCarePause('today') }}>到明早</button>
+                    <button className="btn sec" type="button" onClick={() => { void updateCarePause('week') }}>7 天</button>
+                    <button className="btn sec" type="button" disabled={!carePausedUntil} onClick={() => { void updateCarePause('resume') }}>恢复</button>
+                  </div>
+                  {carePausedUntil && (
+                    <div className="field-hint">已暂停至 {carePausedUntil.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+                  )}
+                </div>
+
+                {recentCareActions.length > 0 && (
+                  <div className="care-recent-decisions">
+                    <div className="field-label">最近的主动判断</div>
+                    {recentCareActions.map((action) => (
+                      <div className="care-decision-line" key={action.id}>
+                        <span>{careActionExplanation(action)}</span>
+                        <time>{new Date(action.plannedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <p className="care-copy">次数是上限。Echo 只在当下合适、线索足够时出现。</p>
                 <button className="btn sec care-test-btn" type="button" onClick={testCarePing} disabled={busy || carePingRunning || schedulerCatchupRunning}>
                   {carePingRunning ? '生成中...' : '立刻测试一条'}
                 </button>

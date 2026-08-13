@@ -3,6 +3,7 @@ import { loadConversationsForDate, loadUserConversationsForDate } from '../db/co
 import { isExternalListeningSource, loadMeaningfulTrackEventsForDate, type TodayTrackEvent } from '../db/tracks'
 import { getRandomYinyi, getYinyiByDate, getYinyiRange, upsertYinyi } from '../db/yinyi'
 import { getSettings } from '../db/settings'
+import { listExecutedActionItemIdsForDate } from '../db/agentActions'
 import { completeChat, LlmError } from '../llm/client'
 import { stripKnownSystemBlocks } from '../llm/outputSanitize'
 import { recordHealth } from './health'
@@ -132,6 +133,14 @@ function pickDismissedYinyiTracks(tracks: TodayTrackEvent[]): TodayTrackEvent[] 
   return tracks.filter((track) => track.queueStatus === 'skipped')
 }
 
+function filterYinyiTracksByExecutedActions(tracks: TodayTrackEvent[], executedActionItemIds: Set<string>): TodayTrackEvent[] {
+  return tracks.filter((track) => (
+    isExternalListeningSource(track.source)
+    || !track.agentActionItemId
+    || executedActionItemIds.has(track.agentActionItemId)
+  ))
+}
+
 function yinyiMetaTrack(track: TodayTrackEvent) {
   return {
     title: track.title,
@@ -235,7 +244,10 @@ export async function generateYinyi(date = todayIso(), options: GenerateYinyiOpt
   assertYinyiActive(options.signal)
   const recentMessages = loadUserConversationsForDate(date, 20)
   const allConversations = loadConversationsForDate(date, 40)
-  const recentTracks = loadMeaningfulTrackEventsForDate(date, 60)
+  const recentTracks = filterYinyiTracksByExecutedActions(
+    loadMeaningfulTrackEventsForDate(date, 60),
+    listExecutedActionItemIdsForDate(date),
+  )
   const positiveTracks = pickPositiveYinyiTracks(recentTracks)
   const dismissedTracks = pickDismissedYinyiTracks(recentTracks)
 
@@ -367,4 +379,5 @@ export const yinyiTestHelpers = {
   fallbackYinyiEntry,
   pickPositiveYinyiTracks,
   pickDismissedYinyiTracks,
+  filterYinyiTracksByExecutedActions,
 }

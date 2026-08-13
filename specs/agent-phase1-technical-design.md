@@ -1,9 +1,9 @@
 # Echo Agent Phase 1 技术设计
 
-状态：Proposed  
+状态：Implemented，回归验证通过
 目标版本：Agent Kernel Phase 1  
 范围：连续阶段上下文、行动结果闭环  
-依据：`agent-product-next-stage.md` 与当前 `main@11fef11`
+依据：`agent-product-next-stage.md` 与 `main@2725fa2`，后续闭环修复见当前分支
 
 ## 1. 背景
 

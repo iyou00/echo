@@ -29,6 +29,7 @@ export function classifyPlaybackOutcome(input: PlaybackOutcomeInput): AgentActio
     return { ...base, outcomeType: 'completed', polarity: 'positive', strength: 'medium', metadata: { ...base.metadata, completionRate: 1 } }
   }
   if (completionRate >= 0.8) return { ...base, outcomeType: 'completed', polarity: 'positive', strength: 'medium' }
+  if (position >= 60_000 || completionRate >= 0.3) return { ...base, outcomeType: 'effective_listen', polarity: 'positive', strength: 'weak' }
   if (position < 30_000 && completionRate < 0.3) return { ...base, outcomeType: 'quick_skip', polarity: 'negative', strength: 'weak' }
-  return { ...base, outcomeType: 'effective_listen', polarity: 'positive', strength: 'weak' }
+  return { ...base, outcomeType: 'user_stop', polarity: 'neutral', strength: 'weak' }
 }

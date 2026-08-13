@@ -108,7 +108,15 @@ export function recoverInterruptedAgentActions(now = new Date(), database: Datab
   return database.transaction(() => {
     database.prepare(`
       UPDATE agent_action_items
-      SET status = CASE WHEN status = 'planned' THEN 'canceled' ELSE 'failed' END,
+      SET status = CASE
+            WHEN status = 'planned' THEN 'canceled'
+            WHEN EXISTS (
+              SELECT 1 FROM agent_action_outcomes outcomes
+              WHERE outcomes.action_item_id = agent_action_items.id
+                AND outcomes.outcome_type = 'playback_started'
+            ) THEN 'succeeded'
+            ELSE 'failed'
+          END,
           finished_at = ?
       WHERE status IN ('planned', 'started') AND action_id IN (
         SELECT id FROM agent_actions
@@ -117,8 +125,24 @@ export function recoverInterruptedAgentActions(now = new Date(), database: Datab
     `).run(now.toISOString(), cutoff)
     const result = database.prepare(`
       UPDATE agent_actions
-      SET status = CASE WHEN status = 'planned' THEN 'canceled' ELSE 'failed' END,
-          failure_kind = 'interrupted', finished_at = ?
+      SET status = CASE
+            WHEN status = 'planned' THEN 'canceled'
+            WHEN EXISTS (
+              SELECT 1 FROM agent_action_outcomes outcomes
+              WHERE outcomes.action_id = agent_actions.id
+                AND outcomes.outcome_type = 'playback_started'
+            ) THEN 'succeeded'
+            ELSE 'failed'
+          END,
+          failure_kind = CASE
+            WHEN NOT EXISTS (
+              SELECT 1 FROM agent_action_outcomes outcomes
+              WHERE outcomes.action_id = agent_actions.id
+                AND outcomes.outcome_type = 'playback_started'
+            ) THEN 'interrupted'
+            ELSE NULL
+          END,
+          finished_at = ?
       WHERE user_id = current_user_id() AND status IN ('planned', 'started') AND datetime(planned_at) < datetime(?)
     `).run(now.toISOString(), cutoff)
     return result.changes

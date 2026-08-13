@@ -5,7 +5,7 @@ import { appendRecommendedTracks } from '../../db/tracks'
 import { assertAssistantReplyInputContract, assertSendChatResultContract, enforceAssistantTrackBinding } from './pipelineContract'
 import type { CompanionResponseStrategy } from './companionTypes'
 import { loadActiveStageContext } from '../../domain/stageContext/repository'
-import { beginAgentAction, completeAgentAction, failAgentAction } from '../../domain/agentAction/service'
+import { attributeTracksToAgentAction, beginAgentAction, completeAgentAction, failAgentAction } from '../../domain/agentAction/service'
 
 export type ChatRuntimeEmit = (channel: string, payload: unknown) => void
 
@@ -39,12 +39,16 @@ export function appendAssistantReply(options: AssistantReplyOptions): SendChatRe
     ],
     decision: { policyVersion: 1, expectsMusicAction: options.expectsMusicAction ?? false },
   })
+  const attributedTracks = attributeTracksToAgentAction(
+    action,
+    tracks.map((track) => ({ ...track, sourceContext: track.sourceContext ?? 'chat' })),
+  )
   try {
-    if (options.persistTracks) appendRecommendedTracks(tracks)
-    const message = appendConversation('assistant', content, tracks, { responseStrategy: options.responseStrategy })
+    if (options.persistTracks) appendRecommendedTracks(attributedTracks)
+    const message = appendConversation('assistant', content, attributedTracks, { responseStrategy: options.responseStrategy })
     const payload = {
       message,
-      tracks,
+      tracks: attributedTracks,
       durationMs: options.durationMs ?? 0,
       ...(options.hints ? { hints: options.hints } : {}),
     }
@@ -53,7 +57,7 @@ export function appendAssistantReply(options: AssistantReplyOptions): SendChatRe
     completeAgentAction(action)
     return assertSendChatResultContract({
       message,
-      tracks,
+      tracks: attributedTracks,
       ...(options.hints ? { hints: options.hints } : {}),
     })
   } catch (error) {

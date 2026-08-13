@@ -95,4 +95,26 @@ describe('agent phase one persistence', () => {
     expect(database.prepare('SELECT status, failure_kind FROM agent_actions WHERE id = ?').get(action.id)).toEqual({ status: 'failed', failure_kind: 'interrupted' })
     expect(database.prepare('SELECT status FROM agent_action_items WHERE id = ?').get(action.items[0].id)).toEqual({ status: 'failed' })
   })
+
+  it('keeps an interrupted playback action successful when start was already confirmed', () => {
+    const action = createAgentAction({
+      origin: 'playback', actionType: 'play', reasonCode: 'user_request', goalCode: 'none',
+      plannedAt: '2026-08-12T09:00:00.000Z', items: [{ itemType: 'track', ordinal: 0 }],
+    }, database)
+    transitionAgentAction(action.id, 'started', { at: '2026-08-12T09:01:00.000Z' }, database)
+    transitionAgentActionItem(action.items[0].id, 'started', '2026-08-12T09:01:00.000Z', database)
+    recordAgentActionOutcome({
+      actionId: action.id,
+      actionItemId: action.items[0].id,
+      sourceEventKey: 'playback_started:instance-1',
+      outcomeType: 'playback_started',
+      polarity: 'system',
+      strength: 'weak',
+    }, database)
+
+    recoverInterruptedAgentActions(new Date('2026-08-12T10:00:00.000Z'), database)
+
+    expect(database.prepare('SELECT status, failure_kind FROM agent_actions WHERE id = ?').get(action.id)).toEqual({ status: 'succeeded', failure_kind: null })
+    expect(database.prepare('SELECT status FROM agent_action_items WHERE id = ?').get(action.items[0].id)).toEqual({ status: 'succeeded' })
+  })
 })

@@ -27,6 +27,12 @@ const defaultSettings: Settings = {
     enabled: false,
     frequency: 'normal',
     detectFullscreen: true,
+    quietHours: {
+      enabled: true,
+      start: '22:30',
+      end: '08:30',
+    },
+    pausedUntil: '',
   },
   chat: {
     restoreOnStart: true,
@@ -70,6 +76,10 @@ export const SETTINGS_PATHS: readonly SettingPath[] = [
   'carePings.enabled',
   'carePings.frequency',
   'carePings.detectFullscreen',
+  'carePings.quietHours.enabled',
+  'carePings.quietHours.start',
+  'carePings.quietHours.end',
+  'carePings.pausedUntil',
   'chat.restoreOnStart',
   'playback.autoPlayNext',
   'ui.theme',
@@ -139,6 +149,12 @@ function assertHttpUrl(value: unknown, path: SettingPath, options: { allowEmpty?
   return text
 }
 
+function isValidClockTime(value: string): boolean {
+  const match = /^(\d{2}):(\d{2})$/.exec(value)
+  if (!match) return false
+  return Number(match[1]) <= 23 && Number(match[2]) <= 59
+}
+
 function validateSettingValue(path: SettingPath, value: unknown): unknown {
   switch (path) {
     case 'llm.baseUrl':
@@ -162,13 +178,25 @@ function validateSettingValue(path: SettingPath, value: unknown): unknown {
     case 'yinyi.openWithRandom':
     case 'carePings.enabled':
     case 'carePings.detectFullscreen':
+    case 'carePings.quietHours.enabled':
     case 'chat.restoreOnStart':
     case 'playback.autoPlayNext':
     case 'window.closeHintShown':
       return assertBoolean(value, path)
     case 'yinyi.generateAt': {
       const text = assertString(value, path)
-      if (!/^\d{2}:\d{2}$/.test(text)) throw new Error('生成时间格式需要是 HH:mm')
+      if (!isValidClockTime(text)) throw new Error('生成时间格式需要是 HH:mm')
+      return text
+    }
+    case 'carePings.quietHours.start':
+    case 'carePings.quietHours.end': {
+      const text = assertString(value, path)
+      if (!isValidClockTime(text)) throw new Error(`${path} 格式需要是 HH:mm`)
+      return text
+    }
+    case 'carePings.pausedUntil': {
+      const text = assertString(value, path).trim()
+      if (text && Number.isNaN(Date.parse(text))) throw new Error('暂停截止时间无效')
       return text
     }
     case 'carePings.frequency':
@@ -201,7 +229,14 @@ function mergeDefaults(value: Partial<Settings>): Settings {
     ...value,
     llm: { ...defaultSettings.llm, ...(value.llm ?? {}) },
     yinyi: { ...defaultSettings.yinyi, ...(value.yinyi ?? {}) },
-    carePings: { ...defaultSettings.carePings, ...(value.carePings ?? {}) },
+    carePings: {
+      ...defaultSettings.carePings,
+      ...(value.carePings ?? {}),
+      quietHours: {
+        ...defaultSettings.carePings.quietHours,
+        ...(value.carePings?.quietHours ?? {}),
+      },
+    },
     chat: { ...defaultSettings.chat, ...(value.chat ?? {}) },
     playback: { ...defaultSettings.playback, ...(value.playback ?? {}) },
     ui: { ...defaultSettings.ui, ...(value.ui ?? {}) },
@@ -336,3 +371,5 @@ export function updateSettingsSilent(settings: Settings): void {
     .prepare('UPDATE settings SET data_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1')
     .run(JSON.stringify(settings))
 }
+
+export const settingsTestHelpers = { mergeDefaults, validateSettingValue }
