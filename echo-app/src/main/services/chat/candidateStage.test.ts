@@ -45,6 +45,24 @@ describe('chat candidate stage', () => {
     expect(effectiveMusicSearchQuery('你帮我挑一首', intent)).toBe('推荐一首陈默之的歌')
   })
 
+  it('keeps ranking semantics when completing a contextual artist query', () => {
+    const popular = classifyChatIntent('那你随便推荐几首热度高的')
+    const intent = {
+      ...popular,
+      kind: 'artist_request' as const,
+      wantsMusic: true,
+      artistQuery: '陈默之',
+      targetCount: 3,
+      recommendationIntent: {
+        ...popular.recommendationIntent,
+        artistQuery: '陈默之',
+      },
+    }
+
+    expect(effectiveMusicSearchQuery('那你随便推荐几首热度高的', intent))
+      .toBe('推荐3首陈默之的热门歌')
+  })
+
   it('uses the rewritten contextual artist query for candidate recall', async () => {
     vi.mocked(fetchRecommendationCandidates).mockResolvedValueOnce({
       candidates: [{

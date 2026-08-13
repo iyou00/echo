@@ -1,8 +1,10 @@
-import type { Track } from '../../types/ipc'
+import type { StageContext, Track } from '../../types/ipc'
 import { loadRecentConversations, loadTodayConversations, loadUserConversationsForDate } from '../db/conversations'
 import { getCompanionProfile, loadLatestAssistantResponseStrategy } from '../db/companion'
 import { loadActiveEvents, type ActiveEvent } from '../db/events'
-import { appendListeningSegment, getOrCreateListeningSession, loadListeningSegments } from '../db/listening'
+import { appendListeningSegment, bindListeningSessionStageContext, getOrCreateListeningSession, loadListeningSegments } from '../db/listening'
+import { loadActiveStageContext } from '../domain/stageContext/repository'
+import { beginAgentAction, completeAgentAction, failAgentAction } from '../domain/agentAction/service'
 import { appendRecommendedTracks, loadListenedTrackWindows, loadListenedTracksSince, loadRecentRecommendedTracks, loadRecentTracks } from '../db/tracks'
 import { getAllImportedTracks } from '../db/playlists'
 import { getTasteProfile } from '../db/taste'
@@ -769,6 +771,7 @@ function buildContext(input: {
   sessionSegments?: ListeningSegmentRecord[]
   companionProfile?: ReturnType<typeof getCompanionProfile>
   recommendationBasis?: ListeningRecommendationBasis
+  stageContext?: StageContext | null
 }) {
   const now = new Date(input.generatedAt)
   const y = now.getFullYear()
@@ -842,6 +845,19 @@ ${escapePromptData(formatVoiceMoment(input.voiceMoment))}
 
 <weather>${escapePromptData(input.weatherSummary ?? '未知')}</weather>
 
+<stage_context>
+${safePromptJson(input.stageContext
+  ? {
+      kind: input.stageContext.kind,
+      summary: input.stageContext.summary,
+      state: input.stageContext.state,
+      goal: input.stageContext.goal,
+      revision: input.stageContext.revision,
+      instruction: '这是用户当前阶段，不是长期人格。回应本段时承接目标，但不要机械复述字段。',
+    }
+  : { status: 'none', instruction: '没有可靠阶段上下文，不要臆测用户正在工作、疲惫或需要安慰。' })}
+</stage_context>
+
 <listening_plan>
 ${escapePromptData(input.listeningPlan ? formatListeningPlan(input.listeningPlan) : 'density: full\nlength: 160-260\nmaxSentences: 6')}
 </listening_plan>
@@ -905,6 +921,38 @@ move 是本段与用户相处的动作,sentenceForm 是表达句式。自然完�
 </output_contract>`
 }
 
+function recordListeningDecision(input: {
+  track: Track | null
+  text: string
+  delivery: 'spoken' | 'silent'
+  stageContext: StageContext | null
+  succeeded: boolean
+  failureKind?: string
+}): void {
+  const action = beginAgentAction({
+    origin: 'listening',
+    actionType: input.delivery === 'silent'
+      ? input.track ? 'silent_play' : 'stay_silent'
+      : input.track ? 'speak_then_play' : 'reply',
+    reasonCode: input.stageContext?.goal === 'focus' ? 'context_focus'
+      : input.stageContext?.goal === 'recover' ? 'context_recover'
+        : input.stageContext?.goal === 'settle' ? 'context_settle'
+          : input.stageContext?.goal === 'energize' ? 'context_energize'
+            : input.stageContext?.goal === 'companionship' ? 'context_companionship'
+              : 'recommendation_followup',
+    goalCode: input.stageContext?.goal ?? 'none',
+    stageContextId: input.stageContext?.id,
+    stageContextRevision: input.stageContext?.revision,
+    items: [
+      ...(input.text ? [{ itemType: 'speech' as const, ordinal: 0, payload: { characterCount: input.text.length } }] : []),
+      ...(input.track ? [{ itemType: 'track' as const, ordinal: 1, entityKey: trackIdentityKeys(input.track)[0], payload: { title: input.track.title, artist: input.track.artist } }] : []),
+    ],
+    decision: { policyVersion: 1, delivery: input.delivery },
+  })
+  if (input.succeeded) completeAgentAction(action)
+  else failAgentAction(action, input.failureKind ?? 'listening_delivery_failed')
+}
+
 export async function generateListeningSegment(options: ListeningSegmentOptions = {}): Promise<ListeningSegmentResult> {
   assertListeningActive(options.signal)
   const now = new Date()
@@ -940,13 +988,17 @@ export async function generateListeningSegment(options: ListeningSegmentOptions 
   const playedToday = loadRecentTracks(40).filter((track) => track.queueStatus === 'playing' || track.queueStatus === 'completed').length
   const hasRecommendationHistory = loadRecentRecommendedTracks(1).length > 0
   const activeEvents = loadActiveEvents(8)
+  const stageContext = loadActiveStageContext(now)
+  if (session.stageContextId !== (stageContext?.id ?? null)) {
+    bindListeningSessionStageContext(session.id, stageContext?.id ?? null)
+  }
   const consumedEventKeys = new Set(session.consumedEventKeys)
   const unusedActiveEvents = activeEvents.filter((event) => !consumedEventKeys.has(activeEventKey(event)))
   const weather = await getWeather(settings.user.city, { signal: options.signal })
   assertListeningActive(options.signal)
   const latestCompanionStrategy = conversations.length > 0 ? loadLatestAssistantResponseStrategy() : null
   const companionMode = latestCompanionStrategy?.mode ?? session.companionMode
-  const hasUnusedActiveContext = unusedActiveEvents.length > 0
+  const hasUnusedActiveContext = unusedActiveEvents.length > 0 || Boolean(stageContext)
   let listeningPlan = buildListeningPlan({
     session,
     recentSegments: sessionSegments,
@@ -1009,6 +1061,7 @@ export async function generateListeningSegment(options: ListeningSegmentOptions 
       consumedEventKeys: listeningPlan.topicSource === 'active_event' ? unusedActiveEvents.map(activeEventKey) : [],
       generatedAt,
     })
+    recordListeningDecision({ track, text: '', delivery: listeningPlan.delivery, stageContext, succeeded: true })
     options.onProgress?.({ phase: 'done', current: 4, total: 4, message: '这首先安静地听。' })
     return {
       text: '',
@@ -1034,6 +1087,7 @@ export async function generateListeningSegment(options: ListeningSegmentOptions 
     sessionSegments,
     companionProfile,
     recommendationBasis,
+    stageContext,
   })
   const recentTexts = sessionSegments.map((segment) => segment.text).filter(Boolean)
 
@@ -1112,9 +1166,11 @@ export async function generateListeningSegment(options: ListeningSegmentOptions 
     generatedAt,
   })
   if (audio.ok && audio.audioUrl) {
+    recordListeningDecision({ track, text, delivery: listeningPlan.delivery, stageContext, succeeded: true })
     options.onProgress?.({ phase: 'done', current: 4, total: 4, message: '回声片段已生成。' })
     return { text, track, delivery: listeningPlan.delivery, density: listeningPlan.density, sessionId: session.id, audioUrl: audio.audioUrl, generatedAt }
   }
+  recordListeningDecision({ track, text, delivery: listeningPlan.delivery, stageContext, succeeded: false, failureKind: 'tts_failed' })
   options.onProgress?.({ phase: 'done', current: 4, total: 4, message: audio.error?.message ?? 'Echo 现在说不出话来' })
   return { text, track, delivery: listeningPlan.delivery, density: listeningPlan.density, sessionId: session.id, error: audio.error?.message ?? 'Echo 现在说不出话来', generatedAt }
 }

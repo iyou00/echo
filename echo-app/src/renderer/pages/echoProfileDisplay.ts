@@ -148,6 +148,11 @@ export function profileItemIsPositiveDisplaySignal(item: ProfileEvidenceMarker):
   return item.source !== 'explicit_miss'
 }
 
+export function normalizeProfileMoodFilter(activeMoodFilter: string, availableMoodTags: readonly string[]): string {
+  if (activeMoodFilter === 'all') return 'all'
+  return availableMoodTags.includes(activeMoodFilter) ? activeMoodFilter : 'all'
+}
+
 export function profileSignatureItemVisible(item: ProfileSignatureDisplayItem, activeMoodFilter = 'all'): boolean {
   if (!profileItemIsPositiveDisplaySignal(item)) return false
   if (activeMoodFilter === 'all') return true

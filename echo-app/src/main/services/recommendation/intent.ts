@@ -23,6 +23,7 @@ export interface RecommendationIntent {
   energy?: 'low' | 'medium' | 'high'
   tempo?: TrackSemantic['tempo']
   familiarity: 'safe' | 'explore' | 'balanced'
+  ranking: RecommendationRanking
   targetCount: number
   query: string
   seedTitle?: string
@@ -44,6 +45,7 @@ export interface IntentOverride {
   energy?: 'low' | 'medium' | 'high'
   tempo?: 'slow' | 'medium' | 'fast'
   familiarity?: 'safe' | 'explore' | 'balanced'
+  ranking?: RecommendationRanking
   targetCount?: number
   seedTitle?: string
   artistQuery?: string
@@ -52,6 +54,8 @@ export interface IntentOverride {
   rejectIf?: IntentRejectIf
   sceneKey?: SceneKey
 }
+
+export type RecommendationRanking = 'default' | 'latest' | 'popular'
 
 export interface IntentRejectIf {
   minEnergy?: number
@@ -72,8 +76,8 @@ const ALLOWED_LANGUAGES = new Set<MusicLanguage>(MUSIC_LANGUAGE_VALUES)
 const ALLOWED_TEMPOS = new Set<TrackSemantic['tempo']>(['slow', 'medium', 'fast'])
 const INTENT_LLM_TIMEOUT_MS = 4000
 
-export const MAX_RECOMMENDATION_COUNT = 5
-export const OVER_LIMIT_RECOMMENDATION_LINE = '歌不在多，慢慢听。我先给你挑 5 首。'
+export const MAX_RECOMMENDATION_COUNT = 10
+export const OVER_LIMIT_RECOMMENDATION_LINE = '这次想听得真不少。我先给你挑 10 首，后面的我们接着来。'
 export const MUSIC_REQUEST_PATTERN = /推|推荐|挑(?:一|几)?首|选(?:一|几)?首|来几首|来一首|(?:整|安排|搞|弄)(?:一|几)?首|(?:整点|安排点|搞点|弄点)[^，。！？]{0,16}(?:歌|歌曲|音乐|曲子|单曲|好听|耐听|顺耳|入耳|对味|带感)|听什么|听啥|值得听|适合听|想听|想要听|要听|我要听|我想听|播放|能听|放点|放首|来点|找首|找一首|给我.*歌|歌|曲|歌单|music|song/i
 export const GENERIC_DISCOVERY_PATTERN = /这个时候|现在|此刻|随便|随机|听点啥|听什么|有什么.*听|值得听|挑(?:一|几)?首|选(?:一|几)?首|(?:整|安排|搞|弄)(?:一|几)?首|来首歌|来一首歌|放首歌|推首歌|推荐一首|来点音乐|听会儿歌|听会歌/i
 export const SPECIFIC_DISCOVERY_PATTERN = /《|》|像|类似|那种|那类|粤语|广东|英文|欧美|英语|english|外文|外语|国外|外国|韩语|韩国|韩文|kpop|k-pop|日语|日本|日文|j-pop|jpop|华语|中文|国语|法语|法文|法国|德语|德文|德国|西班牙语|西语|俄语|俄文|俄罗斯|泰语|泰文|泰国|葡萄牙语|葡语|意大利语|意语|激情|激昂|高昂|亢奋|振奋|热血|澎湃|带感|节奏|鼓点|动感|燃|提神|清醒|欢快|开心|轻快|轻松|快歌|快的|快一点|快点|慢|困|累|睡|睡前|休息|安静|放松|舒缓|治愈|温柔|温暖|暖一点|暖和|暖心|发呆|平静|emo|伤心|难过|孤独|想哭|r&b|说唱|rap|hip|摇滚|rock|民谣|folk|电子|edm/i
@@ -104,6 +108,12 @@ export const GENERIC_GENRE_KEYWORDS: Record<string, string[]> = {
 
 const HIGH_ENERGY_TERMS = ['激情', '激昂', '高昂', '亢奋', '振奋', '热血', '澎湃', '炸', '爆', '带感', '节奏感强', '节奏强', '有力量', '力量感', '鼓点', '动感', '燃', '提神', '清醒', '运动', '有劲']
 const LOW_ENERGY_TERMS = ['慢', '困', '睡', '安静', '放松', '发呆', '舒缓', '缓和', '轻柔', '松弛', '平静', '温柔', '温暖', '暖一点', '暖和', '暖心']
+
+function inferRanking(text: string): RecommendationRanking {
+  if (/最新|新歌|新作|近作|最近(?:发布|发行|上线|出的|的新歌|的作品)/i.test(text)) return 'latest'
+  if (/热度(?:高|最高)|热门|最火|火(?:一点|一些|的)|人气(?:高|最高)|代表作/i.test(text)) return 'popular'
+  return 'default'
+}
 
 export function parseRequestedTrackCount(text: string): { requestedCount: number; targetCount: number; overLimit: boolean; explicit: boolean } {
   return parseMusicRequestCount(text)
@@ -182,6 +192,7 @@ function normalizeIntentOverride(raw: unknown): IntentOverride | null {
   if (value.energy === 'low' || value.energy === 'medium' || value.energy === 'high') override.energy = value.energy
   if (value.tempo === 'slow' || value.tempo === 'medium' || value.tempo === 'fast') override.tempo = value.tempo
   if (value.familiarity === 'safe' || value.familiarity === 'explore' || value.familiarity === 'balanced') override.familiarity = value.familiarity
+  if (value.ranking === 'default' || value.ranking === 'latest' || value.ranking === 'popular') override.ranking = value.ranking
   if (typeof value.targetCount === 'number' && Number.isFinite(value.targetCount)) {
     override.targetCount = Math.max(1, Math.min(MAX_RECOMMENDATION_COUNT, Math.floor(value.targetCount)))
   }
@@ -217,6 +228,8 @@ export function validateIntentOverride(text: string, override: IntentOverride | 
   if (!next.clearSeedTitle && directSong.seedTitle && !next.seedTitle) next.seedTitle = directSong.seedTitle
   if (!next.clearArtistQuery && artistQuery && !next.artistQuery) next.artistQuery = artistQuery
   if (requested.explicit) next.targetCount = requested.targetCount
+  const explicitRanking = inferRanking(text)
+  if (explicitRanking !== 'default') next.ranking = explicitRanking
 
   if (!options.preserveSemanticConstraints && highTerms.length > 0) {
     next.energy = 'high'
@@ -290,6 +303,9 @@ export function mergeIntent(base: RecommendationIntent, override?: IntentOverrid
   if (override.familiarity === 'safe' || override.familiarity === 'explore' || override.familiarity === 'balanced') {
     merged.familiarity = override.familiarity
   }
+  if (override.ranking === 'default' || override.ranking === 'latest' || override.ranking === 'popular') {
+    merged.ranking = override.ranking
+  }
   if (typeof override.targetCount === 'number' && override.targetCount >= 1 && override.targetCount <= MAX_RECOMMENDATION_COUNT) {
     merged.targetCount = Math.floor(override.targetCount)
   }
@@ -343,7 +359,8 @@ export async function inferIntentWithLlm(text: string, recentDialog?: string, op
   "scenes": [可选: "上午","午休","下午工作","通勤","下班路上","夜晚","睡前","雨天","独处","运动"],
   "energy": "low" | "medium" | "high" | null,
   "tempo": "slow" | "medium" | "fast" | null,
-  "targetCount": 1 | 2 | 3 | 4 | 5,
+  "targetCount": 1 到 10 的整数,
+  "ranking": "default" | "latest" | "popular",
   "seedTitle": null | "用户提到的具体歌名",
   "artistQuery": null | "用户明确提到的艺人或乐队名",
   "evidence": ["从用户原文里支持这个判断的短词"],
@@ -358,7 +375,7 @@ export async function inferIntentWithLlm(text: string, recentDialog?: string, op
 判断规则：
 1. wantsMusic：用户在请求音乐就 true，包括"我累了""想躺会儿""有点 emo""适合上班的歌"这种间接表达；只是闲聊就 false。
 2. 不确定的字段一律填 null 或不填，不要瞎猜。
-3. 用户没说几首就 targetCount: 1；用户说“几首”通常填 3；用户明确说具体数量就照填，最多填 5。
+3. 用户没说几首就 targetCount: 1；用户说“几首”通常填 3；用户明确说具体数量就照填，最多填 10。
 4. moods/scenes/energy/tempo 只用枚举里的值，不要自己造词。
 5. “激昂 / 热血 / 澎湃 / 带感 / 节奏感强 / 炸 / 动感”都属于 moods:["清醒","热烈"], energy:"high", tempo:"fast", rejectIf.minEnergy 至少 0.55, rejectIf.forbidTempo 包含 "slow"。
 6. “舒缓 / 睡前 / 安静 / 慢一点 / 温暖 / 暖一点”属于 energy:"low", tempo:"slow", moods 可填 ["治愈","陪伴"], rejectIf.maxEnergy 不超过 0.78, rejectIf.forbidTempo 包含 "fast"。
@@ -367,6 +384,7 @@ export async function inferIntentWithLlm(text: string, recentDialog?: string, op
 9. 用户直接点歌时要拆出歌手和歌名：例如“我要听王菲的主角”“我要听王菲《主角》”都填 artistQuery:"王菲", seedTitle:"主角", wantsMusic:true。用户只说“我要听主角”时填 seedTitle:"主角"。
 10. “推荐几首陈默之歌曲”这类句子里，“陈默之”是艺人名，“几首”表示 targetCount:3。
 11. “类似/像某首歌”的请求里,seedTitle 填参照歌名；artistQuery 只填明确出现的歌手。“像刚才那首”不填 seedTitle。
+12. “最新/新歌/最近发行”填 ranking:"latest"；“热门/热度高/最火/人气高”填 ranking:"popular"；否则填 ranking:"default"。
 
 例子：
 - "我累了" → {"wantsMusic":true,"intentConfidence":0.84,"moods":["放松","松弛"],"energy":"low","tempo":"slow","targetCount":1,"evidence":["累"],"rejectIf":{"maxEnergy":0.78,"forbidTempo":["fast"]}}
@@ -377,7 +395,9 @@ export async function inferIntentWithLlm(text: string, recentDialog?: string, op
 - "节奏感强一点的" → {"wantsMusic":true,"intentConfidence":0.92,"moods":["清醒","热烈"],"energy":"high","tempo":"fast","targetCount":1,"evidence":["节奏感强"],"rejectIf":{"minEnergy":0.55,"forbidTempo":["slow"],"requireTempo":["fast"]}}
 - "睡前粤语三首" → {"wantsMusic":true,"intentConfidence":0.93,"language":"粤语","scenes":["睡前"],"energy":"low","tempo":"slow","targetCount":3,"evidence":["睡前","粤语"],"rejectIf":{"maxEnergy":0.78,"forbidTempo":["fast"]}}
 - "准备听会儿歌休息，来5首欢快的歌曲" → {"wantsMusic":true,"intentConfidence":0.95,"moods":["轻快"],"energy":"medium","tempo":"medium","targetCount":5,"evidence":["5首","欢快","休息"]}
-- "来十首轻快的" → {"wantsMusic":true,"intentConfidence":0.95,"moods":["轻快"],"targetCount":5,"evidence":["十首","轻快"]}
+- "来十首轻快的" → {"wantsMusic":true,"intentConfidence":0.95,"moods":["轻快"],"targetCount":10,"ranking":"default","evidence":["十首","轻快"]}
+- "听听陈默之的最新几首歌" → {"wantsMusic":true,"intentConfidence":0.97,"artistQuery":"陈默之","targetCount":3,"ranking":"latest","evidence":["陈默之","最新","几首"]}
+- "那你随便推荐几首热度高的" → {"wantsMusic":true,"intentConfidence":0.94,"targetCount":3,"ranking":"popular","evidence":["热度高","几首"]}
 - "魔力红的歌曲来一首" → {"wantsMusic":true,"intentConfidence":0.96,"artistQuery":"Maroon 5","targetCount":1,"evidence":["魔力红","歌曲"]}
 - "推荐几首陈默之歌曲" → {"wantsMusic":true,"intentConfidence":0.96,"artistQuery":"陈默之","targetCount":3,"evidence":["几首","陈默之","歌曲"]}
 - "我要听王菲的主角" → {"wantsMusic":true,"intentConfidence":0.98,"artistQuery":"王菲","seedTitle":"主角","targetCount":1,"evidence":["王菲","主角"]}
@@ -455,6 +475,7 @@ export function parseIntent(text: string, options: IntentParseOptions = {}): Rec
     energy,
     tempo,
     familiarity,
+    ranking: inferRanking(text),
     targetCount: parseTargetCount(text),
     query: text.trim(),
     seedTitle,

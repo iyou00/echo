@@ -18,6 +18,9 @@ import { appendRecommendedTracks } from '../db/tracks'
 import { getTasteProfile } from '../db/taste'
 import { completeChat } from '../llm/client'
 import { stripKnownSystemBlocks } from '../llm/outputSanitize'
+import { loadActiveStageContext } from '../domain/stageContext/repository'
+import { beginAgentAction, completeAgentAction, failAgentAction } from '../domain/agentAction/service'
+import { recordAgentActionOutcome } from '../domain/agentAction/repository'
 import { safePromptJson } from '../llm/promptData'
 import { buildSoulPolicyPrompt } from '../skills/soul/policy'
 import { readRootFile } from '../utils/paths'
@@ -347,6 +350,17 @@ function showMainWindow(payload: { page: 'chat' | 'voice'; action?: 'start_liste
 
 async function handleNotificationClick(record: CarePingRecord): Promise<void> {
   markCarePingClicked(record.id)
+  if (record.payload.agentActionId) {
+    recordAgentActionOutcome({
+      actionId: record.payload.agentActionId,
+      actionItemId: record.payload.agentActionItemId,
+      sourceEventKey: `care_opened:${record.id}`,
+      outcomeType: 'opened',
+      polarity: 'neutral',
+      strength: 'medium',
+      metadata: { userAgency: 'active' },
+    })
+  }
   if (record.type === 'recommend_track' && record.payload.track) {
     appendRecommendedTracks([record.payload.track])
     const message = appendConversation('assistant', record.body, [record.payload.track])
@@ -396,15 +410,54 @@ export async function generateAndSendCarePing(type: PingType, options: CarePingR
     if (!track) return generateAndSendCarePing('casual_check', options)
     const body = await writePingBody('recommend_track', track, options)
     assertCarePingActive(options.signal)
-    const record = insertCarePing('recommend_track', 'Echo', body, { type: 'recommend_track', track })
-    sendNotification(record)
-    return record
+    return persistCarePingAction('recommend_track', body, track)
   }
   const body = await writePingBody(type, undefined, options)
   assertCarePingActive(options.signal)
-  const record = insertCarePing(type, 'Echo', body, { type })
-  sendNotification(record)
-  return record
+  return persistCarePingAction(type, body)
+}
+
+function persistCarePingAction(type: PingType, body: string, track?: Track): CarePingRecord {
+  const stageContext = loadActiveStageContext()
+  const action = beginAgentAction({
+    origin: 'care',
+    actionType: 'reply',
+    reasonCode: 'proactive_check',
+    goalCode: stageContext?.goal ?? 'companionship',
+    stageContextId: stageContext?.id,
+    stageContextRevision: stageContext?.revision,
+    items: [
+      { itemType: 'message', ordinal: 0, payload: { characterCount: body.length, pingType: type } },
+      ...(track ? [{ itemType: 'track' as const, ordinal: 1, entityKey: `${track.id ?? track.neteaseId ?? ''}:${track.title}:${track.artist}`, payload: { title: track.title, artist: track.artist } }] : []),
+    ],
+    decision: { policyVersion: 1, pingType: type },
+  })
+  try {
+    const trackItem = action.items.find((item) => item.itemType === 'track')
+    const record = insertCarePing(type, 'Echo', body, track
+      ? { type, track, agentActionId: action.id, agentActionItemId: trackItem?.id }
+      : { type, agentActionId: action.id, agentActionItemId: action.items[0]?.id })
+    sendNotification(record)
+    completeAgentAction(action)
+    return record
+  } catch (error) {
+    failAgentAction(action, 'notification_delivery_failed')
+    throw error
+  }
+}
+
+function recordCareSilence(reason: string): void {
+  const stageContext = loadActiveStageContext()
+  const action = beginAgentAction({
+    origin: 'care',
+    actionType: 'stay_silent',
+    reasonCode: 'low_intervention_value',
+    goalCode: stageContext?.goal ?? 'none',
+    stageContextId: stageContext?.id,
+    stageContextRevision: stageContext?.revision,
+    decision: { policyVersion: 1, reason: reason.slice(0, 120) },
+  })
+  completeAgentAction(action)
 }
 
 export async function maybeTriggerCarePing(slot: TimeSlot, options: CarePingRunOptions = {}): Promise<boolean> {
@@ -422,6 +475,7 @@ export async function runCarePingSlot(slot: TimeSlot, options: CarePingRunOption
   }
   const readiness = carePingReadiness()
   if (!readiness.ready) {
+    recordCareSilence(readiness.reason ?? 'insufficient_evidence')
     return { triggered: false, status: 'skipped', message: readiness.reason ?? 'Echo 还在积累相处线索。' }
   }
 

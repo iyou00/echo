@@ -1,4 +1,5 @@
 import { getDb } from './index'
+import { loadActiveStageContext } from '../domain/stageContext/repository'
 
 export interface ActiveEvent {
   id?: number
@@ -11,7 +12,7 @@ export interface ActiveEvent {
 }
 
 export function loadActiveEvents(limit = 8): ActiveEvent[] {
-  return getDb()
+  const legacy = getDb()
     .prepare(`
       SELECT id, kind, content, confidence, weight, started_at, created_at
       FROM events
@@ -44,6 +45,17 @@ export function loadActiveEvents(limit = 8): ActiveEvent[] {
         createdAt: typed.created_at,
       }
     })
+  const context = loadActiveStageContext()
+  if (!context) return legacy
+  const projected: ActiveEvent = {
+    kind: 'context',
+    content: context.summary,
+    confidence: context.confidence,
+    weight: 1,
+    startedAt: context.startedAt,
+    createdAt: context.lastActiveAt,
+  }
+  return [projected, ...legacy.filter((event) => event.content !== projected.content)].slice(0, limit)
 }
 
 export function loadRecentEvents(kind: string, limit = 8): ActiveEvent[] {

@@ -12,12 +12,14 @@ import { registerIpc } from '../src/main/ipc'
 import { registerScheduler, runStartupCatchup, stopScheduler } from '../src/main/services/scheduler'
 import { archiveDaySeal, warmMostRecentSealCache } from '../src/main/services/daySeal'
 import { checkSecureStorage } from '../src/main/utils/secureStorage'
-import { getState as getPlaybackState, onPlaybackStateChanged, pause, resume } from '../src/main/services/playback'
+import { getState as getPlaybackState, onPlaybackStateChanged, pause, recordAppClosedPlayback, resume } from '../src/main/services/playback'
 import { getCurrentScene, listSceneDefinitions, onSceneChanged } from '../src/main/services/scene'
 import { NeteaseAuthRequiredError } from '../src/main/services/recommendation'
 import { startScenePlayback } from '../src/main/services/scenePlayback'
 import { recordSchedulerHealth } from '../src/main/services/health'
 import { warmRootFileCache } from '../src/main/utils/paths'
+import { loadActiveStageContext } from '../src/main/domain/stageContext/repository'
+import { recoverInterruptedAgentActions } from '../src/main/domain/agentAction/repository'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -381,6 +383,7 @@ app.on('before-quit', async (event) => {
   await archiveDaySeal().catch((error) => {
     console.warn('[daySeal] archive failed during before-quit', error)
   })
+  recordAppClosedPlayback()
   stopScheduler()
   closeDb()
   app.exit(0)
@@ -394,6 +397,8 @@ if (gotSingleInstanceLock) {
         checkSecureStorage()
         upgradeLegacySettingsSecrets()
         upgradeLegacyNeteaseSecret()
+        loadActiveStageContext()
+        recoverInterruptedAgentActions()
         registerIpc()
         pruneOldData()
         registerScheduler()

@@ -80,8 +80,13 @@ function artistParts(artist: string): string[] {
     .filter(Boolean)
 }
 
-export function artistMatchesConstraint(artist: string, expected?: string): boolean {
+export function artistMatchesConstraint(artist: string, expected?: string, strict = false): boolean {
   if (!expected) return true
+  if (strict) {
+    const target = normalizeText(expected)
+    return artistParts(artist).some((part) => normalizeText(part) === target)
+      || normalizeText(artist) === target
+  }
   return artistParts(artist).some((part) => closeEnough(part, expected)) || closeEnough(artist, expected)
 }
 
@@ -122,7 +127,7 @@ export function trackMatchesMusicEntity(
   const titleOk = titleMatchesConstraint(track.title, constraint.verifiedTrackTitle ?? constraint.seedTitle, options.strictTitle || Boolean(constraint.verifiedTrackTitle))
   if (!titleOk) return false
   const expectedArtist = constraint.verifiedArtistName ?? constraint.artistQuery
-  const artistOk = artistMatchesConstraint(track.artist, expectedArtist)
+  const artistOk = artistMatchesConstraint(track.artist, expectedArtist, options.strictArtist)
   return expectedArtist ? artistOk : !options.strictArtist || artistOk
 }
 

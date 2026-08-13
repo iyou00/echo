@@ -1,6 +1,7 @@
 import type { Track } from '../../../types/ipc'
 import {
   inferIntentWithLlm,
+  MAX_RECOMMENDATION_COUNT,
   NeteaseAuthRequiredError,
   recommendFromNetease,
   type IntentOverride,
@@ -88,7 +89,7 @@ function defaultCandidatePoolSize(mode: MusicSearchMode, targetCount?: number): 
 
 function withTargetCount(override: IntentOverride | null | undefined, targetCount?: number): IntentOverride | undefined {
   const next = override ? { ...override } : {}
-  if (targetCount && !next.targetCount) next.targetCount = Math.max(1, Math.min(5, Math.floor(targetCount)))
+  if (targetCount && !next.targetCount) next.targetCount = Math.max(1, Math.min(MAX_RECOMMENDATION_COUNT, Math.floor(targetCount)))
   return Object.keys(next).length > 0 ? next : undefined
 }
 

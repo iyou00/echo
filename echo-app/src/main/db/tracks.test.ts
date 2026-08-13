@@ -32,15 +32,21 @@ describe('recommended track status persistence', () => {
   })
 
   it('updates a matching recent recommendation across midnight with an outcome timestamp', () => {
-    const track: Track = { id: '42', title: '跨午夜', artist: 'Echo', sceneSessionId: 7 }
-    dbMock.rows = [{ id: 3, meta_json: JSON.stringify(track) }]
+    const track: Track = {
+      id: '42', title: '跨午夜', artist: 'Echo', sceneSessionId: 7,
+      agentActionId: 'action-1', agentActionItemId: 'item-1', stageContextId: 'stage-1', playbackInstanceId: 'play-1',
+    }
+    dbMock.rows = [{ id: 3, meta_json: JSON.stringify({ id: '42', title: '跨午夜', artist: 'Echo', sceneSessionId: 7 }) }]
 
     updateRecommendedTrackStatus(track, 'completed', 'playback_completed')
 
     expect(dbMock.sql[0]).not.toContain("date(listened_at, 'localtime')")
     expect(dbMock.sql[0]).toContain('LIMIT 500')
     const persisted = JSON.parse(String(dbMock.runs[0][0])) as Track
-    expect(persisted).toMatchObject({ queueStatus: 'completed', queueStatusReason: 'playback_completed' })
+    expect(persisted).toMatchObject({
+      queueStatus: 'completed', queueStatusReason: 'playback_completed',
+      agentActionId: 'action-1', agentActionItemId: 'item-1', stageContextId: 'stage-1', playbackInstanceId: 'play-1',
+    })
     expect(Date.parse(persisted.queueStatusAt ?? '')).not.toBeNaN()
   })
 })

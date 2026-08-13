@@ -12,11 +12,13 @@ import type {
 } from '../services/listeningTypes'
 import { getDb } from './index'
 import { parseJson } from './json'
+import { loadActiveStageContext } from '../domain/stageContext/repository'
 
 const SESSION_IDLE_MINUTES = 45
 
 interface SessionRow {
   id: number
+  stage_context_id?: string | null
   status: 'active' | 'ended'
   started_at: string
   last_active_at: string
@@ -45,6 +47,7 @@ function mapSession(row: SessionRow): ListeningSessionRecord {
   const consumedEventKeys = parseJson<unknown>(row.consumed_event_keys_json, [], 'listening_sessions.consumed_event_keys_json')
   return {
     id: row.id,
+    stageContextId: row.stage_context_id ?? null,
     status: row.status,
     startedAt: row.started_at,
     lastActiveAt: row.last_active_at,
@@ -77,6 +80,7 @@ function mapSegment(row: SegmentRow): ListeningSegmentRecord {
 export function startListeningSession(now = new Date()): ListeningSessionRecord {
   const timestamp = now.toISOString()
   const database = getDb()
+  const stageContextId = loadActiveStageContext(now, database)?.id ?? null
   const create = database.transaction(() => {
     database.prepare(`
       UPDATE listening_sessions
@@ -84,9 +88,9 @@ export function startListeningSession(now = new Date()): ListeningSessionRecord 
       WHERE user_id = current_user_id() AND status = 'active'
     `).run(timestamp, timestamp)
     const result = database.prepare(`
-      INSERT INTO listening_sessions (user_id, status, started_at, last_active_at, segment_count)
-      VALUES (current_user_id(), 'active', ?, ?, 0)
-    `).run(timestamp, timestamp)
+      INSERT INTO listening_sessions (user_id, status, started_at, last_active_at, segment_count, stage_context_id)
+      VALUES (current_user_id(), 'active', ?, ?, 0, ?)
+    `).run(timestamp, timestamp, stageContextId)
     return database.prepare('SELECT * FROM listening_sessions WHERE id = ?').get(result.lastInsertRowid) as SessionRow
   })
   return mapSession(create())
@@ -203,6 +207,14 @@ export function endListeningSession(sessionId?: number, now = new Date()): void 
     SET status = 'ended', ended_at = ?, last_active_at = ?
     WHERE user_id = current_user_id() AND status = 'active'
   `).run(timestamp, timestamp)
+}
+
+export function bindListeningSessionStageContext(sessionId: number, stageContextId: string | null): void {
+  getDb().prepare(`
+    UPDATE listening_sessions
+    SET stage_context_id = ?
+    WHERE id = ? AND user_id = current_user_id() AND status = 'active'
+  `).run(stageContextId, sessionId)
 }
 
 export const listeningDbTestHelpers = {

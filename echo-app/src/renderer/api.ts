@@ -25,6 +25,7 @@ import type {
   MemoryAuditSummary,
   RuntimeEvent,
   RuntimeTaskSnapshot,
+  StageContext,
 } from '../types/ipc'
 import { chineseDayPeriodLabel } from '../shared/dayPeriod'
 import { trackIdentity } from '../shared/trackIdentity'
@@ -149,6 +150,7 @@ let queueState: Track[] = structuredClone(mockTracks)
 let favoriteState: Track[] = []
 const favoriteListeners = new Set<(payload: { track: Track; favorited: boolean; total: number }) => void>()
 let activeSceneState: ActiveScene | null = null
+let stageContextState: StageContext | null = null
 let sceneSessions: ActiveScene[] = []
 const playbackState: PlaybackState = {
   current: null,
@@ -948,6 +950,34 @@ const mockEcho: EchoApi = {
       return () => sceneListeners.delete(listener)
     },
   },
+  stageContext: {
+    async getActive() {
+      return structuredClone(stageContextState)
+    },
+    async end() {
+      if (!stageContextState) return null
+      stageContextState = { ...stageContextState, status: 'ended', endedAt: new Date().toISOString(), endReason: 'user_ended' }
+      return structuredClone(stageContextState)
+    },
+    async correct(input) {
+      if (!stageContextState) return null
+      stageContextState = {
+        ...stageContextState,
+        ...input,
+        state: { ...stageContextState.state, ...input.statePatch },
+        revision: stageContextState.revision + 1,
+        lastActiveAt: new Date().toISOString(),
+      }
+      return structuredClone(stageContextState)
+    },
+    async delete(id) {
+      if (stageContextState?.id === id) stageContextState = null
+      return { ok: true }
+    },
+    async recentActions() {
+      return []
+    },
+  },
   semantics: {
     async buildForImportedTracks() {
       return { tagged: mockTracks.length, skipped: 0 }
@@ -1079,6 +1109,12 @@ const mockEcho: EchoApi = {
       playbackState.duration = state.duration ?? playbackState.duration
       playbackState.status = state.status
       return structuredClone(playbackState)
+    },
+    async reportError(playbackInstanceId) {
+      if (playbackState.current?.playbackInstanceId !== playbackInstanceId) return structuredClone(playbackState)
+      playbackState.status = 'error'
+      playbackState.error = '播放失败，请重试。'
+      return emitPlayback()
     },
     async refreshUrl(trackId) {
       const track = playbackState.current ? { ...playbackState.current, playUrl: 'mock://audio', urlExpiresAt: new Date(Date.now() + 25 * 60 * 1000).toISOString() } : mockTracks[0]

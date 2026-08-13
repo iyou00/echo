@@ -3,6 +3,9 @@ import type { IntentOverride } from './recommendation'
 import { getDb } from '../db'
 import { loadRecentTracks } from '../db/tracks'
 import { sceneOutcomeCounts } from './sceneJourney'
+import { applyStageContextProposal } from '../domain/stageContext/service'
+import { loadActiveStageContext } from '../domain/stageContext/repository'
+import { beginAgentAction, completeAgentAction } from '../domain/agentAction/service'
 
 const SCENE_TTL_MS = 2 * 60 * 60 * 1000
 const sceneListeners = new Set<(scene: ActiveScene | null) => void>()
@@ -108,6 +111,7 @@ function toIso(value?: string): string {
 
 function rowToScene(row: {
   id: number
+  stage_context_id?: string | null
   scene_key: SceneKey
   label: string
   started_at: string
@@ -119,6 +123,7 @@ function rowToScene(row: {
   return {
     ...definition,
     id: row.id,
+    stageContextId: row.stage_context_id ?? undefined,
     label: row.label || definition.label,
     startedAt: toIso(row.started_at),
     endedAt: row.ended_at ? toIso(row.ended_at) : undefined,
@@ -158,7 +163,7 @@ export function getCurrentScene(): ActiveScene | null {
   expireOverdueScenes()
   const row = getDb()
     .prepare(`
-      SELECT id, scene_key, label, started_at, ended_at, expires_at, status
+      SELECT id, scene_key, label, stage_context_id, started_at, ended_at, expires_at, status
       FROM scene_sessions
       WHERE user_id = current_user_id() AND status = 'active'
       ORDER BY started_at DESC, id DESC
@@ -187,14 +192,58 @@ export function startScene(key: SceneKey): ActiveScene {
       VALUES (current_user_id(), ?, ?, ?, ?)
     `)
     .run(definition.key, definition.label, expiresAt, JSON.stringify(definition))
+  const sceneId = Number(result.lastInsertRowid)
+  const activeContext = loadActiveStageContext()
+  const mapping = key === 'focus'
+    ? { kind: 'work' as const, goal: 'focus' as const, summary: '正在专注工作' }
+    : key === 'sleepy'
+      ? { kind: activeContext?.kind ?? 'work', goal: 'energize' as const, summary: '有点困，想提提精神' }
+      : key === 'relax'
+        ? { kind: 'rest' as const, goal: 'recover' as const, summary: '想暂时松口气' }
+        : key === 'irritated'
+          ? { kind: 'emotional_support' as const, goal: 'settle' as const, summary: '有点烦，想安静下来' }
+          : null
+  const stageContext = mapping
+    ? applyStageContextProposal({
+        proposal: {
+          operation: activeContext?.kind === mapping.kind ? 'update' : 'create',
+          kind: mapping.kind,
+          goal: mapping.goal,
+          summary: mapping.summary,
+          confidence: 1,
+          ttlClass: 'short',
+          evidenceConversationIds: [],
+        },
+        sourceType: 'scene_session',
+        evidenceSourceIds: [String(sceneId)],
+        evidenceStrength: 'explicit',
+      })
+    : activeContext
+  if (stageContext) {
+    database.prepare('UPDATE scene_sessions SET stage_context_id = ? WHERE id = ?').run(stageContext.id, sceneId)
+  }
   const row = database
     .prepare(`
-      SELECT id, scene_key, label, started_at, ended_at, expires_at, status
+      SELECT id, scene_key, label, stage_context_id, started_at, ended_at, expires_at, status
       FROM scene_sessions
       WHERE id = ?
     `)
-    .get(Number(result.lastInsertRowid)) as Parameters<typeof rowToScene>[0]
+    .get(sceneId) as Parameters<typeof rowToScene>[0]
   const scene = rowToScene(row)
+  const action = beginAgentAction({
+    origin: 'scene',
+    actionType: 'adjust_music',
+    reasonCode: stageContext?.goal === 'focus' ? 'context_focus'
+      : stageContext?.goal === 'recover' ? 'context_recover'
+        : stageContext?.goal === 'settle' ? 'context_settle'
+          : stageContext?.goal === 'energize' ? 'context_energize'
+            : 'user_request',
+    goalCode: stageContext?.goal ?? 'none',
+    stageContextId: stageContext?.id,
+    stageContextRevision: stageContext?.revision,
+    decision: { policyVersion: 1, sceneKey: key, sceneSessionId: sceneId },
+  })
+  completeAgentAction(action)
   emitScene(scene)
   return scene
 }
@@ -249,7 +298,7 @@ export function listTodaySceneSessions(): SceneSessionSummary[] {
   const placeholders = keys.map(() => '?').join(', ')
   const rows = getDb()
     .prepare(`
-      SELECT id, scene_key, label, started_at, ended_at, expires_at, status
+      SELECT id, scene_key, label, stage_context_id, started_at, ended_at, expires_at, status
       FROM scene_sessions
       WHERE user_id = current_user_id()
         AND date(started_at, 'localtime') = date('now', 'localtime')

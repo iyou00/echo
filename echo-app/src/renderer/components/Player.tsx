@@ -83,8 +83,8 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
     try {
       await sendHeartbeat(true, 'playing')
       const next = completionAction === 'auto_next' || completionAction === 'scene_next'
-        ? await echo.playback.next()
-        : await echo.playback.finishCurrent()
+        ? await echo.playback.next(current?.playbackInstanceId)
+        : await echo.playback.finishCurrent(current?.playbackInstanceId)
       setState(next)
       await refreshQueue()
       if (shouldContinueVoice) onVoiceTrackEnded?.()
@@ -189,6 +189,7 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
     if (!force && now - lastHeartbeatRef.current < 5000) return
     lastHeartbeatRef.current = now
     const next = await echo.playback.heartbeat({
+      playbackInstanceId: current.playbackInstanceId,
       position: Math.floor(audio.currentTime * 1000),
       duration: Math.floor((audio.duration || displayDuration) * 1000),
       status,
@@ -215,7 +216,7 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
   }
 
   async function playNext() {
-    const next = await echo.playback.next()
+    const next = await echo.playback.next(current?.playbackInstanceId)
     setState(next)
     await refreshQueue()
   }
@@ -299,6 +300,7 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
       setLocalPlaying(false)
       setPlaybackError('播放链接失效且重试失败，请检查网络或重新登录。')
       echo.playback.pause().then(setState).catch(() => undefined)
+      if (current?.playbackInstanceId) echo.playback.reportError(current.playbackInstanceId, 'url_retry_exhausted').then(setState).catch(() => undefined)
       return
     }
 
@@ -314,6 +316,7 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
       setLocalPlaying(false)
       setPlaybackError('自动刷新播放链接失败，请重试。')
       echo.playback.pause().then(setState).catch(() => undefined)
+      if (current?.playbackInstanceId) echo.playback.reportError(current.playbackInstanceId, 'url_refresh_failed').then(setState).catch(() => undefined)
     }
   }
 
@@ -326,6 +329,7 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
           setPlaybackError(null)
           retryCountRef.current = 0
           echo.playback.heartbeat({
+            playbackInstanceId: current?.playbackInstanceId,
             position: Math.floor((audioRef.current?.currentTime ?? 0) * 1000),
             duration: Math.floor((audioRef.current?.duration || displayDuration) * 1000),
             status: 'playing',

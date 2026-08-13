@@ -1,4 +1,5 @@
 import { BrowserWindow } from 'electron'
+import { randomUUID } from 'node:crypto'
 import type { PlaybackHeartbeat, PlaybackPlayOptions, PlaybackState, Track } from '../../types/ipc'
 import { trackIdentity as trackKey } from '../../shared/trackIdentity'
 import { getQueue, markQueueStatus } from './queue'
@@ -7,6 +8,17 @@ import { recordHealth } from './health'
 import { recordTrackFeedback } from '../db/feedback'
 import { applyMemorySignal } from './memoryPolicy'
 import { sceneQueueAfterAdjustment } from './sceneJourney'
+import { loadActiveStageContext } from '../domain/stageContext/repository'
+import {
+  createAgentAction,
+  loadAgentActionItemStatus,
+  loadAgentActionStatus,
+  recordAgentActionOutcome,
+  transitionAgentAction,
+  transitionAgentActionItem,
+} from '../domain/agentAction/repository'
+import { classifyPlaybackOutcome } from '../domain/agentAction/outcomePolicy'
+import { getDb } from '../db'
 
 const state: PlaybackState = {
   current: null,
@@ -32,6 +44,102 @@ type InternalPlaybackPlayOptions = PlaybackPlayOptions & {
 interface PlaybackNextOptions {
   recordCurrentFeedback?: boolean
   skippedReason?: Track['queueStatusReason']
+  playbackInstanceId?: string
+}
+
+function playbackOrigin(track: Track) {
+  if (track.sourceContext === 'voice') return 'listening' as const
+  if (track.sourceContext === 'scene') return 'scene' as const
+  if (track.sourceContext === 'care') return 'care' as const
+  if (track.sourceContext === 'chat') return 'chat' as const
+  return 'playback' as const
+}
+
+function createAttributedPlayback(track: Track): Track {
+  const context = loadActiveStageContext()
+  const playbackInstanceId = randomUUID()
+  const action = createAgentAction({
+    origin: playbackOrigin(track),
+    actionType: track.sourceContext === 'voice' ? 'silent_play' : 'play',
+    reasonCode: context?.goal === 'focus' ? 'context_focus'
+      : context?.goal === 'recover' ? 'context_recover'
+        : context?.goal === 'settle' ? 'context_settle'
+          : context?.goal === 'energize' ? 'context_energize'
+            : context?.goal === 'companionship' ? 'context_companionship'
+              : 'user_request',
+    goalCode: context?.goal ?? 'none',
+    stageContextId: context?.id,
+    stageContextRevision: context?.revision,
+    items: [{
+      itemType: 'track',
+      ordinal: 0,
+      entityKey: trackKey(track),
+      payload: { id: track.id ?? track.neteaseId, title: track.title, artist: track.artist, sourceContext: track.sourceContext, sceneKey: track.sceneKey },
+    }],
+    decision: { policyVersion: 1, playbackInstanceId },
+  })
+  return {
+    ...track,
+    agentActionId: action.id,
+    agentActionItemId: action.items[0].id,
+    stageContextId: context?.id,
+    playbackInstanceId,
+  }
+}
+
+function markAttributedPlaybackStarted(track: Track): void {
+  if (!track.agentActionId || !track.agentActionItemId) return
+  if (loadAgentActionStatus(track.agentActionId) === 'planned') transitionAgentAction(track.agentActionId, 'started')
+  if (loadAgentActionItemStatus(track.agentActionItemId) === 'planned') transitionAgentActionItem(track.agentActionItemId, 'started')
+}
+
+function markAttributedPlaybackSucceeded(track: Track): void {
+  if (!track.agentActionId || !track.agentActionItemId) return
+  if (loadAgentActionItemStatus(track.agentActionItemId) === 'started') transitionAgentActionItem(track.agentActionItemId, 'succeeded')
+  if (loadAgentActionStatus(track.agentActionId) === 'started') transitionAgentAction(track.agentActionId, 'succeeded')
+  if (track.playbackInstanceId) {
+    recordAgentActionOutcome({
+      actionId: track.agentActionId,
+      actionItemId: track.agentActionItemId,
+      sourceEventKey: `playback_started:${track.playbackInstanceId}`,
+      outcomeType: 'playback_started',
+      polarity: 'system',
+      strength: 'weak',
+      metadata: { userAgency: track.sourceContext === 'queue' ? 'passive' : 'reactive' },
+    })
+  }
+}
+
+function markAttributedPlaybackFailed(track: Track, failureKind: string): void {
+  if (!track.agentActionId || !track.agentActionItemId) return
+  const itemStatus = loadAgentActionItemStatus(track.agentActionItemId)
+  const actionStatus = loadAgentActionStatus(track.agentActionId)
+  if (itemStatus === 'planned' || itemStatus === 'started') transitionAgentActionItem(track.agentActionItemId, 'failed')
+  if (actionStatus === 'planned' || actionStatus === 'started') transitionAgentAction(track.agentActionId, 'failed', { failureKind })
+  if (track.playbackInstanceId) {
+    recordAgentActionOutcome({
+      actionId: track.agentActionId,
+      actionItemId: track.agentActionItemId,
+      sourceEventKey: `playback_final:${track.playbackInstanceId}`,
+      outcomeType: 'system_failure',
+      polarity: 'system',
+      strength: 'weak',
+      metadata: { failureKind, userAgency: 'reactive' },
+    })
+  }
+}
+
+function attributedPlaybackOutcome(track: Track, reason: 'ended' | 'next' | 'stop' | 'app_closed' | 'system_failure') {
+  if (!track.agentActionId || !track.playbackInstanceId) return null
+  return classifyPlaybackOutcome({
+    playbackInstanceId: track.playbackInstanceId,
+    actionId: track.agentActionId,
+    actionItemId: track.agentActionItemId,
+    positionMs: state.position,
+    durationMs: state.duration,
+    reason,
+    userAgency: track.sourceContext === 'queue' ? 'passive' : 'reactive',
+  })
 }
 
 function cloneState(): PlaybackState {
@@ -122,10 +230,18 @@ function pruneLoopCounts(now = Date.now()): void {
   for (const [key] of oldest) loopCounts.delete(key)
 }
 
-async function applyPlaybackFeedback(track: Track, completionRate: number): Promise<void> {
+async function applyPlaybackFeedback(track: Track, completionRate: number, reason: 'ended' | 'next'): Promise<void> {
   const rate = Math.max(0, Math.min(1, completionRate))
+  const outcome = attributedPlaybackOutcome(track, reason)
+  let shouldApplyLegacy = true
+  getDb().transaction(() => {
+    if (outcome) shouldApplyLegacy = recordAgentActionOutcome(outcome).inserted
+    if (!shouldApplyLegacy) return
+    if (rate >= 0.8) recordTrackFeedback('played', track, rate)
+    else if (rate < 0.3) recordTrackFeedback('skipped', track, rate)
+  })()
+  if (!shouldApplyLegacy) return
   if (rate >= 0.8) {
-    recordTrackFeedback('played', track, rate)
     await applyMemorySignal('played', { artist: track.artist, trackId: track.id ?? track.neteaseId, title: track.title, completionRate: rate }, { source: 'playback', track })
     const key = trackKey(track)
     const now = Date.now()
@@ -142,7 +258,6 @@ async function applyPlaybackFeedback(track: Track, completionRate: number): Prom
     return
   }
   if (rate < 0.3) {
-    recordTrackFeedback('skipped', track, rate)
     await applyMemorySignal('skipped', { artist: track.artist, trackId: track.id ?? track.neteaseId, title: track.title, completionRate: rate }, { source: 'playback', track })
   }
 }
@@ -169,7 +284,16 @@ async function ensurePlayable(track: Track): Promise<Track> {
 
 export async function play(track: Track, options: InternalPlaybackPlayOptions = {}): Promise<PlaybackState> {
   const pushHistory = options.pushHistory ?? true
-  const playable = await ensurePlayable(track)
+  const attributed = createAttributedPlayback(track)
+  let playable: Track
+  try {
+    const resolved = await ensurePlayable(attributed)
+    playable = { ...resolved, agentActionId: attributed.agentActionId, agentActionItemId: attributed.agentActionItemId, stageContextId: attributed.stageContextId, playbackInstanceId: attributed.playbackInstanceId }
+    markAttributedPlaybackStarted(playable)
+  } catch (error) {
+    markAttributedPlaybackFailed(attributed, 'unplayable')
+    throw error
+  }
   const adjustedQueue = sceneQueueAfterAdjustment(state.queue, track)
   for (const replaced of adjustedQueue.replaced) markQueueStatus(replaced, 'skipped', 'scene_replaced')
   const previousQueue = adjustedQueue.kept
@@ -180,7 +304,7 @@ export async function play(track: Track, options: InternalPlaybackPlayOptions = 
 
   if (pushHistory && previousCurrent && currentKey && currentKey !== nextKey) {
     if (options.recordPreviousFeedback !== false) {
-      await applyPlaybackFeedback(previousCurrent, previousCompletionRate)
+      await applyPlaybackFeedback(previousCurrent, previousCompletionRate, 'next')
       markQueueStatus(previousCurrent, statusForCompletionRate(previousCompletionRate), statusForCompletionRate(previousCompletionRate) === 'skipped' ? 'playback_skipped' : 'playback_completed')
     }
     state.history = [previousCurrent, ...state.history].slice(0, 20)
@@ -212,11 +336,12 @@ export async function enqueue(track: Track): Promise<PlaybackState> {
 }
 
 export async function next(options: PlaybackNextOptions = {}): Promise<PlaybackState> {
+  if (options.playbackInstanceId && state.current?.playbackInstanceId !== options.playbackInstanceId) return cloneState()
   const finished = state.current
   if (finished) {
     const completionRate = currentCompletionRate(0)
     if (options.recordCurrentFeedback !== false) {
-      await applyPlaybackFeedback(finished, completionRate)
+      await applyPlaybackFeedback(finished, completionRate, 'next')
     }
     const status = options.recordCurrentFeedback === false ? 'skipped' : statusForCompletionRate(completionRate)
     markQueueStatus(finished, status, status === 'skipped' ? options.skippedReason ?? 'playback_skipped' : 'playback_completed')
@@ -241,11 +366,12 @@ export async function next(options: PlaybackNextOptions = {}): Promise<PlaybackS
   return emitState()
 }
 
-export async function finishCurrent(): Promise<PlaybackState> {
+export async function finishCurrent(playbackInstanceId?: string): Promise<PlaybackState> {
+  if (playbackInstanceId && state.current?.playbackInstanceId !== playbackInstanceId) return cloneState()
   const finished = state.current
   if (finished) {
     const completionRate = currentCompletionRate(1)
-    await applyPlaybackFeedback(finished, completionRate)
+    await applyPlaybackFeedback(finished, completionRate, 'ended')
     const status = statusForCompletionRate(completionRate)
     markQueueStatus(finished, status, status === 'skipped' ? 'playback_skipped' : 'playback_completed')
     state.history = [finished, ...state.history].slice(0, 20)
@@ -328,9 +454,13 @@ export function reorderQueue(fromIndex: number, toIndex: number): PlaybackState 
 }
 
 export function heartbeat(payload: PlaybackHeartbeat): PlaybackState {
+  if (payload.playbackInstanceId && state.current?.playbackInstanceId !== payload.playbackInstanceId) return cloneState()
   state.position = Math.max(0, Math.floor(payload.position))
   if (payload.duration && payload.duration > 0) state.duration = Math.floor(payload.duration)
-  if (state.current && payload.status) state.status = payload.status
+  if (state.current && payload.status) {
+    state.status = payload.status
+    if (payload.status === 'playing') markAttributedPlaybackSucceeded(state.current)
+  }
   if (state.current && isUrlStale(state.current)) {
     const refreshId = state.current.id ?? state.current.neteaseId
     if (refreshId && !urlRefreshInFlight.has(refreshId)) {
@@ -339,6 +469,14 @@ export function heartbeat(payload: PlaybackHeartbeat): PlaybackState {
     }
   }
   return cloneState()
+}
+
+export function reportPlaybackError(playbackInstanceId: string, failureKind = 'renderer_error'): PlaybackState {
+  if (!state.current || state.current.playbackInstanceId !== playbackInstanceId) return cloneState()
+  markAttributedPlaybackFailed(state.current, failureKind)
+  state.status = 'error'
+  state.error = '播放失败，请重试。'
+  return emitState()
 }
 
 export async function refreshUrl(trackId: string): Promise<{ track: Track; state: PlaybackState }> {
@@ -369,6 +507,12 @@ export async function refreshUrl(trackId: string): Promise<{ track: Track; state
 export function getState(): PlaybackState {
   if (!state.current) state.queue = playableQueue()
   return cloneState()
+}
+
+export function recordAppClosedPlayback(): void {
+  if (!state.current) return
+  const outcome = attributedPlaybackOutcome(state.current, 'app_closed')
+  if (outcome) recordAgentActionOutcome(outcome)
 }
 
 export function resetPlaybackState(): PlaybackState {

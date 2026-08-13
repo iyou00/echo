@@ -5,7 +5,7 @@ import type { MusicSearchFailure } from '../../skills/music/search'
 import { currentMusicCorrectionConstraintForQuery } from '../../skills/music/correctionMemory'
 import type { MusicEntityResolution } from '../../skills/music/entityResolver'
 import { constraintFromResolution, filterTracksByMusicEntity, mergeMusicEntityConstraints, type MusicEntityConstraint } from '../../skills/music/verifier'
-import { parseRequestedTrackCount } from '../recommendation'
+import { MAX_RECOMMENDATION_COUNT, parseRequestedTrackCount } from '../recommendation'
 import { mergeIntent } from '../recommendation/intent'
 import type { PendingQuestionReplyCapture } from '../tasteQuestionScheduler'
 import { classifyFallbackChatIntent, type ChatIntent } from './intent'
@@ -72,8 +72,13 @@ export function effectiveMusicSearchQuery(query: string, intent: ChatIntent): st
     return `我要听${intent.artistQuery}的《${intent.seedTitle}》`
   }
   if (intent.artistQuery && !mentionsArtist) {
-    const count = Math.max(1, Math.min(5, Math.floor(intent.targetCount || 1)))
-    return count > 1 ? `推荐${count}首${intent.artistQuery}的歌` : `推荐一首${intent.artistQuery}的歌`
+    const count = Math.max(1, Math.min(MAX_RECOMMENDATION_COUNT, Math.floor(intent.targetCount || 1)))
+    const ranking = intent.recommendationIntent.ranking === 'latest'
+      ? '最新'
+      : intent.recommendationIntent.ranking === 'popular'
+        ? '热门'
+        : ''
+    return count > 1 ? `推荐${count}首${intent.artistQuery}的${ranking}歌` : `推荐一首${intent.artistQuery}的${ranking}歌`
   }
   if (intent.seedTitle && !mentionsTitle) {
     return `我要听《${intent.seedTitle}》`
@@ -200,7 +205,7 @@ export async function prepareCandidateStage(input: CandidateStageInput): Promise
     ? input.initialChatIntent
     : classifyDerivedRecommendationIntent(recommendationQuery, input)
   const requested = parseRequestedTrackCount(input.trimmed)
-  const targetCount = Math.max(1, Math.min(5, Math.floor(recommendationIntent.targetCount || requested.targetCount)))
+  const targetCount = Math.max(1, Math.min(MAX_RECOMMENDATION_COUNT, Math.floor(recommendationIntent.targetCount || requested.targetCount)))
   const countExplicit = requested.explicit || targetCount > requested.targetCount
   if (
     !hasMusicActionIntent(recommendationIntent)

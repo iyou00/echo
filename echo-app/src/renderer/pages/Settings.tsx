@@ -1,6 +1,6 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { Download, Info, MessageCircle, Upload } from 'lucide-react'
-import type { CareFrequency, EchoApi, ImportProgressPayload, ImportTaskSnapshot, SemanticSummary, Settings, Track } from '../../types/ipc'
+import type { AgentActionSummary, CareFrequency, EchoApi, ImportProgressPayload, ImportTaskSnapshot, SemanticSummary, Settings, StageContext, Track } from '../../types/ipc'
 import type { AppPageProps } from '../appState'
 import { EmptyState, Section } from '../components'
 import { RuntimeTaskList } from '../components/RuntimeTaskNotice'
@@ -87,6 +87,21 @@ const defaultTtsBaseUrl = 'https://tts.wangwangit.com'
 const drawerExitMs = 360
 const semanticSummaryUnavailable = '语义统计暂时没有读出来。'
 const importResultStatusTtlMs = 8000
+const stageKindLabels: Record<StageContext['kind'], string> = {
+  work: '工作', rest: '休息', commute: '通勤', sleep: '睡眠', exercise: '运动', emotional_support: '需要陪伴', other: '当下',
+}
+const stageGoalLabels: Record<StageContext['goal'], string> = {
+  focus: '专注', recover: '恢复', settle: '缓下来', energize: '提神', companionship: '陪伴', sleep: '入睡', none: '陪着',
+}
+const actionOriginLabels: Record<AgentActionSummary['origin'], string> = {
+  chat: '絮语', listening: '连续回声', scene: '场景', care: '主动关心', playback: '播放',
+}
+const actionTypeLabels: Record<AgentActionSummary['actionType'], string> = {
+  reply: '回应', clarify: '确认', play: '播放', adjust_music: '调整音乐', speak_then_play: '说完再播', silent_play: '安静播放', stay_silent: '没有打扰', safety_guidance: '安全提醒',
+}
+const actionOutcomeLabels: Record<AgentActionSummary['outcomes'][number]['type'], string> = {
+  playback_started: '已开始播放', quick_skip: '很快切走', effective_listen: '听了一会儿', completed: '听完了', favorite: '已收藏', explicit_like: '明确喜欢', explicit_miss: '明确不合适', replay: '又听了一次', opened: '点开了', system_failure: '执行失败', user_stop: '主动停止', app_closed: '随应用结束', dismissed: '已收起', ignored: '没有回应',
+}
 
 function formatSemanticSummary(summary: SemanticSummary | null): string {
   if (!summary) return '正在读取语义统计...'
@@ -254,6 +269,9 @@ export function SettingsPage({
   const [neteaseCaptcha, setNeteaseCaptcha] = useState('')
   const [neteaseCaptchaCooldown, setNeteaseCaptchaCooldown] = useState(0)
   const [neteaseCookieInput, setNeteaseCookieInput] = useState('')
+  const [stageContext, setStageContext] = useState<StageContext | null>(null)
+  const [recentAgentActions, setRecentAgentActions] = useState<AgentActionSummary[]>([])
+  const [stageContextStatus, setStageContextStatus] = useState('')
 
   function switchProvider(key: string) {
     const preset = providerPresets[key]
@@ -415,6 +433,36 @@ export function SettingsPage({
   useEffect(() => {
     void refreshSemanticSummary()
   }, [refreshSemanticSummary])
+
+  const refreshAgentContext = useCallback(async () => {
+    try {
+      const [context, actions] = await Promise.all([
+        echo.stageContext.getActive(),
+        echo.stageContext.recentActions(8),
+      ])
+      setStageContext(context)
+      setRecentAgentActions(actions)
+    } catch (error) {
+      console.warn('[settings] agent context failed', error)
+    }
+  }, [echo])
+
+  useEffect(() => {
+    void refreshAgentContext()
+  }, [refreshAgentContext])
+
+  async function endCurrentStageContext() {
+    await echo.stageContext.end()
+    setStageContextStatus('当前阶段已结束')
+    await refreshAgentContext()
+  }
+
+  async function deleteCurrentStageContext() {
+    if (!stageContext) return
+    await echo.stageContext.delete(stageContext.id)
+    setStageContextStatus('这条理解已删除')
+    await refreshAgentContext()
+  }
 
   useEffect(() => {
     if (importTask?.status !== 'succeeded') return
@@ -1448,6 +1496,44 @@ export function SettingsPage({
                 )}
               </Section>
 
+              <Section label="E C H O 此 刻 的 理 解">
+                {stageContext ? (
+                  <>
+                    <div className="data-line">
+                      <div>
+                        {stageContext.summary}
+                        <small>{stageKindLabels[stageContext.kind]} · {stageGoalLabels[stageContext.goal]} · 第 {stageContext.revision} 次更新</small>
+                      </div>
+                    </div>
+                    <div className="settings-row">
+                      <button className="btn sec" type="button" onClick={() => { void endCurrentStageContext() }}>已经结束</button>
+                      <button className="btn danger" type="button" onClick={() => { void deleteCurrentStageContext() }}>这条不对</button>
+                    </div>
+                  </>
+                ) : (
+                  <EmptyState title="现在没有持续中的阶段" body="此刻轻轻松松的，也很好。" />
+                )}
+                {stageContextStatus && (
+                  <div className="status-ind ok"><span className="status-dot" />{stageContextStatus}</div>
+                )}
+                {recentAgentActions.length > 0 && (
+                  <div className="service-health-list">
+                    {recentAgentActions.slice(0, 5).map((action) => (
+                      <div className={`service-health-item ${action.status === 'failed' ? 'error' : 'ok'}`} key={action.id}>
+                        <div className="service-health-main">
+                          <span className="service-health-dot" />
+                          <div>
+                            <div className="service-health-title">{actionOriginLabels[action.origin]} · {actionTypeLabels[action.actionType]}</div>
+                            <div className="service-health-message">{action.status === 'failed' ? '没有完成' : action.status === 'canceled' ? '已经取消' : action.outcomes[0] ? actionOutcomeLabels[action.outcomes[0].type] : '已经完成'}</div>
+                          </div>
+                        </div>
+                        <time className="service-health-time">{new Date(action.plannedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Section>
+
               <Section label="回 声 · v 0 . 3">
                 <label className="field">
                   <div className="field-label">所在城市</div>
@@ -1760,7 +1846,7 @@ export function SettingsPage({
         </div>
         {feedbackStatus && <div className="settings-support-status" role="status">{feedbackStatus}</div>}
 
-        <footer className="page-foot">E C H O · v 0 . 1 . 3</footer>
+        <footer className="page-foot">E C H O · v 0 . 1 . 5</footer>
       </div>
 
       {renderNeteaseDrawer && (

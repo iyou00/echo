@@ -61,6 +61,8 @@ import type { CompanionResponseStrategy } from './companionTypes'
 import { composePlannedReply } from './plannedReply'
 import { inferCompanionReactionSignals } from './companionStrategy'
 import { MUSIC_LANGUAGE_VALUES } from '../recommendation/language'
+import { loadActiveStageContext } from '../../domain/stageContext/repository'
+import { applyStageContextProposal } from '../../domain/stageContext/service'
 import {
   applyWeatherToChatIntent,
   availableWeatherContext,
@@ -552,6 +554,7 @@ export async function runChatSendPipeline(
     const musicSession = getChatMusicSessionSnapshot()
     const companionProfile = getCompanionProfile()
     const previousResponseStrategy = loadLatestAssistantResponseStrategy()
+    const activeStageContext = loadActiveStageContext()
     const routedIntent = await routeChatIntentWithLlm(trimmed, {
       currentTrack: currentPlaybackTrack,
       currentSceneKey: getCurrentScene()?.key,
@@ -562,7 +565,16 @@ export async function runChatSendPipeline(
       companionProfile,
       previousResponseStrategy,
       companionResponseBrief,
+      currentConversationId: userMessage.id,
+      activeStageContext,
     }, signal)
+    if (routedIntent.stageContextProposal) {
+      applyStageContextProposal({
+        proposal: routedIntent.stageContextProposal,
+        allowedEvidenceConversationIds: [userMessage.id],
+        evidenceStrength: 'proposed',
+      })
+    }
     responseStrategy = routedIntent.responseStrategy
     const companionSignals = [
       ...(routedIntent.companionSignals ?? []),

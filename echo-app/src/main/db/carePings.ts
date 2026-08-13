@@ -5,6 +5,8 @@ import { parseJson } from './json'
 export interface CarePingPayload {
   type: PingType
   track?: Track
+  agentActionId?: string
+  agentActionItemId?: string
 }
 
 export interface CarePingRecord {

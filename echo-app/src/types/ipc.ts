@@ -7,6 +7,7 @@ export interface Track {
   artist: string
   album?: string
   year?: number
+  publishedAt?: string
   reason?: string
   source?: string
   playUrl?: string
@@ -29,6 +30,80 @@ export interface Track {
   sceneJourneyIndex?: number
   sceneAdjustmentBatchId?: string
   sourceContext?: 'chat' | 'voice' | 'scene' | 'queue' | 'favorite' | 'history' | 'care'
+  agentActionId?: string
+  agentActionItemId?: string
+  stageContextId?: string
+  playbackInstanceId?: string
+}
+
+export type StageContextKind = 'work' | 'rest' | 'commute' | 'sleep' | 'exercise' | 'emotional_support' | 'other'
+export type StageContextGoal = 'focus' | 'recover' | 'settle' | 'energize' | 'companionship' | 'sleep' | 'none'
+export type StageContextStatus = 'active' | 'paused' | 'ended' | 'expired'
+export type StageContextEndReason = 'user_ended' | 'user_corrected' | 'replaced' | 'expired' | 'deleted'
+export type StageContextEvidenceStrength = 'proposed' | 'executed' | 'engaged' | 'accepted' | 'explicit'
+
+export interface StageState {
+  emotion: 'neutral' | 'tired' | 'irritated' | 'low' | 'anxious' | 'calm' | 'positive' | 'unknown'
+  energy: 'low' | 'medium' | 'high' | 'unknown'
+  interactionPreference: 'talk' | 'music' | 'quiet' | 'unknown'
+  safety: 'normal' | 'caution'
+}
+
+export interface StageContext {
+  id: string
+  kind: StageContextKind
+  status: StageContextStatus
+  summary: string
+  state: StageState
+  goal: StageContextGoal
+  confidence: number
+  revision: number
+  startedAt: string
+  lastActiveAt: string
+  expiresAt: string
+  endedAt?: string
+  endReason?: StageContextEndReason
+}
+
+export interface StageContextProposal {
+  operation: 'none' | 'create' | 'update' | 'end'
+  kind?: StageContextKind
+  summary?: string
+  statePatch?: Partial<StageState>
+  goal?: StageContextGoal
+  confidence: number
+  ttlClass?: 'short' | 'day' | 'multi_day'
+  evidenceConversationIds: number[]
+}
+
+export interface StageContextCorrection {
+  kind?: StageContextKind
+  summary?: string
+  statePatch?: Partial<StageState>
+  goal?: StageContextGoal
+}
+
+export type AgentActionOrigin = 'chat' | 'listening' | 'scene' | 'care' | 'playback'
+export type AgentActionType = 'reply' | 'clarify' | 'play' | 'adjust_music' | 'speak_then_play' | 'silent_play' | 'stay_silent' | 'safety_guidance'
+export type AgentActionStatus = 'planned' | 'started' | 'succeeded' | 'failed' | 'canceled'
+export type AgentActionReason = 'user_request' | 'context_focus' | 'context_recover' | 'context_settle' | 'context_energize' | 'context_companionship' | 'recommendation_followup' | 'explicit_correction' | 'proactive_check' | 'safety_risk' | 'low_intervention_value' | 'muted_or_blocked'
+export type AgentActionOutcomeType = 'playback_started' | 'quick_skip' | 'effective_listen' | 'completed' | 'favorite' | 'explicit_like' | 'explicit_miss' | 'replay' | 'opened' | 'system_failure' | 'user_stop' | 'app_closed' | 'dismissed' | 'ignored'
+export type AgentActionOutcomeStrength = 'weak' | 'medium' | 'strong'
+export type AgentActionOutcomePolarity = 'positive' | 'negative' | 'neutral' | 'system'
+export type AgentUserAgency = 'passive' | 'reactive' | 'active'
+
+export interface AgentActionSummary {
+  id: string
+  origin: AgentActionOrigin
+  actionType: AgentActionType
+  reasonCode: AgentActionReason
+  goalCode: StageContextGoal
+  status: AgentActionStatus
+  stageContextId?: string
+  stageContextRevision?: number
+  plannedAt: string
+  finishedAt?: string
+  outcomes: Array<{ type: AgentActionOutcomeType; polarity: AgentActionOutcomePolarity; strength: AgentActionOutcomeStrength; occurredAt: string }>
 }
 
 export type PlaybackStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'error'
@@ -177,6 +252,7 @@ export interface SceneDefinition {
 
 export interface ActiveScene extends SceneDefinition {
   id: number
+  stageContextId?: string
   startedAt: string
   expiresAt: string
   endedAt?: string
@@ -275,6 +351,7 @@ export interface PlaybackPlayOptions {
 }
 
 export interface PlaybackHeartbeat {
+  playbackInstanceId?: string
   position: number
   duration?: number
   status: PlaybackStatus
@@ -654,6 +731,13 @@ export interface EchoApi {
     today(): Promise<SceneSessionSummary[]>
     onChanged(listener: (scene: ActiveScene | null) => void): () => void
   }
+  stageContext: {
+    getActive(): Promise<StageContext | null>
+    end(): Promise<StageContext | null>
+    correct(input: StageContextCorrection): Promise<StageContext | null>
+    delete(id: string): Promise<{ ok: boolean }>
+    recentActions(limit?: number): Promise<AgentActionSummary[]>
+  }
   semantics: {
     buildForImportedTracks(): Promise<{ tagged: number; skipped: number }>
     getSummary(): Promise<SemanticSummary>
@@ -669,8 +753,8 @@ export interface EchoApi {
   playback: {
     play(track: Track, options?: PlaybackPlayOptions): Promise<PlaybackState>
     enqueue(track: Track): Promise<PlaybackState>
-    next(): Promise<PlaybackState>
-    finishCurrent(): Promise<PlaybackState>
+    next(playbackInstanceId?: string): Promise<PlaybackState>
+    finishCurrent(playbackInstanceId?: string): Promise<PlaybackState>
     prev(): Promise<PlaybackState>
     pause(): Promise<PlaybackState>
     resume(): Promise<PlaybackState>
@@ -682,6 +766,7 @@ export interface EchoApi {
     clearQueue(): Promise<PlaybackState>
     reorderQueue(fromIndex: number, toIndex: number): Promise<PlaybackState>
     heartbeat(state: PlaybackHeartbeat): Promise<PlaybackState>
+    reportError(playbackInstanceId: string, failureKind?: string): Promise<PlaybackState>
     refreshUrl(trackId: string): Promise<{ track: Track; state: PlaybackState }>
     getState(): Promise<PlaybackState>
     onStateChanged(listener: (state: PlaybackState) => void): () => void

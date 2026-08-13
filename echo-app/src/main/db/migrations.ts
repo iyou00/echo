@@ -137,6 +137,115 @@ const migrations: DbMigration[] = [
       `)
     },
   },
+  {
+    version: 10,
+    name: 'agent_phase_one_context_and_actions',
+    up(database) {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS stage_contexts (
+          id TEXT PRIMARY KEY,
+          user_id INTEGER NOT NULL,
+          kind TEXT NOT NULL,
+          status TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          state_json TEXT NOT NULL,
+          goal TEXT NOT NULL,
+          confidence REAL NOT NULL,
+          revision INTEGER NOT NULL DEFAULT 1,
+          started_at DATETIME NOT NULL,
+          last_active_at DATETIME NOT NULL,
+          expires_at DATETIME NOT NULL,
+          ended_at DATETIME,
+          end_reason TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_stage_context_one_active
+          ON stage_contexts(user_id) WHERE status = 'active';
+        CREATE INDEX IF NOT EXISTS idx_stage_context_recent
+          ON stage_contexts(user_id, last_active_at DESC);
+
+        CREATE TABLE IF NOT EXISTS stage_context_evidence (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          context_id TEXT NOT NULL,
+          source_type TEXT NOT NULL,
+          source_id TEXT NOT NULL,
+          strength TEXT NOT NULL,
+          fact TEXT NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          retracted_at DATETIME,
+          UNIQUE(context_id, source_type, source_id, fact),
+          FOREIGN KEY (context_id) REFERENCES stage_contexts(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_actions (
+          id TEXT PRIMARY KEY,
+          user_id INTEGER NOT NULL,
+          stage_context_id TEXT,
+          stage_context_revision INTEGER,
+          runtime_task_id TEXT,
+          origin TEXT NOT NULL,
+          action_type TEXT NOT NULL,
+          reason_code TEXT NOT NULL,
+          goal_code TEXT NOT NULL,
+          status TEXT NOT NULL,
+          failure_kind TEXT,
+          recovers_action_id TEXT,
+          decision_json TEXT NOT NULL DEFAULT '{}',
+          planned_at DATETIME NOT NULL,
+          started_at DATETIME,
+          finished_at DATETIME,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id),
+          FOREIGN KEY (stage_context_id) REFERENCES stage_contexts(id) ON DELETE SET NULL,
+          FOREIGN KEY (recovers_action_id) REFERENCES agent_actions(id) ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_actions_recent
+          ON agent_actions(user_id, planned_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_agent_actions_context
+          ON agent_actions(stage_context_id, planned_at DESC);
+
+        CREATE TABLE IF NOT EXISTS agent_action_items (
+          id TEXT PRIMARY KEY,
+          action_id TEXT NOT NULL,
+          item_type TEXT NOT NULL,
+          ordinal INTEGER NOT NULL,
+          entity_key TEXT,
+          payload_json TEXT NOT NULL DEFAULT '{}',
+          status TEXT NOT NULL,
+          started_at DATETIME,
+          finished_at DATETIME,
+          UNIQUE(action_id, item_type, ordinal),
+          FOREIGN KEY (action_id) REFERENCES agent_actions(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_action_outcomes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          action_id TEXT NOT NULL,
+          action_item_id TEXT,
+          source_event_key TEXT NOT NULL,
+          outcome_type TEXT NOT NULL,
+          polarity TEXT NOT NULL,
+          strength TEXT NOT NULL,
+          occurred_at DATETIME NOT NULL,
+          metadata_json TEXT NOT NULL DEFAULT '{}',
+          UNIQUE(user_id, source_event_key),
+          FOREIGN KEY (user_id) REFERENCES users(id),
+          FOREIGN KEY (action_id) REFERENCES agent_actions(id) ON DELETE CASCADE,
+          FOREIGN KEY (action_item_id) REFERENCES agent_action_items(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_outcomes_action
+          ON agent_action_outcomes(action_id, occurred_at DESC);
+
+        ALTER TABLE scene_sessions ADD COLUMN stage_context_id TEXT REFERENCES stage_contexts(id) ON DELETE SET NULL;
+        ALTER TABLE listening_sessions ADD COLUMN stage_context_id TEXT REFERENCES stage_contexts(id) ON DELETE SET NULL;
+        ALTER TABLE track_feedback_events ADD COLUMN agent_action_id TEXT REFERENCES agent_actions(id) ON DELETE SET NULL;
+        ALTER TABLE track_feedback_events ADD COLUMN agent_action_item_id TEXT REFERENCES agent_action_items(id) ON DELETE SET NULL;
+      `)
+    },
+  },
 ]
 
 function backfillSettingsFirstUsedAt(database: Database.Database): void {

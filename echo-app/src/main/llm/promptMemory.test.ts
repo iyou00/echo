@@ -38,6 +38,11 @@ vi.mock('../db/tracks', () => ({
   loadMeaningfulTrackEventsForDate: vi.fn(() => []),
 }))
 
+vi.mock('../db/agentActions', () => ({
+  listAgentActionFactsForDate: vi.fn(() => []),
+  listQualifiedActionItemIdsForDate: vi.fn(() => new Set()),
+}))
+
 vi.mock('../db/yinyi', () => ({
   getYinyiRange: vi.fn(() => []),
 }))

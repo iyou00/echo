@@ -147,6 +147,7 @@ function buildCacheKey(
     energy: intent.energy,
     tempo: intent.tempo,
     familiarity: intent.familiarity,
+    ranking: intent.ranking,
     targetCount: intent.targetCount,
     seedTitle: intent.seedTitle,
     artistQuery: intent.artistQuery,
@@ -240,7 +241,29 @@ async function recommendGenericDiscovery(intent: RecommendationIntent, options: 
 }
 
 function isArtistFocusedIntent(intent: RecommendationIntent): boolean {
-  return Boolean(intent.artistQuery) && !intent.seedTitle && intent.moods.every((mood) => mood === '陪伴')
+  return Boolean(intent.artistQuery)
+    && !intent.seedTitle
+    && (intent.ranking !== 'default' || intent.moods.every((mood) => mood === '陪伴'))
+}
+
+function orderedArtistCandidates(tracks: Track[], intent: RecommendationIntent, seed: string): Track[] {
+  const unique = uniqueTracks(tracks)
+  if (intent.ranking === 'popular') return unique
+  if (intent.ranking === 'latest') {
+    return unique
+      .map((track, index) => ({ track, index, publishedAt: Date.parse(track.publishedAt ?? '') || 0 }))
+      .sort((left, right) => right.publishedAt - left.publishedAt || left.index - right.index)
+      .map((item) => item.track)
+  }
+  return shuffleTracks(unique, seed)
+}
+
+function mergeOrderedArtistCandidatePools(
+  pools: Track[][],
+  intent: RecommendationIntent,
+  seed: string,
+): Track[] {
+  return uniqueTracks(pools.flatMap((pool, index) => orderedArtistCandidates(pool, intent, `${seed}:${index}`)))
 }
 
 function isDirectSongRequest(text: string, intent: RecommendationIntent): boolean {
@@ -332,6 +355,8 @@ export const recommendationTestHelpers = {
   tasteProfileFingerprint,
   trackIdentitySet,
   constrainByRequestedLanguage,
+  orderedArtistCandidates,
+  mergeOrderedArtistCandidatePools,
 }
 
 export async function recommendFromNetease(text: string, override?: IntentOverride, options: RecommendationOptions = {}): Promise<Track[]> {
@@ -438,8 +463,9 @@ export async function recommendFromNetease(text: string, override?: IntentOverri
     const lastResortArtistCandidates = allowCooldownFallback
       ? candidates.filter((track) => intent.artistQuery ? normalizeText(track.artist).includes(normalizeText(intent.artistQuery)) : true)
       : []
-    const playableArtistTracks = await filterPlayableTracks(shuffleTracks(
-      artistCandidates.length ? artistCandidates : fallbackArtistCandidates.length ? fallbackArtistCandidates : lastResortArtistCandidates,
+    const playableArtistTracks = await filterPlayableTracks(mergeOrderedArtistCandidatePools(
+      [artistCandidates, fallbackArtistCandidates, lastResortArtistCandidates],
+      intent,
       `${determinism.daySeed}:artist:${intent.query}:${intent.artistQuery ?? ''}:${desiredCount}`,
     ), desiredCount, options.signal)
     assertRecommendationActive(options.signal)

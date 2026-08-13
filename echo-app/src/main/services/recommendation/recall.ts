@@ -434,7 +434,15 @@ async function fetchArtistCandidates(intent: RecommendationIntent, cookie: strin
   const topSongCalls = artistIds.map(async (id) => {
     assertRecallActive(signal)
     const topSongs = await timed(
-      netease.artist_top_song({ id, cookie }),
+      intent.ranking === 'default'
+        ? netease.artist_top_song({ id, cookie })
+        : netease.artist_songs({
+            id,
+            order: intent.ranking === 'latest' ? 'time' : 'hot',
+            limit: Math.max(30, intent.targetCount * 4),
+            offset: 0,
+            cookie,
+          }),
       NET_CALL_TIMEOUT_MS,
       null as ApiResponse | null,
     )
@@ -515,13 +523,14 @@ async function fetchCandidatesInternal(intent: RecommendationIntent, signal?: Ab
         netCall(netease.personal_fm({ cookie }), 'fm'),
       ]
   const calls: Array<Promise<Track[]>> = [
+    ...(intent.artistQuery ? [timed(fetchArtistCandidates(intent, cookie, context, signal), NET_CALL_TIMEOUT_MS + 2000, [] as Track[])] : []),
     ...languageSearchCalls(intent, cookie),
     ...sceneCalls,
     ...(intent.seedTitle ? [netCall(netease.cloudsearch({ keywords: keyword, type: 1, limit: 10, offset: 0, cookie }), 'search')] : []),
     ...personalizedCalls,
     netCall(netease.cloudsearch({ keywords: keyword, type: 1, limit: 30, offset: searchOffset, cookie }), 'search'),
     netCall(netease.personalized_newsong({ limit: 20, cookie }), 'new_song'),
-    timed(fetchArtistCandidates(intent, cookie, context, signal), NET_CALL_TIMEOUT_MS + 2000, [] as Track[]),
+    ...(!intent.artistQuery ? [timed(fetchArtistCandidates(intent, cookie, context, signal), NET_CALL_TIMEOUT_MS + 2000, [] as Track[])] : []),
     timed(fetchSimilarArtistCandidates(cookie, context, signal), NET_CALL_TIMEOUT_MS + 2000, [] as Track[]),
     timed(fetchPlaylistCandidates(intent, cookie, determinism, context, signal), NET_CALL_TIMEOUT_MS + 2000, [] as Track[]),
   ]

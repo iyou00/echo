@@ -366,6 +366,11 @@ export function resetDatabase(): void {
   try {
     database.transaction(() => {
       database.exec(`
+        DELETE FROM agent_action_outcomes;
+        DELETE FROM agent_action_items;
+        DELETE FROM agent_actions;
+        DELETE FROM stage_context_evidence;
+        DELETE FROM stage_contexts;
         DELETE FROM listening_segments;
         DELETE FROM listening_sessions;
         DELETE FROM companion_signal_events;

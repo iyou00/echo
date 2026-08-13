@@ -1,13 +1,15 @@
-import type { Track } from '../../../types/ipc'
+import type { StageContext, StageContextProposal, Track } from '../../../types/ipc'
 import { getSettings } from '../../db/settings'
 import { completeChat } from '../../llm/client'
 import {
   mergeIntent,
+  MAX_RECOMMENDATION_COUNT,
   parseIntent,
   validateIntentOverride,
   type IntentOverride,
   type IntentRejectIf,
   type RecommendationIntent,
+  type RecommendationRanking,
 } from '../../services/recommendation/intent'
 import { isMusicDescriptorPhrase, resolveMusicEntitiesFromText } from '../music/entityResolver'
 import { normalizeText, unique } from '../music/identity'
@@ -84,6 +86,7 @@ export interface ChatIntent {
   pendingTasteAction?: PendingTasteReplyAction
   responseStrategy?: CompanionResponseStrategy
   companionSignals?: CompanionPreferenceSignal[]
+  stageContextProposal?: StageContextProposal
 }
 
 export interface ChatPendingIntentContext {
@@ -104,6 +107,7 @@ export interface ChatPendingTasteContext {
 
 export interface ChatMusicSessionContext {
   sourceText: string
+  intentKind?: string
   tracks: Array<{ title: string; artist: string }>
   artistQuery?: string
   seedTitle?: string
@@ -120,6 +124,8 @@ export interface ChatIntentContext {
   companionProfile?: CompanionProfile | null
   previousResponseStrategy?: CompanionResponseStrategy | null
   companionResponseBrief?: CompanionResponseBrief | null
+  currentConversationId?: number
+  activeStageContext?: StageContext | null
 }
 
 const DIRECT_SONG_ACTION_PATTERN = /想听|想要听|要听|我要听|我想听|听听看|听一下|听听|播放|放一下|放首|放一首|点播|给我放|帮我放|安排(?:一下|一首|首)?|整(?:一首|首)?|搞(?:一首|首)?|弄(?:一首|首)?/i
@@ -150,6 +156,7 @@ const SCENE_OR_FIT_SELECTION_PATTERN = /(?:找|来|放|推荐|推|选|挑|分享
 const GENERIC_TITLE_WORDS = new Set(['歌', '歌曲', '音乐', '作品', '那首', '这首', '一首', '几首', '来一首', '来几首'])
 const ROUTER_LANGUAGES = new Set<NonNullable<IntentOverride['language']>>(MUSIC_LANGUAGE_VALUES)
 const ROUTER_MOODS = new Set(['放松', '松弛', '清醒', '热烈', '轻快', '治愈', '怀旧', '孤独', '陪伴', '发呆'])
+const ROUTER_RANKINGS = new Set<RecommendationRanking>(['default', 'latest', 'popular'])
 const ROUTER_SCENES = new Set(['上午', '午休', '下午工作', '通勤', '下班路上', '夜晚', '睡前', '雨天', '独处', '运动'])
 const ROUTER_ARTIST_ALIASES: Record<string, string> = {
   eason: '陈奕迅',
@@ -400,6 +407,11 @@ function shouldClearUnsupportedRouterTitle(source: string, title: string | undef
 
 function recentUserSupportsArtist(context: ChatIntentContext, artist: string | undefined): artist is string {
   if (!artist) return false
+  if (
+    context.musicSession?.intentKind !== 'similar_to_track'
+    && context.musicSession?.artistQuery
+    && normalizeText(context.musicSession.artistQuery) === normalizeText(artist)
+  ) return true
   return (context.recentDialog ?? [])
     .filter((message) => message.role === 'user')
     .slice(-2)
@@ -421,6 +433,14 @@ function isContextualMusicSelection(text: string): boolean {
     || /^(?:可以|好|行|来吧)[呀啊吧的了，。!！?？]*$/.test(trimmed)
 }
 
+function isContextualMusicContinuation(text: string): boolean {
+  const trimmed = text.trim()
+  if (!/^(?:那(?:你|就|么)?|再|继续|接着|还有|还要|另外|换)/.test(trimmed)) return false
+  return MUSIC_ACTION_PATTERN.test(trimmed)
+    || SHARE_MUSIC_ACTION_PATTERN.test(trimmed)
+    || /几首|\d+首|[一二两三四五六七八九十]+首|热门|热度|最新|新歌/.test(trimmed)
+}
+
 function assistantOfferedMusicAction(context: ChatIntentContext): boolean {
   const assistant = [...(context.recentDialog ?? [])].reverse().find((message) => message.role === 'assistant')
   return Boolean(assistant && /(?:要不要|要我|我来|可以|帮你).{0,18}(?:挑|选|找|放|推荐|来一首|开始放)/.test(assistant.content))
@@ -433,20 +453,30 @@ function contextCanSupplyMusicEntities(
 ): boolean {
   if (kind === 'pending_reply') return true
   if (/(?:刚才|刚刚|之前|上一首|那首|那个|这首|这个|这位|那个歌手|这个歌手|他(?:的)?歌|她(?:的)?歌)/.test(text)) return true
+  if (context.musicSession?.intentKind !== 'similar_to_track' && context.musicSession?.artistQuery && isContextualMusicContinuation(text)) return true
   return isContextualMusicSelection(text) && assistantOfferedMusicAction(context)
 }
 
 function applyRecentMusicContext(intent: ChatIntent, context: ChatIntentContext): ChatIntent {
   if (intent.artistQuery || intent.seedTitle) return intent
-  if (!isContextualMusicSelection(intent.text) || !assistantOfferedMusicAction(context)) return intent
+  const contextualSessionArtist = context.musicSession?.intentKind !== 'similar_to_track' && isContextualMusicContinuation(intent.text)
+    ? context.musicSession?.artistQuery
+    : undefined
+  const currentRuleIntent = contextualSessionArtist ? parseIntent(intent.text) : undefined
+  const currentArtist = intent.llmIntentOverride?.clearArtistQuery ? undefined : currentRuleIntent?.artistQuery
+  const currentTitle = intent.llmIntentOverride?.clearSeedTitle ? undefined : currentRuleIntent?.seedTitle
+  const sessionArtist = !currentArtist && !currentTitle ? contextualSessionArtist : undefined
+  const offeredSelection = isContextualMusicSelection(intent.text) && assistantOfferedMusicAction(context)
+  if (!currentArtist && !currentTitle && !sessionArtist && !offeredSelection) return intent
   const previousUser = [...(context.recentDialog ?? [])].reverse().find((message) => message.role === 'user')
-  if (!previousUser) return intent
-  const previousIntent = parseIntent(previousUser.content)
-  if (!previousIntent.artistQuery && !previousIntent.seedTitle) return intent
+  const previousIntent = previousUser ? parseIntent(previousUser.content) : undefined
+  const artistQuery = currentArtist ?? sessionArtist ?? previousIntent?.artistQuery
+  const seedTitle = currentTitle ?? (currentArtist || sessionArtist ? undefined : previousIntent?.seedTitle)
+  if (!artistQuery && !seedTitle) return intent
   const override: IntentOverride = {
     wantsMusic: true,
-    artistQuery: previousIntent.artistQuery,
-    seedTitle: previousIntent.seedTitle,
+    artistQuery,
+    seedTitle,
     targetCount: intent.targetCount,
     intentConfidence: 0.86,
     evidence: ['承接上一轮音乐话题'],
@@ -454,7 +484,7 @@ function applyRecentMusicContext(intent: ChatIntent, context: ChatIntentContext)
   const recommendationIntent = mergeIntent(intent.recommendationIntent, override)
   return {
     ...intent,
-    kind: previousIntent.seedTitle ? 'direct_song' : previousIntent.artistQuery ? 'artist_request' : 'mood_request',
+    kind: seedTitle ? 'direct_song' : artistQuery ? 'artist_request' : 'mood_request',
     confidence: Math.max(intent.confidence, 0.86),
     wantsMusic: true,
     recommendationIntent,
@@ -542,6 +572,18 @@ function compactRouterContext(context: ChatIntentContext): Record<string, unknow
     companionProfile: context.companionProfile ? compactCompanionProfile(context.companionProfile) : null,
     previousResponseStrategy: context.previousResponseStrategy ?? null,
     companionResponseBrief: context.companionResponseBrief ?? null,
+    currentConversationId: context.currentConversationId ?? null,
+    activeStageContext: context.activeStageContext
+      ? {
+          id: context.activeStageContext.id,
+          kind: context.activeStageContext.kind,
+          summary: context.activeStageContext.summary,
+          state: context.activeStageContext.state,
+          goal: context.activeStageContext.goal,
+          revision: context.activeStageContext.revision,
+          expiresAt: context.activeStageContext.expiresAt,
+        }
+      : null,
   }
 }
 
@@ -600,6 +642,43 @@ interface InferredChatRoute {
   override?: IntentOverride
   responseStrategy: CompanionResponseStrategy
   companionSignals: CompanionPreferenceSignal[]
+  stageContextProposal?: StageContextProposal
+}
+
+function normalizeStageContextProposal(value: unknown, context: ChatIntentContext): StageContextProposal | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const input = value as Record<string, unknown>
+  const operation = enumValue(input.operation, new Set(['none', 'create', 'update', 'end'] as const))
+  if (!operation) return undefined
+  const kind = enumValue(input.kind, new Set(['work', 'rest', 'commute', 'sleep', 'exercise', 'emotional_support', 'other'] as const))
+  const goal = enumValue(input.goal, new Set(['focus', 'recover', 'settle', 'energize', 'companionship', 'sleep', 'none'] as const))
+  const ttlClass = enumValue(input.ttlClass, new Set(['short', 'day', 'multi_day'] as const))
+  const confidence = Math.max(0, Math.min(1, numberValue(input.confidence) ?? 0))
+  const evidenceConversationIds = Array.isArray(input.evidenceConversationIds)
+    ? input.evidenceConversationIds.map(Number).filter((id) => Number.isInteger(id) && id === context.currentConversationId)
+    : context.currentConversationId ? [context.currentConversationId] : []
+  const rawState = input.statePatch && typeof input.statePatch === 'object' && !Array.isArray(input.statePatch)
+    ? input.statePatch as Record<string, unknown>
+    : {}
+  const statePatch: StageContextProposal['statePatch'] = {}
+  const emotion = enumValue(rawState.emotion, new Set(['neutral', 'tired', 'irritated', 'low', 'anxious', 'calm', 'positive', 'unknown'] as const))
+  const energy = enumValue(rawState.energy, new Set(['low', 'medium', 'high', 'unknown'] as const))
+  const interactionPreference = enumValue(rawState.interactionPreference, new Set(['talk', 'music', 'quiet', 'unknown'] as const))
+  const safety = enumValue(rawState.safety, new Set(['normal', 'caution'] as const))
+  if (emotion) statePatch.emotion = emotion
+  if (energy) statePatch.energy = energy
+  if (interactionPreference) statePatch.interactionPreference = interactionPreference
+  if (safety) statePatch.safety = safety
+  return {
+    operation,
+    kind,
+    summary: stringValue(input.summary)?.slice(0, 120),
+    statePatch,
+    goal,
+    confidence,
+    ttlClass,
+    evidenceConversationIds,
+  }
 }
 
 function parseChatRouteContent(content: string, text: string, context: ChatIntentContext): InferredChatRoute | null {
@@ -638,7 +717,7 @@ function parseChatRouteContent(content: string, text: string, context: ChatInten
     )
     ? parsedSeedTitle
     : undefined
-  const targetCount = Math.max(1, Math.min(5, Math.floor(numberValue(parsed.targetCount) ?? 1)))
+  const targetCount = Math.max(1, Math.min(MAX_RECOMMENDATION_COUNT, Math.floor(numberValue(parsed.targetCount) ?? 1)))
   const continuationTarget = normalizeContinuationTarget(parsed.continuationTarget, context)
   const pendingTasteAction = continuationTarget === 'taste_question'
     ? normalizePendingTasteAction(parsed.pendingTasteAction)
@@ -666,6 +745,7 @@ function parseChatRouteContent(content: string, text: string, context: ChatInten
   const energy = enumValue(parsed.energy, new Set(['low', 'medium', 'high'] as const))
   const tempo = enumValue(parsed.tempo, new Set(['slow', 'medium', 'fast'] as const))
   const familiarity = enumValue(parsed.familiarity, new Set(['safe', 'explore', 'balanced'] as const))
+  const ranking = enumValue(parsed.ranking, ROUTER_RANKINGS)
   const rejectIf = normalizeRouterRejectIf(parsed.rejectIf)
   if (language) override.language = language
   if (moods) override.moods = moods
@@ -673,6 +753,7 @@ function parseChatRouteContent(content: string, text: string, context: ChatInten
   if (energy) override.energy = energy
   if (tempo) override.tempo = tempo
   if (familiarity) override.familiarity = familiarity
+  if (ranking) override.ranking = ranking
   if (rejectIf) override.rejectIf = rejectIf
   if (artistQuery) override.artistQuery = artistQuery
   if (seedTitle) override.seedTitle = seedTitle
@@ -731,6 +812,7 @@ function parseChatRouteContent(content: string, text: string, context: ChatInten
     brief: context.companionResponseBrief,
   })
   const companionSignals = normalizeCompanionSignals(parsed.companionSignals, text)
+  const stageContextProposal = normalizeStageContextProposal(parsed.stageContextProposal, context)
   return {
     kind: normalizedKind,
     confidence,
@@ -743,6 +825,7 @@ function parseChatRouteContent(content: string, text: string, context: ChatInten
     override: validatedOverride,
     responseStrategy,
     companionSignals,
+    stageContextProposal,
   }
 }
 
@@ -783,7 +866,7 @@ async function inferChatRouteWithLlm(text: string, signal?: AbortSignal, context
 - pending_reply: 用户在回答上下文里的待确认问题或承接上一轮音乐结果。
 
 输出格式:
-{"kind":"mood_request","wantsMusic":true,"confidence":0.92,"artistQuery":null,"seedTitle":null,"targetCount":1,"language":null,"moods":[],"scenes":[],"energy":null,"tempo":null,"familiarity":"balanced","rejectIf":null,"feedbackAction":null,"outOfScopeTopic":null,"continuationTarget":null,"pendingTasteAction":null,"clarificationReason":null,"evidence":["原文短词"],"responseStrategy":{"mode":"warm_care","warmth":0.8,"playfulness":0.1,"directness":0.5,"initiative":"play_music","verbosity":"normal","vulnerability":"medium","reasonCodes":["current_vulnerability"]},"companionSignals":[]}
+{"kind":"mood_request","wantsMusic":true,"confidence":0.92,"artistQuery":null,"seedTitle":null,"targetCount":1,"language":null,"moods":[],"scenes":[],"energy":null,"tempo":null,"familiarity":"balanced","ranking":"default","rejectIf":null,"feedbackAction":null,"outOfScopeTopic":null,"continuationTarget":null,"pendingTasteAction":null,"clarificationReason":null,"evidence":["原文短词"],"responseStrategy":{"mode":"warm_care","warmth":0.8,"playfulness":0.1,"directness":0.5,"initiative":"play_music","verbosity":"normal","vulnerability":"medium","reasonCodes":["current_vulnerability"]},"companionSignals":[],"stageContextProposal":{"operation":"create","kind":"work","summary":"今晚在加班","statePatch":{"emotion":"tired","energy":"low","interactionPreference":"music","safety":"normal"},"goal":"focus","confidence":0.9,"ttlClass":"day","evidenceConversationIds":[123]}}
 
 规则:
 1. 纯粹说心情,例如“我累了”“我有点烦”,kind 填 casual_chat,wantsMusic:false。
@@ -793,7 +876,7 @@ async function inferChatRouteWithLlm(text: string, signal?: AbortSignal, context
 5. “歌曲吧/歌吧/音乐吧/作品吧”是泛指词,不能当歌名。
 6. 不确定歌名就 seedTitle:null,不要猜。
 6.1 欢快、轻快、舒缓、治愈、类型、风格、儿歌等词描述用户想要的音乐；它们填入 moods/scenes/energy/tempo 等条件,artistQuery 和 seedTitle 填 null。只有用户用《》或“这首歌”明确标记时才可视为歌名。
-7. targetCount 默认 1,“几首”填 3,最多 5。
+7. targetCount 默认 1,“几首”填 3,最多 10。
 8. 用户说“这首不好听”“刚才那首不对”“换一首激情一点的”,并且确实指当前播放,kind 填 feedback_current_track,feedbackAction 填 not_right 或 skip。
 9. 用户说“我喜欢王菲的《主角》”“王菲的主角这首歌我喜欢”“我喜欢陈奕迅的冷夜”,这是偏好表达,kind 填 casual_chat,wantsMusic:false,artistQuery/seedTitle 仍要抽取。
 10. 句子里同时有当前指代和明确歌手/歌名时,优先相信明确歌手/歌名；只有它和当前播放一致时才算 feedback_current_track。
@@ -807,11 +890,16 @@ async function inferChatRouteWithLlm(text: string, signal?: AbortSignal, context
 18. 激昂、热血、带感、节奏感强对应 moods:["清醒","热烈"],energy:"high",tempo:"fast",rejectIf.minEnergy 至少 0.55。
 19. 舒缓、睡前、安静、慢一点、温暖、暖一点对应 energy:"low",tempo:"slow",moods 可用 ["治愈","陪伴"],rejectIf.maxEnergy 不超过 0.78。
 20. 用户上一句明确说了歌手或歌名,你刚问“要不要我挑一首”,用户回答“你帮我挑一首”“那你选一首”,要继承上一轮用户说出的实体并执行音乐动作。
+20.1 context.musicSession 有 artistQuery，且 intentKind 不是 similar_to_track 时，用户用“那你/再/继续/接着”承接并继续要歌，且本轮没有提出新歌手，才继承该 artistQuery。例如上一轮是 artist_request 陈默之，下一句“那你随便推荐几首热度高的”仍是陈默之，并填 ranking:"popular"。similar_to_track 中的 artistQuery 只是参照信息，不能继承成歌手限定。
 21. 用户想点具体歌曲但缺少关键实体时,kind 填 clarification_needed。歌名有歧义填 ambiguous_direct_song；有歌名但缺歌手填 missing_artist；“放那个”“来刚才说的”且上下文无法确认填 unclear_reference。
 22. responseStrategy 必须结合当前原话、companionProfile、previousResponseStrategy、最近对话和 companionResponseBrief。它是表达策略,不写最终回复。
 23. mode 可选 warm_care、playful_tease、practical、quiet_company、celebrate、clarify、serious_care。用户脆弱、重大失落或身体风险时降低 playfulness；自伤或紧急身体风险时 mode=serious_care,vulnerability=high,playfulness=0。
 24. companionSignals 只提取用户对相处方式的明确表达或对上一条回复的直接评价。dimension 可选 warmth、playfulness、directness、initiative、verbosity；direction 填 more 或 less；evidence 必须逐字来自本轮 input。普通情绪和沉默不形成长期偏好。
 25. “你可以损我”“别调侃我”“直接点”“少说点”属于明确相处偏好，explicit:true。用户评价“你刚才那样说挺好/我不喜欢你刚才的语气”时，结合 previousResponseStrategy 判断具体 dimension，证据仍引用本轮原话。
+26. stageContextProposal 只描述用户当前阶段，不描述长期人格。普通闲聊填 operation:none；明确开始一个阶段填 create；延续或改变当前阶段填 update；“缓过来了/结束了/别再把我当成很累”填 end。
+27. kind 可选 work、rest、commute、sleep、exercise、emotional_support、other；goal 可选 focus、recover、settle、energize、companionship、sleep、none。只有明确“这几天”等跨天表达才用 multi_day。
+28. evidenceConversationIds 只能填写 context.currentConversationId。不要生成 id，不要指定绝对时间。
+29. “最新/新歌/最近发行”填 ranking:"latest"；“热门/热度高/最火/人气高”填 ranking:"popular"；否则填 ranking:"default"。
 
 例子:
 - 你随便来一首陈奕迅的歌曲吧 → {"kind":"artist_request","wantsMusic":true,"confidence":0.96,"artistQuery":"陈奕迅","seedTitle":null,"targetCount":1,"evidence":["随便","陈奕迅","歌曲"]}
@@ -887,7 +975,8 @@ function hasExplicitMusicExecutionCue(text: string, route: InferredChatRoute): b
     || route.override?.scenes?.length
     || route.override?.energy
     || route.override?.tempo
-    || route.override?.language,
+    || route.override?.language
+    || (route.override?.ranking && route.override.ranking !== 'default')
   )
   const hasSceneOrFitSelection = (route.kind === 'scene_request' || hasStructuredSemantics)
     && SCENE_OR_FIT_SELECTION_PATTERN.test(text)
@@ -897,6 +986,7 @@ function hasExplicitMusicExecutionCue(text: string, route: InferredChatRoute): b
     || MUSIC_EXECUTION_QUESTION_PATTERN.test(text)
     || MUSIC_FIT_REQUEST_PATTERN.test(text)
     || COLLOQUIAL_MUSIC_REQUEST_PATTERN.test(text)
+    || (route.override?.ranking !== undefined && route.override.ranking !== 'default' && MUSIC_ACTION_PATTERN.test(text))
     || hasSceneOrFitSelection
     || (hasStructuredEntity && /推(?:荐)?|挑|选|来|找|放|听|播放|分享|整|安排|搞|弄|类似|像|相似/.test(text))
     || (hasStructuredEntity && /适合|合适|贴合|配|这个时候|这会儿|这会|现在|此刻|当下/.test(text))
@@ -970,6 +1060,7 @@ function applyInferredChatRoute(intent: ChatIntent, route: InferredChatRoute, co
     pendingTasteAction: route.pendingTasteAction,
     responseStrategy: route.responseStrategy,
     companionSignals: route.companionSignals,
+    stageContextProposal: route.stageContextProposal,
   }
 }
 

@@ -86,6 +86,50 @@ describe('recommendation intent entity inference boundaries', () => {
     }
   })
 
+  it('turns artist latest and popularity wording into deterministic ranking intents', () => {
+    const latest = parseIntent('听听陈默之的最新几首歌')
+    const popular = parseIntent('那你随便推荐几首热度高的')
+
+    expect(latest).toMatchObject({ artistQuery: '陈默之', targetCount: 3, ranking: 'latest' })
+    expect(popular).toMatchObject({ targetCount: 3, ranking: 'popular' })
+  })
+
+  it('orders latest artist candidates by full publish time and preserves hot source order', () => {
+    const tracks: Track[] = [
+      { title: '旧歌', artist: '陈默之', publishedAt: '2025-01-03T00:00:00.000Z' },
+      { title: '新歌', artist: '陈默之', publishedAt: '2026-08-01T00:00:00.000Z' },
+      { title: '未知时间', artist: '陈默之' },
+    ]
+    const latestIntent = parseIntent('陈默之最新的歌')
+    const popularIntent = parseIntent('陈默之热度高的歌')
+
+    expect(recommendationTestHelpers.orderedArtistCandidates(tracks, latestIntent, 'seed').map((track) => track.title))
+      .toEqual(['新歌', '旧歌', '未知时间'])
+    expect(recommendationTestHelpers.orderedArtistCandidates(tracks, popularIntent, 'seed').map((track) => track.title))
+      .toEqual(['旧歌', '新歌', '未知时间'])
+  })
+
+  it('fills an artist request from lower-priority pools without displacing fresher candidates', () => {
+    const fresh: Track[] = [{ id: 'fresh', title: '全新候选', artist: '陈默之' }]
+    const withoutHardCooldown: Track[] = [
+      { id: 'recent', title: '近期推荐过', artist: '陈默之' },
+      ...fresh,
+    ]
+    const allCandidates: Track[] = [
+      { id: 'hard', title: '最终兜底', artist: '陈默之' },
+      ...withoutHardCooldown,
+    ]
+    const intent = parseIntent('推荐10首陈默之热度高的歌')
+
+    const merged = recommendationTestHelpers.mergeOrderedArtistCandidatePools(
+      [fresh, withoutHardCooldown, allCandidates],
+      intent,
+      'seed',
+    )
+
+    expect(merged.map((track) => track.title)).toEqual(['全新候选', '近期推荐过', '最终兜底'])
+  })
+
   it('keeps colloquial vague discovery wording out of artist extraction', () => {
     const parsed = parseIntent('给我整点好听的')
 

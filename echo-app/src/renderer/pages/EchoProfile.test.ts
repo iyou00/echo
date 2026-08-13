@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { profileChangeSectionCopy, profileEnergyLine, profileSignatureItemVisible, profileTrendLines, profileWeightDisplay, tempoPreferenceDisplay } from './echoProfileDisplay'
+import { normalizeProfileMoodFilter, profileChangeSectionCopy, profileEnergyLine, profileItemIsPositiveDisplaySignal, profileSignatureItemVisible, profileTrendLines, profileWeightDisplay, tempoPreferenceDisplay } from './echoProfileDisplay'
 
 describe('EchoProfile display math', () => {
   it('keeps genre percentages aligned with profile weights', () => {
@@ -146,5 +146,21 @@ describe('EchoProfile display math', () => {
       evidenceLevel: 'strong',
       source: 'favorite',
     })).toBe(true)
+  })
+
+  it('keeps explicit misses out of positive profile sections', () => {
+    expect(profileItemIsPositiveDisplaySignal({
+      evidenceLevel: 'strong',
+      source: 'explicit_miss',
+    })).toBe(false)
+    expect(profileItemIsPositiveDisplaySignal({
+      evidenceLevel: 'medium',
+      source: 'played',
+    })).toBe(true)
+  })
+
+  it('returns to all songs when a refreshed profile no longer has the selected mood', () => {
+    expect(normalizeProfileMoodFilter('晚上工作', ['晚上工作', '回家路上'])).toBe('晚上工作')
+    expect(normalizeProfileMoodFilter('晚上工作', ['放松发呆', '回家路上'])).toBe('all')
   })
 })

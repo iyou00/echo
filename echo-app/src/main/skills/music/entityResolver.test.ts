@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isMusicDescriptorPhrase, resolveMusicEntitiesFromText } from './entityResolver'
+import { isMusicDescriptorPhrase, parseMusicRequestCount, resolveMusicEntitiesFromText } from './entityResolver'
 
 describe('music entity descriptor validation', () => {
   it.each([
@@ -31,5 +31,25 @@ describe('music entity descriptor validation', () => {
   it('recognizes combined recommendation descriptors', () => {
     expect(isMusicDescriptorPhrase('找欢快类型的歌曲')).toBe(true)
     expect(isMusicDescriptorPhrase('王菲')).toBe(false)
+  })
+
+  it('keeps an explicit request for ten tracks instead of silently truncating to five', () => {
+    expect(parseMusicRequestCount('再来10首陈默之的歌曲吧')).toEqual({
+      requestedCount: 10,
+      targetCount: 10,
+      overLimit: false,
+      explicit: true,
+    })
+    expect(resolveMusicEntitiesFromText('再来10首陈默之的歌曲吧')).toMatchObject({
+      artistQuery: '陈默之',
+      targetCount: 10,
+    })
+  })
+
+  it('extracts the artist from a latest-tracks request', () => {
+    const resolved = resolveMusicEntitiesFromText('听听陈默之的最新几首歌')
+
+    expect(resolved.artistQuery).toBe('陈默之')
+    expect(resolved.targetCount).toBe(3)
   })
 })

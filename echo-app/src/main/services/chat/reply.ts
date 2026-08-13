@@ -4,6 +4,8 @@ import { appendConversation } from '../../db/conversations'
 import { appendRecommendedTracks } from '../../db/tracks'
 import { assertAssistantReplyInputContract, assertSendChatResultContract, enforceAssistantTrackBinding } from './pipelineContract'
 import type { CompanionResponseStrategy } from './companionTypes'
+import { loadActiveStageContext } from '../../domain/stageContext/repository'
+import { beginAgentAction, completeAgentAction, failAgentAction } from '../../domain/agentAction/service'
 
 export type ChatRuntimeEmit = (channel: string, payload: unknown) => void
 
@@ -23,19 +25,39 @@ export function appendAssistantReply(options: AssistantReplyOptions): SendChatRe
   const tracks = options.tracks ?? []
   const content = enforceAssistantTrackBinding(options.content, tracks, options.expectsMusicAction ?? false)
   assertAssistantReplyInputContract(content, tracks)
-  if (options.persistTracks) appendRecommendedTracks(tracks)
-  const message = appendConversation('assistant', content, tracks, { responseStrategy: options.responseStrategy })
-  const payload = {
-    message,
-    tracks,
-    durationMs: options.durationMs ?? 0,
-    ...(options.hints ? { hints: options.hints } : {}),
-  }
-  if (options.sender && !options.sender.isDestroyed()) options.sender.send('chat:stream:end', payload)
-  options.runtimeEmit?.('runtime:chat-stream-end', payload)
-  return assertSendChatResultContract({
-    message,
-    tracks,
-    ...(options.hints ? { hints: options.hints } : {}),
+  const stageContext = loadActiveStageContext()
+  const action = beginAgentAction({
+    origin: 'chat',
+    actionType: 'reply',
+    reasonCode: stageContext?.goal === 'companionship' ? 'context_companionship' : 'user_request',
+    goalCode: stageContext?.goal ?? 'none',
+    stageContextId: stageContext?.id,
+    stageContextRevision: stageContext?.revision,
+    items: [
+      { itemType: 'message', ordinal: 0, payload: { characterCount: content.length } },
+      ...tracks.map((track, index) => ({ itemType: 'track' as const, ordinal: index + 1, entityKey: `${track.id ?? track.neteaseId ?? ''}:${track.title}:${track.artist}`, payload: { title: track.title, artist: track.artist } })),
+    ],
+    decision: { policyVersion: 1, expectsMusicAction: options.expectsMusicAction ?? false },
   })
+  try {
+    if (options.persistTracks) appendRecommendedTracks(tracks)
+    const message = appendConversation('assistant', content, tracks, { responseStrategy: options.responseStrategy })
+    const payload = {
+      message,
+      tracks,
+      durationMs: options.durationMs ?? 0,
+      ...(options.hints ? { hints: options.hints } : {}),
+    }
+    if (options.sender && !options.sender.isDestroyed()) options.sender.send('chat:stream:end', payload)
+    options.runtimeEmit?.('runtime:chat-stream-end', payload)
+    completeAgentAction(action)
+    return assertSendChatResultContract({
+      message,
+      tracks,
+      ...(options.hints ? { hints: options.hints } : {}),
+    })
+  } catch (error) {
+    failAgentAction(action, 'reply_delivery_failed')
+    throw error
+  }
 }

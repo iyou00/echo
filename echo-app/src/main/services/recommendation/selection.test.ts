@@ -27,6 +27,7 @@ const intent: RecommendationIntent = {
   moods: [],
   scenes: [],
   familiarity: 'balanced',
+  ranking: 'default',
   query: '推荐一首',
   rejectIf: {},
   source: 'rules',

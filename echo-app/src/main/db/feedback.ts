@@ -162,12 +162,30 @@ export function recordExplicitTrackFeedback(action: ExplicitTrackFeedbackAction,
   const db = getDb()
   const key = feedbackTrackKey(track)
   db.transaction(() => {
-    db
+    const eventResult = db
       .prepare(`
-        INSERT INTO track_feedback_events (user_id, track_key, action, context, title, artist, album, source, track_json)
-        VALUES (current_user_id(), ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO track_feedback_events (
+          user_id, track_key, action, context, title, artist, album, source, track_json,
+          agent_action_id, agent_action_item_id
+        ) VALUES (current_user_id(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
-      .run(key, action, context ?? '', track.title, track.artist, track.album ?? '', track.source ?? '', JSON.stringify(track))
+      .run(key, action, context ?? '', track.title, track.artist, track.album ?? '', track.source ?? '', JSON.stringify(track),
+        track.agentActionId ?? null, track.agentActionItemId ?? null)
+
+    if (track.agentActionId) {
+      db.prepare(`
+        INSERT OR IGNORE INTO agent_action_outcomes (
+          user_id, action_id, action_item_id, source_event_key, outcome_type, polarity, strength, occurred_at, metadata_json
+        ) VALUES (current_user_id(), ?, ?, ?, ?, ?, 'strong', CURRENT_TIMESTAMP, ?)
+      `).run(
+        track.agentActionId,
+        track.agentActionItemId ?? null,
+        `explicit_feedback:${String(eventResult.lastInsertRowid)}`,
+        action === 'more_like_this' ? 'explicit_like' : 'explicit_miss',
+        action === 'more_like_this' ? 'positive' : 'negative',
+        JSON.stringify({ userAgency: 'active' }),
+      )
+    }
 
     db
       .prepare(`

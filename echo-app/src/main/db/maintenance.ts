@@ -3,6 +3,8 @@ import { getStoredSettingsRaw, updateSettingsSilent } from './settings'
 import { removeLegacyAbsentYinyi } from './yinyi'
 
 const PRUNE_TABLES: Array<{ table: string; dateColumn: string; retentionDays: number; extraWhere?: string }> = [
+  { table: 'agent_actions', dateColumn: 'planned_at', retentionDays: 180, extraWhere: "AND status IN ('succeeded', 'failed', 'canceled')" },
+  { table: 'stage_contexts', dateColumn: 'updated_at', retentionDays: 90, extraWhere: "AND status IN ('ended', 'expired')" },
   { table: 'listening_segments', dateColumn: 'generated_at', retentionDays: 60 },
   { table: 'listening_sessions', dateColumn: 'last_active_at', retentionDays: 60 },
   { table: 'tracks_listened', dateColumn: 'listened_at', retentionDays: 60 },

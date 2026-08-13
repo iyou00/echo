@@ -7,6 +7,7 @@ import { musicSearchTestHelpers } from '../../skills/music/search'
 import type { Track } from '../../../types/ipc'
 import {
   clearChatMusicSession,
+  getChatMusicSessionSnapshot,
   inferSessionAffirmationAction,
   rememberChatMusicSession,
   resolveSessionMusicFollowUp,
@@ -454,6 +455,112 @@ describe('chat weak memory signal boundaries', () => {
     expect(inherited?.routeSource).toBe('llm')
   })
 
+  it('inherits the active music-session artist for a popularity follow-up', () => {
+    const context = {
+      musicSession: {
+        sourceText: '听听陈默之的最新几首歌',
+        artistQuery: '陈默之',
+        tracks: [{ title: '沉溺', artist: '陈默之' }],
+      },
+      recentDialog: [
+        { role: 'user' as const, content: '听听陈默之的最新几首歌' },
+        { role: 'assistant' as const, content: '先放这几首。' },
+      ],
+    }
+    const route = chatIntentTestHelpers.parseChatRouteContent(
+      '{"kind":"artist_request","wantsMusic":true,"confidence":0.96,"artistQuery":"陈默之","seedTitle":null,"targetCount":3,"ranking":"popular","evidence":["承接上一轮","热度高"]}',
+      '那你随便推荐几首热度高的',
+      context,
+    )
+    const intent = chatIntentTestHelpers.resolveInferredChatRoute('那你随便推荐几首热度高的', route, context)
+
+    expect(intent).toMatchObject({
+      kind: 'artist_request',
+      artistQuery: '陈默之',
+      targetCount: 3,
+    })
+    expect(intent?.recommendationIntent.ranking).toBe('popular')
+  })
+
+  it('recovers the active music-session artist when the llm omits it', () => {
+    const context = {
+      musicSession: {
+        sourceText: '听听陈默之的最新几首歌',
+        artistQuery: '陈默之',
+        tracks: [{ title: '沉溺', artist: '陈默之' }],
+      },
+    }
+    const route = chatIntentTestHelpers.parseChatRouteContent(
+      '{"kind":"mood_request","wantsMusic":true,"confidence":0.92,"artistQuery":null,"seedTitle":null,"targetCount":3,"ranking":"popular","evidence":["热度高"]}',
+      '那你随便推荐几首热度高的',
+      context,
+    )
+    const intent = chatIntentTestHelpers.resolveInferredChatRoute('那你随便推荐几首热度高的', route, context)
+
+    expect(intent).toMatchObject({ kind: 'artist_request', artistQuery: '陈默之', targetCount: 3 })
+    expect(intent?.recommendationIntent.ranking).toBe('popular')
+  })
+
+  it('does not inherit a session artist for a standalone discovery request', () => {
+    const context = {
+      musicSession: {
+        sourceText: '听听陈默之的最新几首歌',
+        intentKind: 'artist_request',
+        artistQuery: '陈默之',
+        tracks: [{ title: '沉溺', artist: '陈默之' }],
+      },
+    }
+    const route = chatIntentTestHelpers.parseChatRouteContent(
+      '{"kind":"mood_request","wantsMusic":true,"confidence":0.92,"artistQuery":null,"seedTitle":null,"targetCount":3,"ranking":"popular","evidence":["热度高"]}',
+      '随便推荐几首热度高的',
+      context,
+    )
+    const intent = chatIntentTestHelpers.resolveInferredChatRoute('随便推荐几首热度高的', route, context)
+
+    expect(intent).toMatchObject({ kind: 'mood_request', artistQuery: undefined, targetCount: 3 })
+    expect(intent?.recommendationIntent.ranking).toBe('popular')
+  })
+
+  it('does not turn a similarity-reference artist into a follow-up artist constraint', () => {
+    const context = {
+      musicSession: {
+        sourceText: '推荐几首像周深《大鱼》这样的歌',
+        intentKind: 'similar_to_track',
+        artistQuery: '周深',
+        seedTitle: '大鱼',
+        tracks: [{ title: '不染', artist: '毛不易' }],
+      },
+    }
+    const route = chatIntentTestHelpers.parseChatRouteContent(
+      '{"kind":"mood_request","wantsMusic":true,"confidence":0.92,"artistQuery":"周深","seedTitle":null,"targetCount":3,"ranking":"popular","evidence":["承接上一轮","热度高"]}',
+      '那再来几首热度高的',
+      context,
+    )
+    const intent = chatIntentTestHelpers.resolveInferredChatRoute('那再来几首热度高的', route, context)
+
+    expect(intent).toMatchObject({ kind: 'mood_request', artistQuery: undefined, targetCount: 3 })
+    expect(intent?.recommendationIntent.ranking).toBe('popular')
+  })
+
+  it('prefers a newly named artist over the active music-session artist', () => {
+    const context = {
+      musicSession: {
+        sourceText: '听听陈默之的最新几首歌',
+        artistQuery: '陈默之',
+        tracks: [{ title: '沉溺', artist: '陈默之' }],
+      },
+    }
+    const route = chatIntentTestHelpers.parseChatRouteContent(
+      '{"kind":"mood_request","wantsMusic":true,"confidence":0.92,"artistQuery":null,"seedTitle":null,"targetCount":3,"ranking":"popular","evidence":["热度高"]}',
+      '那你推荐几首周杰伦热度高的歌',
+      context,
+    )
+    const intent = chatIntentTestHelpers.resolveInferredChatRoute('那你推荐几首周杰伦热度高的歌', route, context)
+
+    expect(intent).toMatchObject({ kind: 'artist_request', artistQuery: '周杰伦', targetCount: 3 })
+    expect(intent?.artistQuery).not.toBe('陈默之')
+  })
+
   it('arms session search for natural assistant offers to pick or find a track', () => {
     for (const reply of [
       '你想先试哪一首，还是我来找一首开始放？',
@@ -485,6 +592,49 @@ describe('chat weak memory signal boundaries', () => {
         expect(followUp.query).toContain('陈默之')
         expect(followUp.excludeTracks.map((track) => track.title)).toEqual(['沉溺'])
       }
+    } finally {
+      clearChatMusicSession()
+    }
+  })
+
+  it('keeps similarity follow-ups anchored to the original request instead of its artist', () => {
+    rememberChatMusicSession({
+      sourceText: '推荐几首像周深《大鱼》这样的歌',
+      intentKind: 'similar_to_track',
+      artistQuery: '周深',
+      seedTitle: '大鱼',
+      tracks: [{ title: '不染', artist: '毛不易', source: 'netease' }],
+    })
+
+    try {
+      expect(getChatMusicSessionSnapshot()?.intentKind).toBe('similar_to_track')
+      const followUp = resolveSessionMusicFollowUp('那再来几首')
+      expect(followUp.kind).toBe('search')
+      if (followUp.kind === 'search') {
+        expect(followUp.query).toContain('推荐几首像周深《大鱼》这样的歌')
+        expect(followUp.query).not.toContain('推荐周深的歌')
+      }
+    } finally {
+      clearChatMusicSession()
+    }
+  })
+
+  it('keeps all ten recommendations addressable in the music session', () => {
+    const tracks = Array.from({ length: 10 }, (_, index) => ({
+      title: `第${index + 1}首歌`,
+      artist: '陈默之',
+      source: 'netease',
+    }))
+    rememberChatMusicSession({
+      sourceText: '再来10首陈默之的歌曲吧',
+      intentKind: 'artist_request',
+      artistQuery: '陈默之',
+      tracks,
+    })
+
+    try {
+      const followUp = resolveSessionMusicFollowUp('第10首')
+      expect(followUp).toMatchObject({ kind: 'play_track', track: { title: '第10首歌', artist: '陈默之' } })
     } finally {
       clearChatMusicSession()
     }

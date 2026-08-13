@@ -52,7 +52,7 @@ notes 数量必须是 ${selected.length}。理由要具体,每首理由要有差
         role: 'user',
         content: safePromptJson(promptData),
       },
-    ], { temperature: 0, signal, maxTokens: 200 })
+    ], { temperature: 0, signal, maxTokens: Math.min(500, 120 + selected.length * 32) })
     assertSelectionActive(signal)
     const parsed = parseJsonObject(content)
     const notes = Array.isArray(parsed?.notes) ? parsed.notes.map(String) : []

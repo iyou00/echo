@@ -85,7 +85,10 @@ export function normalizeNeteaseTrack(item: unknown): Track | null {
     .filter(Boolean)
   const album = asObject(raw.al ?? raw.album)
   const publishTime = Number(raw.publishTime ?? 0)
-  const year = publishTime > 0 ? new Date(publishTime).getFullYear() : undefined
+  const publishDate = Number.isFinite(publishTime) && publishTime > 0 ? new Date(publishTime) : undefined
+  const validPublishDate = publishDate && Number.isFinite(publishDate.getTime()) ? publishDate : undefined
+  const year = validPublishDate?.getFullYear()
+  const publishedAt = validPublishDate?.toISOString()
   const title = String(raw.name ?? '')
   if (!title || artists.length === 0) return null
   return {
@@ -94,6 +97,7 @@ export function normalizeNeteaseTrack(item: unknown): Track | null {
     artist: artists.join(' / '),
     album: typeof album.name === 'string' ? album.name : undefined,
     year,
+    publishedAt,
     source: 'netease',
   }
 }

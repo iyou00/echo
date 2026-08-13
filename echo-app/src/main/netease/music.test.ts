@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Track } from '../../types/ipc'
-import { neteaseMusicTestHelpers } from './music'
+import { neteaseMusicTestHelpers, normalizeNeteaseTrack } from './music'
 
 function track(id: string): Track {
   return {
@@ -48,4 +48,36 @@ describe('netease playable filtering', () => {
     expect(result.tracks.map((item) => item.id)).toEqual(['1', '3'])
     expect(result.failCount).toBe(1)
   })
+})
+
+describe('netease track normalization', () => {
+  it('keeps a valid publish time for latest-song ordering', () => {
+    const normalized = normalizeNeteaseTrack({
+      id: 1,
+      name: '新歌',
+      ar: [{ name: '陈默之' }],
+      publishTime: Date.UTC(2026, 7, 1),
+    })
+
+    expect(normalized).toMatchObject({
+      year: 2026,
+      publishedAt: '2026-08-01T00:00:00.000Z',
+    })
+  })
+
+  it.each([Number.POSITIVE_INFINITY, Number.NaN, 9e15, -1])(
+    'ignores an invalid publish time without rejecting the track: %s',
+    (publishTime) => {
+      const normalized = normalizeNeteaseTrack({
+        id: 1,
+        name: '时间未知的歌',
+        ar: [{ name: '陈默之' }],
+        publishTime,
+      })
+
+      expect(normalized).toMatchObject({ title: '时间未知的歌', artist: '陈默之' })
+      expect(normalized?.year).toBeUndefined()
+      expect(normalized?.publishedAt).toBeUndefined()
+    },
+  )
 })

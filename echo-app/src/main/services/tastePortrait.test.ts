@@ -12,6 +12,17 @@ describe('taste portrait boundaries', () => {
     expect(tasteTestHelpers.profileTrackAgencyFactor({}, 'recommended_by_echo')).toBe(0.4)
   })
 
+  it('requires a real outcome for new Agent-owned positive profile evidence', () => {
+    const events: ProfileTrackEvent[] = [
+      { track: { title: '未播放推荐', artist: 'Echo', agentActionItemId: 'pending-item' }, listenedAt: '2026-08-12T10:00:00.000Z', source: 'recommended_by_echo', queueStatus: 'completed' },
+      { track: { title: '真实听完', artist: 'Echo', agentActionItemId: 'completed-item' }, listenedAt: '2026-08-12T10:10:00.000Z', source: 'recommended_by_echo', queueStatus: 'completed' },
+      { track: { title: '明确跳过', artist: 'Echo', agentActionItemId: 'skipped-item' }, listenedAt: '2026-08-12T10:20:00.000Z', source: 'recommended_by_echo', queueStatus: 'skipped' },
+      { track: { title: '升级前历史', artist: 'Echo' }, listenedAt: '2026-08-11T10:00:00.000Z', source: 'recommended_by_echo', queueStatus: 'completed' },
+    ]
+    const filtered = tasteTestHelpers.filterProfileEventsByActionOutcome(events, new Set(['completed-item']))
+    expect(filtered.map((event) => event.track.title)).toEqual(['真实听完', '明确跳过', '升级前历史'])
+  })
+
   it('keeps the last published portrait when a replacement has hard issues', () => {
     const profile = {
       echo_portrait: '这是已经发布且通过检查的画像。',

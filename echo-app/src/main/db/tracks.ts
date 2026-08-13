@@ -16,6 +16,9 @@ export interface TodayTrackEvent {
   recommendSource?: string
   reason?: string
   sourceContext?: Track['sourceContext']
+  agentActionId?: string
+  agentActionItemId?: string
+  playbackInstanceId?: string
 }
 
 export interface ProfileTrackEvent {
@@ -102,6 +105,9 @@ function toTodayTrackEvent(typed: TrackEventRow): TodayTrackEvent {
     recommendSource: parsed?.recommendSource,
     reason: parsed?.reason,
     sourceContext: parsed?.sourceContext,
+    agentActionId: parsed?.agentActionId,
+    agentActionItemId: parsed?.agentActionItemId,
+    playbackInstanceId: parsed?.playbackInstanceId,
   }
 }
 
@@ -495,6 +501,10 @@ export function updateRecommendedTrackStatus(track: Track, status: NonNullable<T
   const parsed = parseJson<Track>(target.meta_json, track, 'tracks_listened.meta_json')
   const next: Track = {
     ...parsed,
+    agentActionId: track.agentActionId ?? parsed.agentActionId,
+    agentActionItemId: track.agentActionItemId ?? parsed.agentActionItemId,
+    stageContextId: track.stageContextId ?? parsed.stageContextId,
+    playbackInstanceId: track.playbackInstanceId ?? parsed.playbackInstanceId,
     queueStatus: status,
     queueStatusReason: reason,
     queueStatusAt: new Date().toISOString(),

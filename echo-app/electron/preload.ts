@@ -146,6 +146,13 @@ const echoApi: EchoApi = {
       return () => ipcRenderer.off('scene:changed', wrapped)
     },
   },
+  stageContext: {
+    getActive: () => invoke('stageContext:getActive'),
+    end: () => invoke('stageContext:end'),
+    correct: (input) => invoke('stageContext:correct', input),
+    delete: (id) => invoke('stageContext:delete', id),
+    recentActions: (limit) => invoke('stageContext:recentActions', limit),
+  },
   semantics: {
     buildForImportedTracks: () => invoke('semantics:buildForImportedTracks'),
     getSummary: () => invoke('semantics:getSummary'),
@@ -169,8 +176,8 @@ const echoApi: EchoApi = {
   playback: {
     play: (track, options) => invoke('playback:play', track, options),
     enqueue: (track) => invoke('playback:enqueue', track),
-    next: () => invoke('playback:next'),
-    finishCurrent: () => invoke('playback:finishCurrent'),
+    next: (playbackInstanceId) => invoke('playback:next', playbackInstanceId),
+    finishCurrent: (playbackInstanceId) => invoke('playback:finishCurrent', playbackInstanceId),
     prev: () => invoke('playback:prev'),
     pause: () => invoke('playback:pause'),
     resume: () => invoke('playback:resume'),
@@ -182,6 +189,7 @@ const echoApi: EchoApi = {
     clearQueue: () => invoke('playback:clearQueue'),
     reorderQueue: (fromIndex, toIndex) => invoke('playback:reorderQueue', fromIndex, toIndex),
     heartbeat: (state) => invoke('playback:heartbeat', state),
+    reportError: (playbackInstanceId, failureKind) => invoke('playback:reportError', playbackInstanceId, failureKind),
     refreshUrl: (trackId) => invoke('playback:refreshUrl', trackId),
     getState: () => invoke('playback:getState'),
     onStateChanged: (listener) => {

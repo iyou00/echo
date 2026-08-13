@@ -29,6 +29,7 @@ import { buildMemoryEvidencePrompt, formatAvoidedPattern } from './memoryEvidenc
 import { parseIntent, type RecommendationIntent } from './recommendation/intent'
 import { musicLanguageGenre } from './recommendation/language'
 import { buildRecentProfileInsights, filterAcknowledgedProfileInsights, profileEventAgencyFactor, profileTrackAgencyFactor } from './profileInsights'
+import { listQualifiedActionItemIds } from '../db/agentActions'
 
 interface ArtistSeed {
   genre?: string[]
@@ -369,10 +370,19 @@ function groupEventsByTrack(events: ProfileTrackEvent[]): Map<string, ProfileTra
   return eventsByKey
 }
 
+function filterProfileEventsByActionOutcome(events: ProfileTrackEvent[], qualifiedActionItemIds: Set<string>): ProfileTrackEvent[] {
+  return events.filter((event) => (
+    event.queueStatus === 'skipped'
+    || !event.track.agentActionItemId
+    || qualifiedActionItemIds.has(event.track.agentActionItemId)
+  ))
+}
+
 function createProfileBuildContext(tracks: Track[]): ProfileBuildContext {
   const semanticTracks = listSemantics()
   const feedbackRows = listProfileTrackFeedback()
-  const profileEvents = loadProfileTrackEvents()
+  const qualifiedActionItemIds = listQualifiedActionItemIds()
+  const profileEvents = filterProfileEventsByActionOutcome(loadProfileTrackEvents(), qualifiedActionItemIds)
   const importedTrackKeys = new Set(tracks.map((track) => trackKey(track)))
   return {
     tracks,
@@ -2425,6 +2435,7 @@ export const tasteTestHelpers = {
   applySemanticTrackSignals,
   shouldIncludeArtistCandidate,
   isPositiveProfileEvent,
+  filterProfileEventsByActionOutcome,
   hasWrittenPortrait,
   shouldIncludeSignatureCandidate,
   shouldCarryPreviousSignatureTrack,

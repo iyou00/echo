@@ -34,6 +34,7 @@ export type ListeningTopicSource = 'conversation' | 'active_event' | 'weather' |
 
 export interface ListeningSessionRecord {
   id: number
+  stageContextId?: string | null
   status: 'active' | 'ended'
   startedAt: string
   lastActiveAt: string

@@ -624,13 +624,13 @@ function App() {
     }
 
     return (
-      <header className="shell-hdr shell-hdr-detail">
+      <header className={`shell-hdr shell-hdr-detail${page === 'profile' ? ' shell-hdr-profile' : ''}`}>
         <button className="shell-return" type="button" onClick={() => setPage(page === 'settings' ? 'profile' : page === 'about' ? 'settings' : 'chat')}>
           ◁ 返回
         </button>
         <div className="shell-title">
-          {page === 'settings' ? '设 置' : page === 'about' ? '关 于' : 'Echo'}
-          <small>{page === 'settings' ? 'S E T T I N G S' : page === 'about' ? 'A B O U T' : 'P R O F I L E'}</small>
+          {page === 'settings' ? '设 置' : page === 'about' ? '关 于' : 'Echo 眼里的你'}
+          {page !== 'profile' && <small>{page === 'settings' ? 'S E T T I N G S' : 'A B O U T'}</small>}
         </div>
         <WindowControls
           onMinimize={() => echo.window.minimize().catch((error) => logAppAsyncError('window minimize', error))}
@@ -731,6 +731,7 @@ function App() {
               {...commonProps}
               echo={echo}
               profile={profile}
+              playbackState={playbackState}
               setPlaybackState={setPlaybackState}
               refreshQueue={refreshQueue}
               refreshProfile={refreshProfile}

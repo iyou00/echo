@@ -21,6 +21,7 @@ export type SessionMusicFollowUp =
 
 export interface ChatMusicSessionSnapshot {
   sourceText: string
+  intentKind: string
   tracks: Array<{ title: string; artist: string }>
   artistQuery?: string
   seedTitle?: string
@@ -52,9 +53,9 @@ function compactText(value: string): string {
 function pickMentionedTrack(text: string, tracks: Track[]): MentionedTrack | null {
   const compact = compactText(text)
   if (!compact) return null
-  const indexMatch = text.trim().match(/^第?\s*([1-5一二两三四五])\s*(?:个|首|项|号)?$/)
+  const indexMatch = text.trim().match(/^第?\s*(10|[1-9]|[一二两三四五六七八九十])\s*(?:个|首|项|号)?$/)
   if (indexMatch?.[1]) {
-    const map: Record<string, number> = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5 }
+    const map: Record<string, number> = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 }
     const index = Number(indexMatch[1]) || map[indexMatch[1]]
     const track = tracks[index - 1]
     return track ? { track, match: 'index' } : null
@@ -83,7 +84,7 @@ function isExplicitPlaySelection(text: string): boolean {
 }
 
 function wantsMore(text: string): boolean {
-  return /^(再来|再给|再放|接着|继续|还有|多来|来一首|来几首|挑一首|选一首|找一首)|帮我(?:挑|选|找)一首|你(?:来|帮我)?(?:挑|选|找)一首|再来点|继续来|还有吗/.test(text.trim())
+  return /^(再来|再给|再放|接着|继续|还有|多来|来一首|来几首|挑一首|选一首|找一首)|帮我(?:挑|选|找)一首|你(?:来|帮我)?(?:挑|选|找)一首|再来点|继续来|还有吗|^(?:那(?:你|就|么)?|再|继续|接着).{0,12}(?:推荐|推|来|找|放|几首|热门|热度|最新|新歌)/.test(text.trim())
 }
 
 function wantsChange(text: string): boolean {
@@ -96,8 +97,10 @@ function wantsSimilar(text: string): boolean {
 
 function buildFollowUpSearchQuery(context: ChatMusicSessionContext, text: string): string {
   const seed = context.tracks[0]
-  const base = context.artistQuery
-    ? `推荐一首${context.artistQuery}的歌`
+  const base = context.intentKind === 'similar_to_track'
+    ? context.sourceText
+    : context.artistQuery
+    ? `推荐${context.artistQuery}的歌`
     : seed
       ? similarTrackSearchQuery(seed, text)
       : `${context.sourceText} ${text}`
@@ -129,7 +132,7 @@ export function rememberChatMusicSession(input: {
   musicSessionContext = {
     sourceText: input.sourceText,
     intentKind: input.intentKind,
-    tracks: input.tracks.slice(0, 8),
+    tracks: input.tracks.slice(0, 10),
     artistQuery: input.artistQuery,
     seedTitle: input.seedTitle,
     affirmationAction: input.affirmationAction,
@@ -157,7 +160,8 @@ export function getChatMusicSessionSnapshot(): ChatMusicSessionSnapshot | null {
   }
   return {
     sourceText: musicSessionContext.sourceText,
-    tracks: musicSessionContext.tracks.slice(0, 5).map((track) => ({
+    intentKind: musicSessionContext.intentKind,
+    tracks: musicSessionContext.tracks.slice(0, 10).map((track) => ({
       title: track.title,
       artist: track.artist,
     })),
@@ -176,7 +180,7 @@ export function resolveSessionMusicFollowUp(text: string): SessionMusicFollowUp 
   const context = musicSessionContext
   if (hasExplicitSimilarityAnchor(text)) return { kind: 'none' }
   const mentioned = pickMentionedTrack(text, context.tracks)
-  const indexSelection = /^第?\s*[1-5一二两三四五]/.test(text.trim())
+  const indexSelection = /^第?\s*(?:10|[1-9]|[一二两三四五六七八九十])/.test(text.trim())
   const explicitSelection = isExplicitPlaySelection(text)
   const bareAffirmation = isBareAffirmation(text)
   const titleSelection = mentioned?.match === 'title' && /就|放|听|选|要|这首|那首|这个|那个/.test(text)

@@ -16,6 +16,7 @@ import { buildSoulPolicyPrompt } from '../skills/soul/policy'
 import { memoryPolicySummary } from '../skills/memory/policy'
 import type { TodayTrackEvent } from '../db/tracks'
 import type { CompanionResponseBrief } from '../services/chat/companionResponse'
+import { listAgentActionFactsForDate, listQualifiedActionItemIdsForDate } from '../db/agentActions'
 import { compactCompanionProfile } from '../services/chat/companionStrategy'
 import { createDefaultCompanionProfile, type CompanionProfile, type CompanionResponseStrategy } from '../services/chat/companionTypes'
 import type { RecommendationWeatherContext } from '../services/chat/weatherRecommendation'
@@ -211,9 +212,13 @@ export function buildYinyiContext(date: string, weatherSummary?: string): LlmMes
   const isToday = date === new Date().toLocaleDateString('sv-SE')
   const history = loadConversationsForDate(date, 20)
   const tracks = loadMeaningfulTrackEventsForDate(date, 60)
-  const positiveTracks = yinyiPositiveListeningEvidence(tracks)
+  const qualifiedActionItemIds = listQualifiedActionItemIdsForDate(date)
+  const actionFacts = listAgentActionFactsForDate(date)
+  const positiveTracks = yinyiPositiveListeningEvidence(tracks).filter((track) => (
+    !track.agentActionItemId || qualifiedActionItemIds.has(track.agentActionItemId)
+  ))
   const dismissedTracks = yinyiDismissedTrackEvidence(tracks)
-  const recommendations = yinyiRecommendationEvidence(tracks)
+  const recommendations = positiveTracks.filter((track) => track.source === 'recommended_by_echo' && isMeaningfulTrackEvent(track))
   const activeEvents = isToday ? loadActiveEvents(8) : []
   const todaySceneContext = isToday ? buildTodaySceneContext() : ''
   const recentYinyi = getYinyiRange(7).filter((entry) => entry.date !== date)
@@ -244,6 +249,22 @@ ${safePromptJson(positiveTracks.map((track) => {
   }
 }))}
 </today_listening>
+
+<agent_action_facts>
+${safePromptJson(actionFacts.map((fact) => ({
+  time: fact.occurredAt ?? fact.plannedAt,
+  origin: fact.origin,
+  actionType: fact.actionType,
+  reasonCode: fact.reasonCode,
+  goalCode: fact.goalCode,
+  itemType: fact.itemType,
+  item: fact.itemPayload,
+  outcomeType: fact.outcomeType,
+  polarity: fact.polarity,
+  strength: fact.strength,
+})))}
+这些是已执行行动与真实结果。没有 outcome 的 track item 只能说明 Echo 做过推荐，不能写成用户听过或喜欢。
+</agent_action_facts>
 
 <dismissed_tracks>
 ${safePromptJson(dismissedTracks.map((track) => {

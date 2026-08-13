@@ -5,6 +5,7 @@ const dbMock = vi.hoisted(() => ({
   rows: [] as Array<{ kind: string; content: string; confidence?: number; weight?: number; started_at?: string; created_at?: string }>,
   row: undefined as Record<string, unknown> | undefined,
 }))
+const stageContextMock = vi.hoisted(() => ({ current: null as import('../../types/ipc').StageContext | null }))
 
 vi.mock('./index', () => ({
   getDb: vi.fn(() => ({
@@ -16,6 +17,10 @@ vi.mock('./index', () => ({
       }
     },
   })),
+}))
+
+vi.mock('../domain/stageContext/repository', () => ({
+  loadActiveStageContext: vi.fn(() => stageContextMock.current),
 }))
 
 import { getCorrectionEventCount, getLatestCorrectionCreatedAt, loadActiveEvents, loadRecentEvents } from './events'
@@ -41,6 +46,21 @@ describe('event queries', () => {
 
     expect(events[0]?.kind).toBe('correction')
     expect(dbMock.sql[0]).toContain('WHERE user_id = current_user_id() AND kind = ?')
+  })
+
+  it('projects the current stage ahead of duplicate legacy context', () => {
+    dbMock.sql = []
+    dbMock.rows = [{ kind: 'context', content: '今晚加班', weight: 0.8 }]
+    stageContextMock.current = {
+      id: 'stage-1', kind: 'work', status: 'active', summary: '今晚加班',
+      state: { emotion: 'tired', energy: 'low', interactionPreference: 'music', safety: 'normal' },
+      goal: 'focus', confidence: 0.95, revision: 1,
+      startedAt: '2026-08-12T10:00:00.000Z', lastActiveAt: '2026-08-12T10:00:00.000Z', expiresAt: '2026-08-12T18:00:00.000Z',
+    }
+
+    expect(loadActiveEvents(8)).toHaveLength(1)
+    expect(loadActiveEvents(8)[0]).toMatchObject({ content: '今晚加班', confidence: 0.95, weight: 1 })
+    stageContextMock.current = null
   })
 
   it('reports correction event count for scheduler refresh decisions', () => {

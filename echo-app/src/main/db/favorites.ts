@@ -1,4 +1,5 @@
 import type { Track } from '../../types/ipc'
+import { randomUUID } from 'node:crypto'
 import type { FavoriteListOptions } from '../../types/ipc'
 import { trackIdentity } from '../../shared/trackIdentity'
 import { getDb } from './index'
@@ -103,6 +104,13 @@ export function toggleFavoriteTrack(track: Track): { favorited: boolean; favorit
            favorited_at = CURRENT_TIMESTAMP`,
       )
       .run(key, track.title, track.artist, track.album ?? '', track.source ?? '', JSON.stringify(saved))
+    if (track.agentActionId) {
+      getDb().prepare(`
+        INSERT INTO agent_action_outcomes (
+          user_id, action_id, action_item_id, source_event_key, outcome_type, polarity, strength, occurred_at, metadata_json
+        ) VALUES (current_user_id(), ?, ?, ?, 'favorite', 'positive', 'strong', CURRENT_TIMESTAMP, ?)
+      `).run(track.agentActionId, track.agentActionItemId ?? null, `favorite:${randomUUID()}`, JSON.stringify({ userAgency: 'active' }))
+    }
     return true
   })
   const favorited = write()
@@ -128,6 +136,13 @@ export function saveFavoriteTrack(track: Track): { favorited: true; changed: boo
            track_json = excluded.track_json`,
       )
       .run(key, track.title, track.artist, track.album ?? '', track.source ?? '', JSON.stringify(saved))
+    if (!existing && track.agentActionId) {
+      getDb().prepare(`
+        INSERT INTO agent_action_outcomes (
+          user_id, action_id, action_item_id, source_event_key, outcome_type, polarity, strength, occurred_at, metadata_json
+        ) VALUES (current_user_id(), ?, ?, ?, 'favorite', 'positive', 'strong', CURRENT_TIMESTAMP, ?)
+      `).run(track.agentActionId, track.agentActionItemId ?? null, `favorite:${randomUUID()}`, JSON.stringify({ userAgency: 'active' }))
+    }
     return !existing
   })
   const changed = write()
