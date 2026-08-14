@@ -134,6 +134,39 @@ export type RuntimeTaskVisibility = 'user' | 'internal'
 export type RuntimeErrorKind = 'config' | 'network' | 'auth' | 'rate_limit' | 'server' | 'timeout' | 'canceled' | 'unknown'
 export const RUNTIME_TASK_RECENT_LIMIT = 50
 
+export type UiBoundaryCode =
+  | 'startup_failed'
+  | 'model_missing'
+  | 'model_invalid'
+  | 'music_empty'
+  | 'queue_empty'
+  | 'taste_empty'
+  | 'context_empty'
+  | 'offline'
+  | 'no_playable'
+  | 'playback_recovering'
+  | 'mic_denied'
+  | 'tts_fallback'
+  | 'yinyi_empty'
+  | 'yinyi_failed'
+  | 'task_failed'
+  | 'import_invalid'
+  | 'close_busy'
+
+export interface UiBoundarySnapshot {
+  code: UiBoundaryCode
+  scope: 'system' | 'surface' | 'inline'
+  sourceId?: string
+  retryable: boolean
+  preserved: string[]
+  occurredAt: string
+  details?: {
+    invalidFields?: string[]
+    invalidItems?: number
+    totalItems?: number
+  }
+}
+
 export interface RuntimeTaskSnapshot {
   id: string
   parentTaskId?: string
@@ -605,6 +638,7 @@ export interface YinyiEntry {
     }>
   }
   createdAt?: string
+  boundary?: UiBoundarySnapshot
 }
 
 export interface ImportPlaylistResult {
@@ -613,6 +647,7 @@ export interface ImportPlaylistResult {
   name?: string
   message?: string
   profile?: TasteProfile
+  boundary?: UiBoundarySnapshot
 }
 
 export interface LlmTestResult {
@@ -662,6 +697,7 @@ export interface SendChatResult {
   message: ChatMessage
   tracks: Track[]
   hints?: ChatHints
+  boundary?: UiBoundarySnapshot
 }
 
 export interface VoiceLine {
@@ -670,6 +706,9 @@ export interface VoiceLine {
 }
 
 export interface EchoApi {
+  boundary: {
+    get(): Promise<UiBoundarySnapshot[]>
+  }
   runtime: {
     getTask(id: string): Promise<RuntimeTaskSnapshot | null>
     getRecentTasks(): Promise<RuntimeTaskSnapshot[]>
@@ -783,7 +822,10 @@ export interface EchoApi {
     reorderQueue(fromIndex: number, toIndex: number): Promise<PlaybackState>
     heartbeat(state: PlaybackHeartbeat): Promise<PlaybackState>
     reportError(playbackInstanceId: string, failureKind?: string): Promise<PlaybackState>
-    refreshUrl(trackId: string): Promise<{ track: Track; state: PlaybackState }>
+    refreshUrl(trackId: string): Promise<
+      | { ok: true; track: Track; state: PlaybackState }
+      | { ok: false; state: PlaybackState; boundary: UiBoundarySnapshot }
+    >
     getState(): Promise<PlaybackState>
     onStateChanged(listener: (state: PlaybackState) => void): () => void
     onUrlRefreshed(listener: (payload: { trackId: string; url: string; expiresAt: string }) => void): () => void
@@ -817,6 +859,7 @@ export interface EchoApi {
       sessionId: number
       audioUrl?: string
       error?: string
+      boundary?: UiBoundarySnapshot
       generatedAt: string
     }>
     endSession(sessionId?: number): Promise<{ ok: boolean }>

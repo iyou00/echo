@@ -415,6 +415,18 @@ const yinyiEntries: YinyiEntry[] = [
 ]
 
 const mockEcho: EchoApi = {
+  boundary: {
+    async get() {
+      const occurredAt = new Date().toISOString()
+      const boundaries = []
+      if (!(settingsState.llm.baseUrl && settingsState.llm.apiKey && settingsState.llm.model)) {
+        boundaries.push({ code: 'model_missing' as const, scope: 'surface' as const, retryable: true, preserved: ['draft', 'currentTrack'], occurredAt })
+      }
+      if (!profileState) boundaries.push({ code: 'taste_empty' as const, scope: 'surface' as const, retryable: true, preserved: ['listeningHistory'], occurredAt })
+      if (!playbackState.current && playbackState.queue.length === 0) boundaries.push({ code: 'queue_empty' as const, scope: 'surface' as const, retryable: true, preserved: ['currentTrack'], occurredAt })
+      return boundaries
+    },
+  },
   runtime: {
     async getTask(id) {
       return structuredClone(runtimeTasks.find((task) => task.id === id && task.visibility === 'user') ?? null)
@@ -1124,7 +1136,7 @@ const mockEcho: EchoApi = {
       playbackState.current = track
       const payload = { trackId, url: track.playUrl ?? '', expiresAt: track.urlExpiresAt ?? new Date().toISOString() }
       urlRefreshListeners.forEach((listener) => listener(payload))
-      return { track, state: emitPlayback() }
+      return { ok: true, track, state: emitPlayback() }
     },
     async getState() {
       return structuredClone(playbackState)

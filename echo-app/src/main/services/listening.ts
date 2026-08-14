@@ -1,4 +1,4 @@
-import type { StageContext, Track } from '../../types/ipc'
+import type { StageContext, Track, UiBoundarySnapshot } from '../../types/ipc'
 import { loadRecentConversations, loadTodayConversations, loadUserConversationsForDate } from '../db/conversations'
 import { getCompanionProfile, loadLatestAssistantResponseStrategy } from '../db/companion'
 import { loadActiveEvents, type ActiveEvent } from '../db/events'
@@ -15,6 +15,7 @@ import { stripKnownSystemBlocks } from '../llm/outputSanitize'
 import { escapePromptData, safePromptJson } from '../llm/promptData'
 import { filterPlayableTracks } from '../netease/music'
 import { synthesize } from '../tts/client'
+import { createUiBoundary } from '../../shared/uiBoundary'
 import { readRootFile } from '../utils/paths'
 import { getMostRecentSeal } from './daySeal'
 import { getWeather } from '../weather/client'
@@ -75,6 +76,7 @@ export type ListeningSegmentResult = {
   sessionId: number
   audioUrl?: string
   error?: string
+  boundary?: UiBoundarySnapshot
   generatedAt: string
 }
 
@@ -1190,7 +1192,16 @@ export async function generateListeningSegment(options: ListeningSegmentOptions 
     return { text, track, delivery: listeningPlan.delivery, density: listeningPlan.density, sessionId: session.id, audioUrl: audio.audioUrl, generatedAt }
   }
   options.onProgress?.({ phase: 'done', current: 4, total: 4, message: audio.error?.message ?? 'Echo 现在说不出话来' })
-  return { text, track, delivery: listeningPlan.delivery, density: listeningPlan.density, sessionId: session.id, error: audio.error?.message ?? 'Echo 现在说不出话来', generatedAt }
+  return {
+    text,
+    track,
+    delivery: listeningPlan.delivery,
+    density: listeningPlan.density,
+    sessionId: session.id,
+    error: audio.error?.message ?? 'Echo 现在说不出话来',
+    boundary: createUiBoundary('tts_fallback', { sourceId: String(session.id) }),
+    generatedAt,
+  }
 }
 
 export const listeningTestHelpers = {

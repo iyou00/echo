@@ -1,5 +1,5 @@
 import type { WebContents } from 'electron'
-import type { ChatHints, SendChatResult, Track } from '../../../types/ipc'
+import type { ChatHints, SendChatResult, Track, UiBoundarySnapshot } from '../../../types/ipc'
 import { appendConversation } from '../../db/conversations'
 import { appendRecommendedTracks } from '../../db/tracks'
 import { assertAssistantReplyInputContract, assertSendChatResultContract, enforceAssistantTrackBinding } from './pipelineContract'
@@ -13,6 +13,7 @@ export interface AssistantReplyOptions {
   content: string
   tracks?: Track[]
   hints?: ChatHints
+  boundary?: UiBoundarySnapshot
   durationMs?: number
   sender?: WebContents
   runtimeEmit?: ChatRuntimeEmit
@@ -51,6 +52,7 @@ export function appendAssistantReply(options: AssistantReplyOptions): SendChatRe
       tracks: attributedTracks,
       durationMs: options.durationMs ?? 0,
       ...(options.hints ? { hints: options.hints } : {}),
+      ...(options.boundary ? { boundary: { ...options.boundary, sourceId: String(message.id) } } : {}),
     }
     if (options.sender && !options.sender.isDestroyed()) options.sender.send('chat:stream:end', payload)
     options.runtimeEmit?.('runtime:chat-stream-end', payload)
@@ -59,6 +61,7 @@ export function appendAssistantReply(options: AssistantReplyOptions): SendChatRe
       message,
       tracks: attributedTracks,
       ...(options.hints ? { hints: options.hints } : {}),
+      ...(options.boundary ? { boundary: { ...options.boundary, sourceId: String(message.id) } } : {}),
     })
   } catch (error) {
     failAgentAction(action, 'reply_delivery_failed')

@@ -1,9 +1,10 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { Download, Info, MessageCircle, Upload } from 'lucide-react'
-import type { AgentActionSummary, CareFrequency, EchoApi, ImportProgressPayload, ImportTaskSnapshot, SemanticSummary, Settings, StageContext, Track, WindowSizePreset } from '../../types/ipc'
+import type { AgentActionSummary, CareFrequency, EchoApi, ImportProgressPayload, ImportTaskSnapshot, SemanticSummary, Settings, StageContext, Track, UiBoundarySnapshot, WindowSizePreset } from '../../types/ipc'
 import type { AppPageProps } from '../appState'
 import { EmptyState, Section } from '../components'
 import { RuntimeTaskList } from '../components/RuntimeTaskNotice'
+import { BoundaryState } from '../components/BoundaryState'
 import { latestRunningRuntimeTask, runtimeTaskNeedsAttention, useRuntimeTasks } from '../hooks/useRuntimeTasks'
 import { pageLabels } from '../labels'
 import { friendlyOperationError, serviceHealthLabel, serviceRecoveryHint } from '../../shared/runtimeRecovery'
@@ -306,6 +307,7 @@ export function SettingsPage({
   const [stageContextStatus, setStageContextStatus] = useState('')
   const [windowSizeStatus, setWindowSizeStatus] = useState('')
   const [windowSizeBusy, setWindowSizeBusy] = useState(false)
+  const [importBoundary, setImportBoundary] = useState<UiBoundarySnapshot | null>(null)
 
   function switchProvider(key: string) {
     const preset = providerPresets[key]
@@ -828,10 +830,12 @@ export function SettingsPage({
 
   async function importPlaylist() {
     setBusy(true)
+    setImportBoundary(null)
     setImportState('importing')
     setImportStatus('正在读取通用歌单 JSON、写入本地数据库，并生成你的初始画像...')
     try {
       const result = await echo.settings.importPlaylist()
+      setImportBoundary(result.boundary ?? null)
       const summary = result.imported ? await refreshSemanticSummary() : semanticSummary
       setImportState(result.imported ? 'ok' : result.count === 0 && result.message === '导入已取消' ? 'idle' : 'fail')
       setImportStatus(formatImportResultStatus(result, summary))
@@ -1554,6 +1558,7 @@ export function SettingsPage({
                       {importStatus}
                     </div>
                   )}
+                  {importBoundary && <BoundaryState compact snapshot={importBoundary} onAction={() => { void importPlaylist() }} />}
                 </div>
 
                 <div className="data-line">

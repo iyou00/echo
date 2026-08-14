@@ -1,9 +1,10 @@
 import { KeyboardEvent, MouseEvent, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ListMusic, Pause, Play } from 'lucide-react'
-import type { ActiveScene, EchoApi, PlaybackState, PlaybackStatus, Track } from '../../types/ipc'
+import { ListMusic, Pause, Play, RefreshCw } from 'lucide-react'
+import type { ActiveScene, EchoApi, PlaybackState, PlaybackStatus, Track, UiBoundarySnapshot } from '../../types/ipc'
 import { WaveBars } from '../components'
 import { pageLabels } from '../labels'
 import { decidePlaybackCompletionAction } from './playerCompletion'
+import { boundaryPresentation } from '../boundaryPresentation'
 
 interface PlayerProps {
   echo: EchoApi
@@ -48,6 +49,7 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
   const [duration, setDuration] = useState(0)
   const [localPlaying, setLocalPlaying] = useState(false)
   const [playbackError, setPlaybackError] = useState<string | null>(null)
+  const [playbackBoundary, setPlaybackBoundary] = useState<UiBoundarySnapshot | null>(null)
   const current = state.current
   const currentId = trackId(current)
   const displayDuration = duration || (current?.durationMs ? current.durationMs / 1000 : 0)
@@ -55,6 +57,7 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
   const activeSegments = Math.round(progressRatio * 30)
   const canPlayPrevious = state.history.length > 0
   const canPlayNext = state.queue.length > 0
+  const playbackBoundaryCopy = playbackBoundary ? boundaryPresentation(playbackBoundary) : null
 
   const handleAudioPlayFailure = useCallback(async (message: string) => {
     setLocalPlaying(false)
@@ -307,7 +310,15 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
 
     try {
       const result = await echo.playback.refreshUrl(currentId)
+      if (!result.ok) {
+        setState(result.state)
+        setLocalPlaying(false)
+        setPlaybackError(null)
+        setPlaybackBoundary(result.boundary)
+        return
+      }
       setState(result.state)
+      setPlaybackBoundary(null)
       if (audio && result.track.playUrl) {
         audio.src = result.track.playUrl
         audio.currentTime = oldPos
@@ -328,6 +339,7 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
         onPlay={() => {
           setLocalPlaying(true)
           setPlaybackError(null)
+          setPlaybackBoundary(null)
           retryCountRef.current = 0
           echo.playback.heartbeat({
             playbackInstanceId: current?.playbackInstanceId,
@@ -362,7 +374,17 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
         <div className="player-copy">
           <div className="player-title">{current?.title ?? `还没有${pageLabels.queue}`}</div>
           <div className="player-artist">
-            {playbackError ? (
+            {playbackBoundaryCopy ? (
+              <span className="player-recovery">
+                <span>{playbackBoundaryCopy.title}</span>
+                <button type="button" title="重试播放链接" aria-label="重试播放链接" onClick={() => {
+                  retryCountRef.current = 0
+                  void recoverUrl()
+                }}>
+                  <RefreshCw size={11} />
+                </button>
+              </span>
+            ) : playbackError ? (
               <span className="error-text" style={{ color: '#ff6b6b', fontSize: '0.85em' }}>
                 {playbackError}
               </span>

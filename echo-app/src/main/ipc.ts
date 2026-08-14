@@ -1,4 +1,5 @@
 import { registerAppWindowIpc } from './ipc/appWindow'
+import { registerBoundaryIpc } from './ipc/boundary'
 import { registerCareIpc } from './ipc/care'
 import { registerChatIpc } from './ipc/chat'
 import { registerHealthIpc } from './ipc/health'
@@ -17,6 +18,7 @@ import { registerStageContextIpc } from './ipc/stageContext'
 export { broadcast, maskSettings } from './ipc/shared'
 
 export function registerIpc(): void {
+  registerBoundaryIpc()
   registerRuntimeIpc()
   registerSettingsIpc()
   registerHealthIpc()

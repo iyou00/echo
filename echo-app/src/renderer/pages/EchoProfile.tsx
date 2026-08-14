@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { BookOpen, Brain, Check, ChevronDown, Clock3, Play, RefreshCw, RotateCcw, Settings, X } from 'lucide-react'
-import type { EchoApi, MemoryAuditSummary, PlaybackState, ProfileInsight, TasteProfile, TasteProfileVersion, TasteQuestion, Track } from '../../types/ipc'
+import type { EchoApi, MemoryAuditSummary, PlaybackState, ProfileInsight, TasteProfile, TasteProfileVersion, TasteQuestion, Track, UiBoundarySnapshot } from '../../types/ipc'
 import type { AppPageProps } from '../appState'
 import { BrandLogo, EmptyState, Section } from '../components'
 import { latestRunningRuntimeTask, useRuntimeTasks } from '../hooks/useRuntimeTasks'
 import { friendlyOperationError } from '../../shared/runtimeRecovery'
 import { trackIdentity } from '../../shared/trackIdentity'
+import { BoundaryState } from '../components/BoundaryState'
 import {
   ERA_SCALE,
   eraNeedleLeft,
@@ -28,6 +29,7 @@ interface EchoProfileProps extends AppPageProps {
   setPlaybackState: (state: PlaybackState) => void
   refreshQueue: () => Promise<Track[]>
   refreshProfile: () => Promise<void>
+  boundary?: UiBoundarySnapshot
 }
 
 function displayDate(value?: string) {
@@ -113,7 +115,7 @@ function discoveryLabel(value: number) {
   return '探索适中'
 }
 
-export function EchoProfilePage({ echo, navigate, profile, playbackState, setPlaybackState, refreshQueue, refreshProfile }: EchoProfileProps) {
+export function EchoProfilePage({ echo, navigate, profile, playbackState, setPlaybackState, refreshQueue, refreshProfile, boundary }: EchoProfileProps) {
   const [busy, setBusy] = useState(false)
   const [phase, setPhase] = useState<'idle' | 'loading' | 'in'>('idle')
   const [playingKey, setPlayingKey] = useState('')
@@ -492,14 +494,16 @@ export function EchoProfilePage({ echo, navigate, profile, playbackState, setPla
     <div className="phone-surface profile-page">
       <div className="scroll-panel">
         {!profile ? (
-          <EmptyState
-            icon={<BrandLogo className="empty-logo" size={56} />}
-            className="profile-empty"
-            title={profileBusy ? '等我一下。' : '我还没听过你的歌呢。你给我导一份歌单,我读一下,然后我们再正经聊。'}
-            body={undefined}
-            sign={profileBusy ? undefined : '— Echo · 等你'}
-            action={!profileBusy && <button className="primary-button empty-cta" onClick={() => navigate('settings')}>导 入 歌 单</button>}
-          />
+          boundary && !profileBusy
+            ? <BoundaryState snapshot={boundary} onAction={() => navigate('settings')} />
+            : <EmptyState
+                icon={<BrandLogo className="empty-logo" size={56} />}
+                className="profile-empty"
+                title={profileBusy ? '等我一下。' : '我还没听过你的歌呢。你给我导一份歌单,我读一下,然后我们再正经聊。'}
+                body={undefined}
+                sign={profileBusy ? undefined : '— Echo · 等你'}
+                action={!profileBusy && <button className="primary-button empty-cta" onClick={() => navigate('settings')}>导 入 歌 单</button>}
+              />
         ) : (
           <>
             <Section className="portrait-section">

@@ -13,6 +13,7 @@ import { FirstRunWelcome } from './renderer/components/FirstRunWelcome'
 import { Player } from './renderer/components/Player'
 import { EchoShell } from './renderer/shell/EchoShell'
 import { ContextDrawer } from './renderer/shell/ContextDrawer'
+import { BoundaryState } from './renderer/components/BoundaryState'
 import type { WindowFieldMode } from './renderer/shell/WindowField'
 import {
   isVoiceContinuousActive,
@@ -89,6 +90,7 @@ function App() {
     settingsImportFocusToken,
     settingsApiFocusToken,
     playbackState,
+    boundaries,
   } = state
 
   const setPage = useCallback((page: PageKey) => dispatch({ page }), [dispatch])
@@ -150,6 +152,10 @@ function App() {
     return next
   }, [dispatch, echo])
 
+  const refreshBoundaries = useCallback(async (): Promise<void> => {
+    dispatch({ boundaries: await echo.boundary.get() })
+  }, [dispatch, echo])
+
   const reloadSettings = useCallback(async (): Promise<void> => {
     try {
       const next = await echo.settings.get()
@@ -204,7 +210,7 @@ function App() {
 
     async function boot() {
       try {
-        const [nextSettings, nextTaste, nextQueue, nextPlayback, nextYinyi, nextScenes, nextScene, nextImportTask] = await Promise.all([
+        const [nextSettings, nextTaste, nextQueue, nextPlayback, nextYinyi, nextScenes, nextScene, nextImportTask, nextBoundaries] = await Promise.all([
           bootRequired(echo.settings.get(), 10_000, '设置读取超时，请重试。'),
           bootTimeout(echo.taste.getProfile(), 10_000, { profile: null, questions: [] }),
           bootTimeout(echo.queue.get(), 10_000, []),
@@ -213,6 +219,7 @@ function App() {
           bootTimeout(echo.scene.definitions(), 10_000, []),
           bootTimeout(echo.scene.getCurrent(), 10_000, null),
           bootTimeout(echo.import.getSnapshot(), 10_000, null),
+          bootTimeout(echo.boundary.get(), 10_000, []),
         ])
 
         if (!alive) return
@@ -225,6 +232,7 @@ function App() {
           sceneDefinitions: nextScenes,
           currentScene: nextScene,
           importTask: nextImportTask,
+          boundaries: nextBoundaries,
         })
         if (!nextSettings) {
           dispatch({ page: 'settings' })
@@ -268,9 +276,15 @@ function App() {
   useEffect(() => {
     const timer = window.setInterval(() => {
       refreshScene().catch((error) => logAppAsyncError('refresh scene', error))
+      refreshBoundaries().catch((error) => logAppAsyncError('refresh boundaries', error))
     }, 60000)
     return () => window.clearInterval(timer)
-  }, [refreshScene])
+  }, [refreshBoundaries, refreshScene])
+
+  useEffect(() => {
+    if (!bootReady) return
+    refreshBoundaries().catch((error) => logAppAsyncError('refresh boundaries after settings change', error))
+  }, [bootReady, profile, refreshBoundaries, settings?.llm.apiKey, settings?.llm.baseUrl, settings?.llm.model])
 
   useEffect(() => {
     return echo.scene.onChanged((next) => {
@@ -601,6 +615,8 @@ function App() {
             ? 'chat'
             : 'idle'
   const drawerOpen = page === 'review' || page === 'queue' || page === 'profile' || page === 'settings' || page === 'about'
+  const offlineBoundary = boundaries.find((item) => item.code === 'offline')
+  const modelInvalidBoundary = boundaries.find((item) => item.code === 'model_invalid')
   const drawerTitle = page === 'review'
     ? '回望今天'
     : page === 'queue'
@@ -632,11 +648,12 @@ function App() {
       page={page}
       fieldMode={fieldMode}
       yinyiUnread={yinyiUnread}
-      connected={hasLlmConfig}
+      connected={hasLlmConfig && !offlineBoundary && !modelInvalidBoundary}
       onNavigate={setPage}
       onMinimize={() => echo.window.minimize().catch((error) => logAppAsyncError('window minimize', error))}
       onClose={closeWindow}
     >
+        {offlineBoundary && <BoundaryState compact snapshot={offlineBoundary} onAction={() => { void refreshBoundaries() }} />}
         {playbackNotice && <div className="playback-notice">{playbackNotice}</div>}
         {careMuteToast && (
           <div className="care-mute-toast">
@@ -668,6 +685,7 @@ function App() {
               autoPlayNext={settings?.playback.autoPlayNext ?? true}
               updateAutoPlayNext={updateAutoPlayNext}
               focusApiSettings={() => dispatch((current) => ({ settingsApiFocusToken: current.settingsApiFocusToken + 1 }))}
+              boundaries={boundaries}
             />
           </div>
           <div className="shell-page" style={{ display: page === 'yinyi' ? 'flex' : 'none' }}>
@@ -676,6 +694,7 @@ function App() {
               echo={echo}
               isActive={page === 'yinyi'}
               openWithRandom={Boolean(settings?.yinyi.openWithRandom)}
+              boundary={boundaries.find((item) => item.code === 'yinyi_empty')}
             />
           </div>
           <div className="shell-page" style={{ display: page === 'voice' ? 'flex' : 'none' }}>
@@ -705,12 +724,13 @@ function App() {
               setPlaybackState={setPlaybackState}
               refreshQueue={refreshQueue}
               autoPlayNext={settings?.playback.autoPlayNext ?? true}
+              boundary={boundaries.find((item) => item.code === 'queue_empty')}
               updateAutoPlayNext={updateAutoPlayNext}
             />
           </div>
           {page === 'profile' && (
             <div className="d2-drawer-view">
-              <EchoProfilePage
+            <EchoProfilePage
                 {...commonProps}
                 echo={echo}
                 profile={profile}
@@ -718,6 +738,7 @@ function App() {
                 setPlaybackState={setPlaybackState}
                 refreshQueue={refreshQueue}
                 refreshProfile={refreshProfile}
+                boundary={boundaries.find((item) => item.code === 'taste_empty')}
               />
             </div>
           )}

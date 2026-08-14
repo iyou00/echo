@@ -1,6 +1,6 @@
 ﻿import { FormEvent, useEffect, useRef, useState } from 'react'
 import { Send, Square } from 'lucide-react'
-import type { ActiveScene, ChatMessage, EchoApi, PlaybackState, SceneDefinition, SceneKey, ScenePlaybackResult, TasteProfile, Track } from '../../types/ipc'
+import type { ActiveScene, ChatMessage, EchoApi, PlaybackState, SceneDefinition, SceneKey, ScenePlaybackResult, TasteProfile, Track, UiBoundarySnapshot } from '../../types/ipc'
 import type { AppPageProps } from '../appState'
 import { BrandLogo, EmptyState, SceneRail, TrackCard } from '../components'
 import { latestRunningRuntimeTask, useRuntimeTasks } from '../hooks/useRuntimeTasks'
@@ -8,6 +8,7 @@ import { trackIdentity as trackKey } from '../../shared/trackIdentity'
 import { friendlyOperationError } from '../../shared/runtimeRecovery'
 import { pickWaitingLineFor } from './chatWaitingLines'
 import { mergeReturnedTracksIntoMessage } from './chatMessageTracks'
+import { BoundaryState } from '../components/BoundaryState'
 
 interface ChatPageProps extends AppPageProps {
   echo: EchoApi
@@ -25,6 +26,7 @@ interface ChatPageProps extends AppPageProps {
   autoPlayNext: boolean
   updateAutoPlayNext: (value: boolean) => Promise<void>
   focusApiSettings?: () => void
+  boundaries: UiBoundarySnapshot[]
 }
 
 // 让 Echo 看起来像在"打字思考":
@@ -53,18 +55,11 @@ function timeLabel(value: string) {
   return new Date(value).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }
 
-function friendlyChatError(error: unknown) {
-  const message = error instanceof Error ? error.message : ''
-  if (/401|unauthorized|api key|apikey|余额|quota|credit|billing/i.test(message)) {
-    return '我连不上自己的脑子了——你的 API key 可能过期或者余额没了。去设置页看看?'
-  }
-  if (/network|fetch|timeout|econn|enotfound|断网|网络/i.test(message)) {
-    return '网络断了——Echo 等你回来。正在播的歌可以继续听。'
-  }
-  return message || 'Echo 这会儿接不上模型。先去设置里看一眼。'
+function friendlyChatError() {
+  return '这次连接没有完成。你的输入和正在播放的歌都还在，可以再试一次。'
 }
 
-export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasLlmConfig, profile, refreshQueue, restoreOnStart, scenes, currentScene, playScene, endScene, autoPlayNext, updateAutoPlayNext, focusApiSettings }: ChatPageProps) {
+export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasLlmConfig, profile, refreshQueue, restoreOnStart, scenes, currentScene, playScene, endScene, autoPlayNext, updateAutoPlayNext, focusApiSettings, boundaries }: ChatPageProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
@@ -76,6 +71,7 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
   const [chatNotice, setChatNotice] = useState('')
   // 仅会话内有效：标记需要展示"去登录网易云"CTA 的助手消息 id（不持久化）。
   const [authHintIds, setAuthHintIds] = useState<Set<number>>(new Set())
+  const [messageBoundaries, setMessageBoundaries] = useState<Record<number, { snapshot: UiBoundarySnapshot; retryText: string }>>({})
   const activeAssistantId = useRef<number | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const autoScrollPaused = useRef(false)
@@ -263,6 +259,12 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
           return next
         })
       }
+      if (result.boundary) {
+        setMessageBoundaries((items) => ({
+          ...items,
+          [result.message.id]: { snapshot: result.boundary as UiBoundarySnapshot, retryText: text },
+        }))
+      }
       scheduleReplyStart(assistantMessage.id)
       const nextTrack = returnedTracks.find((track) => track.playUrl) ?? null
       if (nextTrack) {
@@ -280,7 +282,7 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
         cancelTokens.current.delete(assistantMessage.id)
         return
       }
-      settleAssistantMessage(assistantMessage.id, { ...assistantMessage, content: friendlyChatError(error) })
+      settleAssistantMessage(assistantMessage.id, { ...assistantMessage, content: friendlyChatError() })
     } finally {
       if (activeAssistantId.current === assistantMessage.id) {
         activeAssistantId.current = null
@@ -512,6 +514,8 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
 
   function renderEmptyChat() {
     if (!hasLlmConfig) {
+      const boundary = boundaries.find((item) => item.code === 'model_missing' || item.code === 'model_invalid')
+      if (boundary) return <BoundaryState snapshot={boundary} onAction={() => navigate('settings')} />
       return (
         <EmptyState
           muted
@@ -524,6 +528,8 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
     }
 
     if (!profile) {
+      const boundary = boundaries.find((item) => item.code === 'music_empty' || item.code === 'taste_empty')
+      if (boundary) return <BoundaryState snapshot={boundary} onAction={() => navigate('settings')} />
       return (
         <EmptyState
           icon="♪"
@@ -610,6 +616,13 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
                     >
                       去登录网易云
                     </button>
+                  )}
+                  {messageBoundaries[message.id] && (
+                    <BoundaryState
+                      compact
+                      snapshot={messageBoundaries[message.id].snapshot}
+                      onAction={() => setDraft(messageBoundaries[message.id].retryText)}
+                    />
                   )}
                 </div>
                 {message.role === 'assistant' && <div className="timestamp">{timeLabel(message.createdAt)}</div>}

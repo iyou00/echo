@@ -1,4 +1,4 @@
-import type { ChatHints, RuntimeTaskSnapshot, SendChatResult, Track } from '../../../types/ipc'
+import type { ChatHints, RuntimeTaskSnapshot, SendChatResult, Track, UiBoundarySnapshot } from '../../../types/ipc'
 import type {
   resolvePendingDirectSongChoiceReply,
   resolvePendingDirectSongReply,
@@ -9,7 +9,7 @@ import type { CompanionResponseStrategy } from './companionTypes'
 export type ReplyFn = (
   content: string,
   tracks?: Track[],
-  options?: { durationMs?: number; hints?: ChatHints; persistTracks?: boolean; expectsMusicAction?: boolean; responseStrategy?: CompanionResponseStrategy },
+  options?: { durationMs?: number; hints?: ChatHints; boundary?: UiBoundarySnapshot; persistTracks?: boolean; expectsMusicAction?: boolean; responseStrategy?: CompanionResponseStrategy },
 ) => SendChatResult
 
 export interface PendingIntentState {

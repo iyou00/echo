@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { EchoApi, PlaybackState, Track } from '../../types/ipc'
+import type { EchoApi, PlaybackState, Track, UiBoundarySnapshot } from '../../types/ipc'
 import type { AppPageProps } from '../appState'
 import { getVoiceLongAbsence, markVoiceSeen, pickVoiceIdleGreeting } from '../../data/voice-idle-greetings'
 import { sameTrack, trackIdentity } from '../../shared/trackIdentity'
 import { friendlyOperationError } from '../../shared/runtimeRecovery'
 import { nextVoiceFailureAction, shouldAcceptVoiceContinuousTrigger, shouldTriggerNextVoiceSegment } from './voiceContinuous'
+import { BoundaryState } from '../components/BoundaryState'
 
 interface VoicePageProps extends AppPageProps {
   echo: EchoApi
@@ -139,6 +140,7 @@ export function VoicePage({
   const [progress, setProgress] = useState(0)
   const [waveLevels, setWaveLevels] = useState(idleWave)
   const [notice, setNotice] = useState('')
+  const [voiceBoundary, setVoiceBoundary] = useState<UiBoundarySnapshot | null>(null)
   const parts = useMemo(() => splitByProgress(text, status === 'done' || status === 'text-only-done' ? 1 : progress), [text, progress, status])
   const statusLabel = status === 'generating' ? 'T H I N K I N G' : status === 'speaking' ? 'S P E A K I N G' : status === 'done' || status === 'text-only-done' ? 'D O N E' : 'S T A N D B Y'
 
@@ -490,6 +492,7 @@ export function VoicePage({
       voiceBaselinePlaybackKeyRef.current = trackIdentity(playbackStateRef.current.current)
       setStatus('generating')
       setNotice('')
+      setVoiceBoundary(null)
       setProgress(0)
       clearCurrentAudioUrl()
       restoreVolumeRef.current = await echo.playback.getVolume()
@@ -519,7 +522,8 @@ export function VoicePage({
         return
       }
       if (!segment.audioUrl) {
-        setNotice(friendlyOperationError(segment.error, '我现在说不出话来，但文字还在。'))
+        if (segment.boundary) setVoiceBoundary(segment.boundary)
+        else setNotice(friendlyOperationError(segment.error, '我现在说不出话来，但文字还在。'))
         if (segment.track) {
           const next = await echo.playback.play(segment.track)
           setPlaybackState(next)
@@ -680,6 +684,7 @@ export function VoicePage({
               </div>
             </div>
             {notice && <div className="voice-notice">{notice}</div>}
+            {voiceBoundary && <BoundaryState compact snapshot={voiceBoundary} onAction={() => { void speak(false, true) }} />}
             <div className="voice-foot">
               <div className="voice-actions">
                 <button className={voiceContinuous ? 'exit-btn voice-loop active' : 'exit-btn voice-loop'} type="button" onClick={toggleContinuousListening}>

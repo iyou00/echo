@@ -6,13 +6,15 @@ import JSZip from 'jszip'
 import { getDb, resetDatabase } from '../db'
 import { getSettings, saveSettings, updateSetting, updateSettingsBatch, type SettingUpdatePatch } from '../db/settings'
 import { parseJson } from '../db/json'
-import { clearImportedTracksCache, getAllImportedTracks, importPlaylist as savePlaylist, type PlaylistPayload } from '../db/playlists'
+import { clearImportedTracksCache, getAllImportedTracks, importPlaylist as savePlaylist } from '../db/playlists'
 import { buildInitialProfile } from './taste'
 import { buildSemanticsForTracks } from './semantics'
 import { clearImportTaskSnapshot, hasRunningImportTask, runImportTask } from './importTasks'
 import { completeChat, LlmError } from '../llm/client'
 import type { ImportPlaylistResult, LlmTestResult } from '../../types/ipc'
 import { recordHealth } from './health'
+import { createUiBoundary } from '../../shared/uiBoundary'
+import { normalizePlaylist, PlaylistValidationError } from './playlistImportValidation'
 
 export { getSettings, updateSetting, updateSettingsBatch, type SettingUpdatePatch }
 
@@ -78,41 +80,6 @@ export async function testLlm(): Promise<LlmTestResult> {
   }
 }
 
-function normalizeArtists(value: unknown): string {
-  if (Array.isArray(value)) return value.map(String).filter(Boolean).join(' / ')
-  return String(value ?? '')
-}
-
-function normalizePlaylist(payload: unknown): PlaylistPayload {
-  const parsed = payload as { name?: string; source?: string; tracks?: unknown[] }
-  if (!parsed || typeof parsed !== 'object') {
-    throw new Error('JSON 顶层需要是一个对象')
-  }
-  if (!Array.isArray(parsed.tracks)) {
-    throw new Error('JSON 里需要有 tracks 数组')
-  }
-  const tracks = (parsed.tracks ?? []).map((item) => {
-    const track = item as Record<string, unknown>
-    const platform = String(track.platform ?? '').toLowerCase()
-    const platformId = track.platformId ? String(track.platformId) : undefined
-    const neteaseId = track.neteaseId ? String(track.neteaseId) : platform === 'netease' ? platformId : undefined
-    return {
-      id: track.id ? String(track.id) : undefined,
-      neteaseId,
-      title: String(track.title ?? track.name ?? ''),
-      artist: normalizeArtists(track.artist ?? track.artists),
-      album: track.album ? String(track.album) : undefined,
-      year: track.year ? Number(track.year) : undefined,
-      durationMs: track.durationMs ? Number(track.durationMs) : undefined,
-      source: parsed.source ? String(parsed.source) : 'imported',
-    }
-  }).filter((track) => track.title && track.artist)
-  return {
-    name: parsed.name ?? '导入歌单',
-    tracks,
-  }
-}
-
 export async function importPlaylistFromDialog(): Promise<ImportPlaylistResult> {
   if (hasRunningImportTask()) throw new Error('已有导入任务正在进行，请稍后再试。')
 
@@ -128,7 +95,8 @@ export async function importPlaylistFromDialog(): Promise<ImportPlaylistResult> 
   try {
     const selectedPath = path.resolve(result.filePaths[0])
     const fileContent = await fs.readFile(selectedPath, 'utf8')
-    const payload = normalizePlaylist(JSON.parse(fileContent))
+    const normalized = normalizePlaylist(JSON.parse(fileContent))
+    const payload = normalized.payload
     const sourceId = createHash('sha256').update(selectedPath.toLowerCase()).digest('hex').slice(0, 20)
     payload.source = `file:${sourceId}`
     if (payload.tracks.length === 0) {
@@ -145,17 +113,34 @@ export async function importPlaylistFromDialog(): Promise<ImportPlaylistResult> 
         count: payload.tracks.length,
         name: payload.name,
         profile,
-        message: `已导入 ${payload.tracks.length} 首`,
+        message: normalized.boundary
+          ? `已导入 ${payload.tracks.length} 首，另有 ${normalized.boundary.details?.invalidItems ?? 0} 项字段不完整，已跳过。`
+          : `已导入 ${payload.tracks.length} 首`,
+        boundary: normalized.boundary,
       }
     })
   } catch (error) {
     console.error('[settings] playlist import failed', error)
+    const boundary = error instanceof PlaylistValidationError
+      ? createUiBoundary('import_invalid', {
+          details: {
+            invalidFields: error.invalidFields,
+            invalidItems: error.invalidItems,
+            totalItems: error.totalItems,
+          },
+        })
+      : error instanceof SyntaxError
+        ? createUiBoundary('import_invalid', { details: { invalidFields: ['json'] } })
+        : undefined
     return {
       imported: false,
       count: 0,
-      message: error instanceof SyntaxError
-        ? '这个文件的 JSON 格式有问题，请检查后再导入。'
-        : '这次导入没有完成，请稍后再试。',
+      message: error instanceof PlaylistValidationError
+        ? error.message
+        : error instanceof SyntaxError
+          ? '这个文件的 JSON 格式有问题，请检查后再导入。'
+          : '这次导入没有完成，请稍后再试。',
+      boundary,
     }
   }
 }

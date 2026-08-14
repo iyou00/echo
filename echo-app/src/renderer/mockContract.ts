@@ -5,6 +5,7 @@ type ContractShape = {
 }
 
 export const ECHO_API_CONTRACT: ContractShape = {
+  boundary: ['get'],
   runtime: ['getTask', 'getRecentTasks', 'cancelTask', 'onTaskChanged', 'onEvent'],
   settings: ['get', 'update', 'updateBatch', 'testLlm', 'importPlaylist', 'downloadPlaylistTemplate', 'exportData', 'resetData', 'onChanged'],
   health: ['get', 'check'],
@@ -119,6 +120,18 @@ type ReadContractCheck = {
 }
 
 const READ_CONTRACT_CHECKS: ReadContractCheck[] = [
+  {
+    label: 'boundary.get',
+    read: (api) => api.boundary.get(),
+    validate: (value) => {
+      assertArray(value, 'boundary.get')
+      value.forEach((item, index) => {
+        if (!isRecord(item) || typeof item.code !== 'string' || typeof item.retryable !== 'boolean' || !Array.isArray(item.preserved)) {
+          throw new Error(`boundaries[${index}] must include code, retryable and preserved`)
+        }
+      })
+    },
+  },
   { label: 'settings.get', read: (api) => api.settings.get(), validate: assertSettings },
   { label: 'playback.getState', read: (api) => api.playback.getState(), validate: assertPlaybackState },
   {

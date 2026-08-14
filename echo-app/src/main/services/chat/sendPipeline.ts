@@ -70,6 +70,7 @@ import {
   unavailableWeatherContext,
   type RecommendationWeatherContext,
 } from './weatherRecommendation'
+import { createUiBoundary } from '../../../shared/uiBoundary'
 
 type ActiveChat = ChatActiveTask
 
@@ -824,6 +825,7 @@ export async function runChatSendPipeline(
     })
     return companionReply('我这会儿没接住这句话。你再说一遍，我重新听。', [], {
       hints: { runtimeFailure: true },
+      boundary: createUiBoundary('task_failed'),
     })
   }
 }

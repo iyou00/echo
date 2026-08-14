@@ -1,5 +1,5 @@
 import { useReducer, type Dispatch } from 'react'
-import type { ActiveScene, AppPageKey, ImportTaskSnapshot, PlaybackState, SceneDefinition, Settings, TasteProfile, Track } from '../types/ipc'
+import type { ActiveScene, AppPageKey, ImportTaskSnapshot, PlaybackState, SceneDefinition, Settings, TasteProfile, Track, UiBoundarySnapshot } from '../types/ipc'
 
 export type PageKey = AppPageKey
 
@@ -30,6 +30,7 @@ export interface AppState {
   settingsImportFocusToken: number
   settingsApiFocusToken: number
   playbackState: PlaybackState
+  boundaries: UiBoundarySnapshot[]
 }
 
 export type AppStateAction = Partial<AppState> | ((state: AppState) => Partial<AppState>)
@@ -84,6 +85,7 @@ function initialAppState(): AppState {
       queue: [],
       history: [],
     },
+    boundaries: [],
   }
 }
 

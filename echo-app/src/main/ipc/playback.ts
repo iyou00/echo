@@ -19,6 +19,7 @@ import {
   seek,
   setVolume,
 } from '../services/playback'
+import { createUiBoundary } from '../../shared/uiBoundary'
 
 export function registerPlaybackIpc(): void {
   ipcMain.handle('playback:play', (_event, track, options) => play(track, options))
@@ -37,6 +38,17 @@ export function registerPlaybackIpc(): void {
   ipcMain.handle('playback:reorderQueue', (_event, fromIndex: number, toIndex: number) => reorderQueue(fromIndex, toIndex))
   ipcMain.handle('playback:heartbeat', (_event, state) => heartbeat(state))
   ipcMain.handle('playback:reportError', (_event, playbackInstanceId, failureKind) => reportPlaybackError(playbackInstanceId, failureKind))
-  ipcMain.handle('playback:refreshUrl', (_event, trackId: string) => refreshUrl(trackId))
+  ipcMain.handle('playback:refreshUrl', async (_event, trackId: string) => {
+    try {
+      const result = await refreshUrl(trackId)
+      return { ok: true as const, ...result }
+    } catch {
+      return {
+        ok: false as const,
+        state: getPlaybackState(),
+        boundary: createUiBoundary('playback_recovering', { sourceId: trackId }),
+      }
+    }
+  })
   ipcMain.handle('playback:getState', () => getPlaybackState())
 }

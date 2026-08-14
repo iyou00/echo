@@ -37,6 +37,9 @@ function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
 }
 
 const echoApi: EchoApi = {
+  boundary: {
+    get: () => invoke('boundary:get'),
+  },
   runtime: {
     getTask: (id) => invoke('runtime:getTask', id),
     getRecentTasks: () => invoke('runtime:getRecentTasks'),

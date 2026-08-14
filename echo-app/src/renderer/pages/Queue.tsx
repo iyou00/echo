@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Check, Heart, Play, Trash2, X } from 'lucide-react'
-import type { EchoApi, PlaybackState, QueueHistoryDay, Track } from '../../types/ipc'
+import type { EchoApi, PlaybackState, QueueHistoryDay, Track, UiBoundarySnapshot } from '../../types/ipc'
 import type { AppPageProps } from '../appState'
 import { EmptyState } from '../components'
 import { pageLabels } from '../labels'
 import { trackIdentity as trackKey } from '../../shared/trackIdentity'
+import { BoundaryState } from '../components/BoundaryState'
 
 const FAVORITE_PAGE_SIZE = 80
 
@@ -27,6 +28,7 @@ interface QueuePageProps extends AppPageProps {
   refreshQueue: () => Promise<Track[]>
   autoPlayNext: boolean
   updateAutoPlayNext: (value: boolean) => Promise<void>
+  boundary?: UiBoundarySnapshot
 }
 
 
@@ -44,6 +46,7 @@ export function QueuePage({
   navigate,
   autoPlayNext,
   updateAutoPlayNext,
+  boundary,
 }: QueuePageProps) {
   const [tab, setTab] = useState<'now' | 'favorites' | 'past'>('now')
   const [dragIndex, setDragIndex] = useState<number | null>(null)
@@ -379,13 +382,15 @@ export function QueuePage({
           </div>
         )}
         {tab === 'now' && (!playing && rest.length === 0 ? (
-          <EmptyState
-            muted
-            icon="♫"
-            title={`${pageLabels.queue}空着——和我说点想听的?`}
-            body='"放点慢的"、"我想睡了"、"来点热闹"…… 都行。'
-            action={<button className="primary-button empty-cta" type="button" onClick={() => navigate('chat')}>去 {pageLabels.chat}</button>}
-          />
+          boundary
+            ? <BoundaryState snapshot={boundary} onAction={() => navigate('chat')} />
+            : <EmptyState
+                muted
+                icon="♫"
+                title={`${pageLabels.queue}空着——和我说点想听的?`}
+                body='"放点慢的"、"我想睡了"、"来点热闹"…… 都行。'
+                action={<button className="primary-button empty-cta" type="button" onClick={() => navigate('chat')}>去 {pageLabels.chat}</button>}
+              />
         ) : (
           <section className="queue-section">
             <div className="queue-section-label">N O W &nbsp; P L A Y I N G</div>

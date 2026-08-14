@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { EchoApi, RuntimeTaskSnapshot, YinyiEntry } from '../../types/ipc'
+import type { EchoApi, RuntimeTaskSnapshot, UiBoundarySnapshot, YinyiEntry } from '../../types/ipc'
 import type { AppPageProps } from '../appState'
 import { BrandLogo, EmptyState } from '../components'
 import { latestRunningRuntimeTask, useRuntimeTasks } from '../hooks/useRuntimeTasks'
 import { pageLabels } from '../labels'
 import { friendlyOperationError } from '../../shared/runtimeRecovery'
+import { BoundaryState } from '../components/BoundaryState'
 
 interface YinyiPageProps extends AppPageProps {
   echo: EchoApi
   isActive: boolean
   openWithRandom: boolean
+  boundary?: UiBoundarySnapshot
 }
 
 function isoDate(offset = 0, base = new Date()) {
@@ -58,7 +60,7 @@ function YinyiWritingState({
   )
 }
 
-export function YinyiPage({ echo, isActive, openWithRandom }: YinyiPageProps) {
+export function YinyiPage({ echo, isActive, openWithRandom, boundary }: YinyiPageProps) {
   const [date, setDate] = useState(isoDate())
   const [entry, setEntry] = useState<YinyiEntry | null>(null)
   const [range, setRange] = useState<YinyiEntry[]>([])
@@ -145,6 +147,7 @@ export function YinyiPage({ echo, isActive, openWithRandom }: YinyiPageProps) {
     if (notice) return <div className="quiet-line">{notice}</div>
 
     if (entry?.meta?.status === 'failed') {
+      if (entry.boundary) return <BoundaryState snapshot={entry.boundary} onAction={generate} />
       return (
         <EmptyState
           icon="…"
@@ -156,6 +159,7 @@ export function YinyiPage({ echo, isActive, openWithRandom }: YinyiPageProps) {
     }
 
     if (entry?.meta?.status === 'absent') {
+      if (entry.boundary) return <BoundaryState snapshot={entry.boundary} onAction={generate} />
       return (
         <EmptyState
           muted
@@ -176,6 +180,7 @@ export function YinyiPage({ echo, isActive, openWithRandom }: YinyiPageProps) {
     }
 
     if (range.length === 0) {
+      if (boundary) return <BoundaryState snapshot={boundary} onAction={generate} />
       return (
         <EmptyState
           icon={<BrandLogo className="empty-logo" size={56} />}

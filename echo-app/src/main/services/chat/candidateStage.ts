@@ -21,6 +21,7 @@ import {
 import type { PendingIntentState, ReplyFn } from './sendPipelineTypes'
 import type { SessionMusicFollowUp } from './sessionContext'
 import type { RecommendationWeatherContext } from './weatherRecommendation'
+import { createUiBoundary } from '../../../shared/uiBoundary'
 
 function shouldExcludeCurrentPlaybackTrack(
   intent: ChatIntent,
@@ -310,6 +311,7 @@ export async function prepareCandidateStage(input: CandidateStageInput): Promise
     return {
       reply: input.reply(noMusicCandidateContent(recommendationIntent, authRequired, failure, input.weatherContext), [], {
         hints: authRequired ? { neteaseAuthRequired: true } satisfies ChatHints : undefined,
+        boundary: createUiBoundary('no_playable'),
       }),
     }
   }

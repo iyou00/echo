@@ -28,6 +28,7 @@ import { enforceAssistantTrackBinding } from './pipelineContract'
 import { applyCompanionResponseStyle, type CompanionResponseBrief } from './companionResponse'
 import type { CompanionProfile, CompanionResponseStrategy } from './companionTypes'
 import type { RecommendationWeatherContext } from './weatherRecommendation'
+import { createUiBoundary } from '../../../shared/uiBoundary'
 
 export const responseStageTestHelpers = {
   enforceTrackClaimContract: enforceAssistantTrackBinding,
@@ -184,6 +185,7 @@ export async function runRecommendationResponseStage(input: RecommendationRespon
     persistTracks: true,
     expectsMusicAction: musicActionExpected,
     responseStrategy,
+    boundary: musicActionExpected && finalTracks.length === 0 ? createUiBoundary('no_playable') : undefined,
   })
   recordFollowUpQuestionAsked(followUpQuestion, result.message.id)
   return result
