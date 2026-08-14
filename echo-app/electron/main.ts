@@ -21,6 +21,7 @@ import { warmRootFileCache } from '../src/main/utils/paths'
 import { loadActiveStageContext } from '../src/main/domain/stageContext/repository'
 import { recoverInterruptedAgentActions } from '../src/main/domain/agentAction/repository'
 import { reconcileCarePingOutcomes } from '../src/main/services/carePings'
+import { windowSizeForPreset } from '../src/shared/windowSize'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -91,18 +92,17 @@ function createAppIcon() {
 }
 
 function createWindow() {
+  const windowSize = windowSizeForPreset(getSettings().ui.windowSize)
   const target = new BrowserWindow({
     title: 'Echo',
-    width: 440,
-    height: 720,
-    minWidth: 380,
-    minHeight: 600,
+    ...windowSize,
     frame: false,
     titleBarStyle: 'hidden',
     trafficLightPosition: { x: -100, y: -100 },
     transparent: false,
-    resizable: true,
-    maximizable: true,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
     autoHideMenuBar: true,
     center: true,
     backgroundColor: '#F5FAED',

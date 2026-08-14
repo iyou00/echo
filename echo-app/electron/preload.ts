@@ -225,7 +225,7 @@ const echoApi: EchoApi = {
   },
   window: {
     minimize: () => invoke('window:minimize'),
-    toggleMaximize: () => invoke('window:toggleMaximize'),
+    setSizePreset: (preset) => invoke('window:setSizePreset', preset),
     close: () => invoke('window:close'),
   },
   voice: {

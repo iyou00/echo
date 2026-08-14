@@ -77,6 +77,7 @@ const mockSettings: Settings = {
   ui: {
     theme: 'system',
     closeBehavior: 'ask',
+    windowSize: 'standard',
   },
   window: {
     closeHintShown: false,
@@ -1175,8 +1176,13 @@ const mockEcho: EchoApi = {
     async minimize() {
       return { ok: true }
     },
-    async toggleMaximize() {
-      return { ok: true, maximized: false }
+    async setSizePreset(preset) {
+      const dimensions = {
+        compact: { width: 1152, height: 720 },
+        standard: { width: 1280, height: 800 },
+        large: { width: 1440, height: 900 },
+      }[preset]
+      return { ok: true, preset, ...dimensions }
     },
     async close() {
       closeRequestListeners.forEach((listener) => listener())

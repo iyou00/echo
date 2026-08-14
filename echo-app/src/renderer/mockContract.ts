@@ -22,7 +22,7 @@ export const ECHO_API_CONTRACT: ContractShape = {
   recommendation: ['recommendFromNetease'],
   playback: ['play', 'enqueue', 'next', 'finishCurrent', 'prev', 'pause', 'resume', 'setVolume', 'getVolume', 'seek', 'removeFromQueue', 'removeTrackFromQueue', 'clearQueue', 'reorderQueue', 'heartbeat', 'reportError', 'refreshUrl', 'getState', 'onStateChanged', 'onUrlRefreshed', 'onCookieExpired'],
   app: ['minimizeToTray', 'quit', 'onCloseRequested', 'onNavigate'],
-  window: ['minimize', 'toggleMaximize', 'close'],
+  window: ['minimize', 'setSizePreset', 'close'],
   voice: ['generate'],
   tts: ['synthesize', 'test'],
   weather: ['get'],

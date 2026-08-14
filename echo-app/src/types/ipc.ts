@@ -473,6 +473,8 @@ export interface MemoryAuditSummary {
   items: MemoryAuditItem[]
 }
 
+export type WindowSizePreset = 'compact' | 'standard' | 'large'
+
 export interface Settings {
   llm: {
     baseUrl: string
@@ -505,6 +507,7 @@ export interface Settings {
   ui: {
     theme?: 'light' | 'dark' | 'system'
     closeBehavior?: 'ask' | 'minimize' | 'quit'
+    windowSize?: WindowSizePreset
   }
   window: {
     closeHintShown: boolean
@@ -548,6 +551,7 @@ export interface SettingPathValueMap {
   'playback.autoPlayNext': boolean
   'ui.theme': NonNullable<Settings['ui']['theme']>
   'ui.closeBehavior': NonNullable<Settings['ui']['closeBehavior']>
+  'ui.windowSize': NonNullable<Settings['ui']['windowSize']>
   'window.closeHintShown': boolean
   'user.city': string
   'tts.baseUrl': string
@@ -794,7 +798,7 @@ export interface EchoApi {
   }
   window: {
     minimize(): Promise<{ ok: boolean }>
-    toggleMaximize(): Promise<{ ok: boolean; maximized?: boolean }>
+    setSizePreset(preset: WindowSizePreset): Promise<{ ok: boolean; preset: WindowSizePreset; width: number; height: number }>
     close(): Promise<{ ok: boolean }>
   }
   tts: {

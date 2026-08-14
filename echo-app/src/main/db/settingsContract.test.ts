@@ -23,3 +23,18 @@ describe('care ping settings contract', () => {
     expect(() => settingsTestHelpers.validateSettingValue('carePings.pausedUntil', '明天')).toThrow('暂停截止时间无效')
   })
 })
+
+describe('window size settings contract', () => {
+  it('migrates old settings to the standard fixed-size preset', () => {
+    const settings = settingsTestHelpers.mergeDefaults({
+      ui: { theme: 'system', closeBehavior: 'ask' },
+    } as Parameters<typeof settingsTestHelpers.mergeDefaults>[0])
+
+    expect(settings.ui.windowSize).toBe('standard')
+  })
+
+  it('rejects free-form window dimensions at the persistence boundary', () => {
+    expect(settingsTestHelpers.validateSettingValue('ui.windowSize', 'large')).toBe('large')
+    expect(() => settingsTestHelpers.validateSettingValue('ui.windowSize', '1280x720')).toThrow('值无效')
+  })
+})

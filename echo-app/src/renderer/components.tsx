@@ -1,4 +1,4 @@
-import { Heart, Pause, Play, ThumbsDown, ThumbsUp } from 'lucide-react'
+import { Heart, Minus, Pause, Play, ThumbsDown, ThumbsUp, X } from 'lucide-react'
 import { Fragment, type ReactNode } from 'react'
 import type { ActiveScene, PlaybackStatus, SceneDefinition, SceneKey, Track } from '../types/ipc'
 import { brand } from '../brand'
@@ -70,23 +70,18 @@ export function BrandLogo({ size = 32, className = '', decorative = true }: { si
 
 export function WindowControls({
   onMinimize,
-  onToggleMaximize,
   onClose,
 }: {
   onMinimize: () => void
-  onToggleMaximize: () => void
   onClose: () => void
 }) {
   return (
     <div className="window-ctrls">
       <button className="wc-btn" type="button" onClick={onMinimize} title="最小化">
-        <span className="wc-icon wc-min" />
-      </button>
-      <button className="wc-btn" type="button" onClick={onToggleMaximize} title="最大化">
-        <span className="wc-icon wc-max" />
+        <Minus size={14} aria-hidden="true" />
       </button>
       <button className="wc-btn wc-close" type="button" onClick={onClose} title="关闭">
-        <span className="wc-icon wc-x" />
+        <X size={14} aria-hidden="true" />
       </button>
     </div>
   )

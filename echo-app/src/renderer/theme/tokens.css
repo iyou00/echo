@@ -1,0 +1,14 @@
+:root {
+  --d2-paper: #eef0eb;
+  --d2-surface: #f8f8f3;
+  --d2-ink: #19201b;
+  --d2-muted: #6e766f;
+  --d2-line: #c8cec7;
+  --d2-forest: #184734;
+  --d2-red: #d94d38;
+  --d2-blue: #315bd6;
+  --d2-mint: #a7cda9;
+  --d2-night: #151814;
+  --d2-serif: Georgia, "Songti SC", "SimSun", serif;
+  --d2-sans: "Segoe UI", "Microsoft YaHei", sans-serif;
+}

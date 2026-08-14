@@ -1,6 +1,6 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { Download, Info, MessageCircle, Upload } from 'lucide-react'
-import type { AgentActionSummary, CareFrequency, EchoApi, ImportProgressPayload, ImportTaskSnapshot, SemanticSummary, Settings, StageContext, Track } from '../../types/ipc'
+import type { AgentActionSummary, CareFrequency, EchoApi, ImportProgressPayload, ImportTaskSnapshot, SemanticSummary, Settings, StageContext, Track, WindowSizePreset } from '../../types/ipc'
 import type { AppPageProps } from '../appState'
 import { EmptyState, Section } from '../components'
 import { RuntimeTaskList } from '../components/RuntimeTaskNotice'
@@ -304,6 +304,8 @@ export function SettingsPage({
   const [recentAgentActions, setRecentAgentActions] = useState<AgentActionSummary[]>([])
   const [recentCareActions, setRecentCareActions] = useState<AgentActionSummary[]>([])
   const [stageContextStatus, setStageContextStatus] = useState('')
+  const [windowSizeStatus, setWindowSizeStatus] = useState('')
+  const [windowSizeBusy, setWindowSizeBusy] = useState(false)
 
   function switchProvider(key: string) {
     const preset = providerPresets[key]
@@ -335,6 +337,29 @@ export function SettingsPage({
   function commitSettings(next: Settings) {
     skipHydrateRef.current = true
     setSettings(next)
+  }
+
+  async function updateWindowSize(preset: WindowSizePreset) {
+    if (!settings || windowSizeBusy) return
+    const previous = settings.ui.windowSize ?? 'standard'
+    if (previous === preset) return
+    setWindowSizeBusy(true)
+    setWindowSizeStatus('正在调整窗口...')
+    try {
+      await echo.window.setSizePreset(preset)
+      const next = await echo.settings.update('ui.windowSize', preset)
+      commitSettings(next)
+      setWindowSizeStatus('窗口尺寸已保存')
+    } catch (error) {
+      if (previous !== preset) {
+        await echo.window.setSizePreset(previous).catch((rollbackError) => {
+          console.warn('[settings] window size rollback failed', rollbackError)
+        })
+      }
+      setWindowSizeStatus(friendlyOperationError(error, '窗口尺寸没有调整成功，请重试。'))
+    } finally {
+      setWindowSizeBusy(false)
+    }
   }
 
   const refreshSemanticSummary = useCallback(async (): Promise<SemanticSummary | null> => {
@@ -1858,6 +1883,34 @@ export function SettingsPage({
                   <p>在我们开始之前,你需要给我一个 LLM 端点——这样我才能“说话”。DeepSeek 一个月几块钱,Kimi 也行,任何 OpenAI 兼容的服务都可以。</p>
                 </div>
               )}
+
+              <Section label="窗 口">
+                <div className="window-size-options" role="group" aria-label="窗口尺寸">
+                  {([
+                    ['compact', '小号', '1152 × 720'],
+                    ['standard', '标准', '1280 × 800'],
+                    ['large', '大号', '1440 × 900'],
+                  ] as const).map(([preset, label, dimensions]) => (
+                    <button
+                      className={(settings?.ui.windowSize ?? 'standard') === preset ? 'window-size-option active' : 'window-size-option'}
+                      type="button"
+                      key={preset}
+                      disabled={windowSizeBusy}
+                      onClick={() => { void updateWindowSize(preset) }}
+                    >
+                      {label}
+                      <small>{dimensions}</small>
+                    </button>
+                  ))}
+                </div>
+                <p className="window-size-note">窗口始终保持 16:10，不支持拖动边框和最大化。切换后会自动居中。</p>
+                {windowSizeStatus && (
+                  <div className={`status-ind ${windowSizeStatus === '窗口尺寸已保存' ? 'ok' : windowSizeStatus.includes('没有') ? 'err' : 'idle'}`} role="status">
+                    <span className="status-dot" />
+                    {windowSizeStatus}
+                  </div>
+                )}
+              </Section>
 
               <div ref={apiSectionRef}>
                 <Section label="A I 模 型">

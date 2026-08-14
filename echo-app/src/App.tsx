@@ -10,8 +10,8 @@ import { VoicePage } from './renderer/pages/Voice'
 import { YinyiPage } from './renderer/pages/Yinyi'
 import { FirstRunWelcome } from './renderer/components/FirstRunWelcome'
 import { Player } from './renderer/components/Player'
-import { HeaderAvatar, WindowControls } from './renderer/components'
-import { pageLabels } from './renderer/labels'
+import { EchoShell } from './renderer/shell/EchoShell'
+import type { WindowFieldMode } from './renderer/shell/WindowField'
 import {
   isVoiceContinuousActive,
   scenePlaybackStatePatch,
@@ -587,60 +587,17 @@ function App() {
     }
   }
 
-  const tabItems: Array<{ key: PageKey; label: string }> = [
-    { key: 'chat', label: pageLabels.chat },
-    { key: 'yinyi', label: pageLabels.yinyi },
-    { key: 'voice', label: pageLabels.voice },
-    { key: 'queue', label: pageLabels.queue },
-  ]
-  const isMainTab = page === 'chat' || page === 'yinyi' || page === 'voice' || page === 'queue'
-
-  function renderShellHeader() {
-    if (isMainTab) {
-      return (
-        <header className="shell-hdr">
-          <button className="shell-avatar-button" type="button" onClick={() => setPage('profile')} title="Echo 主页">
-            <HeaderAvatar offline={!hasLlmConfig} />
-          </button>
-          <nav className="shell-tabs" aria-label="Echo 页面">
-            {tabItems.map((item) => (
-              <button
-                className={page === item.key ? 'shell-tab active' : 'shell-tab'}
-                type="button"
-                key={item.key}
-                onClick={() => setPage(item.key)}
-              >
-                {item.label}
-                {item.key === 'yinyi' && yinyiUnread && <span className="tab-unread" aria-label={`今日新${pageLabels.yinyi}`} />}
-              </button>
-            ))}
-          </nav>
-          <WindowControls
-            onMinimize={() => echo.window.minimize().catch((error) => logAppAsyncError('window minimize', error))}
-            onToggleMaximize={() => echo.window.toggleMaximize().catch((error) => logAppAsyncError('window toggle maximize', error))}
-            onClose={closeWindow}
-          />
-        </header>
-      )
-    }
-
-    return (
-      <header className={`shell-hdr shell-hdr-detail${page === 'profile' ? ' shell-hdr-profile' : ''}`}>
-        <button className="shell-return" type="button" onClick={() => setPage(page === 'settings' ? 'profile' : page === 'about' ? 'settings' : 'chat')}>
-          ◁ 返回
-        </button>
-        <div className="shell-title">
-          {page === 'settings' ? '设 置' : page === 'about' ? '关 于' : 'Echo 眼里的你'}
-          {page !== 'profile' && <small>{page === 'settings' ? 'S E T T I N G S' : 'A B O U T'}</small>}
-        </div>
-        <WindowControls
-          onMinimize={() => echo.window.minimize().catch((error) => logAppAsyncError('window minimize', error))}
-          onToggleMaximize={() => echo.window.toggleMaximize().catch((error) => logAppAsyncError('window toggle maximize', error))}
-          onClose={closeWindow}
-        />
-      </header>
-    )
-  }
+  const fieldMode: WindowFieldMode = page === 'settings' || page === 'about'
+    ? 'quiet'
+    : voiceContinuous
+      ? 'voice'
+      : currentScene
+        ? 'scene'
+        : playbackState.status === 'playing'
+          ? 'listening'
+          : page === 'chat'
+            ? 'chat'
+            : 'idle'
 
   const commonProps: AppPageProps = { navigate: setPage }
 
@@ -658,9 +615,15 @@ function App() {
   }
 
   return (
-    <div className="echo-shell">
-      <main className="app-frame has-global-player">
-        {renderShellHeader()}
+    <EchoShell
+      page={page}
+      fieldMode={fieldMode}
+      yinyiUnread={yinyiUnread}
+      connected={hasLlmConfig}
+      onNavigate={setPage}
+      onMinimize={() => echo.window.minimize().catch((error) => logAppAsyncError('window minimize', error))}
+      onClose={closeWindow}
+    >
         {playbackNotice && <div className="playback-notice">{playbackNotice}</div>}
         {careMuteToast && (
           <div className="care-mute-toast">
@@ -837,8 +800,7 @@ function App() {
             </section>
           </div>
         )}
-      </main>
-    </div>
+    </EchoShell>
   )
 }
 

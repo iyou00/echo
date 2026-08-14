@@ -43,6 +43,7 @@ const defaultSettings: Settings = {
   ui: {
     theme: 'system',
     closeBehavior: 'ask',
+    windowSize: 'standard',
   },
   window: {
     closeHintShown: false,
@@ -84,6 +85,7 @@ export const SETTINGS_PATHS: readonly SettingPath[] = [
   'playback.autoPlayNext',
   'ui.theme',
   'ui.closeBehavior',
+  'ui.windowSize',
   'window.closeHintShown',
   'user.city',
   'tts.baseUrl',
@@ -205,6 +207,8 @@ function validateSettingValue(path: SettingPath, value: unknown): unknown {
       return assertOneOf(value, path, ['light', 'dark', 'system'])
     case 'ui.closeBehavior':
       return assertOneOf(value, path, ['ask', 'minimize', 'quit'])
+    case 'ui.windowSize':
+      return assertOneOf(value, path, ['compact', 'standard', 'large'])
     case 'tts.speed': {
       const speed = assertNumber(value, path)
       if (speed < 0.5 || speed > 1.5) throw new Error('语速需要在 0.5 到 1.5 之间')
