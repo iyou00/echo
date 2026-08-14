@@ -5,6 +5,7 @@ import { WaveBars } from '../components'
 import { pageLabels } from '../labels'
 import { decidePlaybackCompletionAction } from './playerCompletion'
 import { boundaryPresentation } from '../boundaryPresentation'
+import { installMediaSessionActions } from './mediaSession'
 
 interface PlayerProps {
   echo: EchoApi
@@ -58,6 +59,13 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
   const canPlayPrevious = state.history.length > 0
   const canPlayNext = state.queue.length > 0
   const playbackBoundaryCopy = playbackBoundary ? boundaryPresentation(playbackBoundary) : null
+  const mediaActionsRef = useRef<{
+    play: () => void
+    pause: () => void
+    previous: () => void
+    next: () => void
+    seek: (details: MediaSessionActionDetails) => void
+  } | null>(null)
 
   const handleAudioPlayFailure = useCallback(async (message: string) => {
     setLocalPlaying(false)
@@ -331,6 +339,67 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
       if (current?.playbackInstanceId) echo.playback.reportError(current.playbackInstanceId, 'url_refresh_failed').then(setState).catch(() => undefined)
     }
   }
+
+  mediaActionsRef.current = {
+    play: () => {
+      if (!current?.playUrl) return
+      echo.playback.resume().then(setState).catch(() => undefined)
+      audioRef.current?.play().catch(() => {
+        void handleAudioPlayFailure('播放没有启动，请点一下播放重试。')
+      })
+    },
+    pause: () => {
+      audioRef.current?.pause()
+      echo.playback.pause().then(setState).catch(() => undefined)
+    },
+    previous: () => {
+      if (canPlayPrevious) void playPrevious()
+    },
+    next: () => {
+      if (canPlayNext) void playNext()
+    },
+    seek: (details) => {
+      if (typeof details.seekTime === 'number') {
+        void seekToSeconds(details.seekTime, true)
+        return
+      }
+      const offset = details.seekOffset ?? 10
+      const direction = details.action === 'seekbackward' ? -1 : 1
+      void seekToSeconds(currentTime + direction * offset, true)
+    },
+  }
+
+  useEffect(() => {
+    const mediaSession = navigator.mediaSession
+    if (!mediaSession) return undefined
+    mediaSession.metadata = current
+      ? new MediaMetadata({ title: current.title, artist: current.artist, album: current.album ?? 'Echo' })
+      : null
+    mediaSession.playbackState = current
+      ? localPlaying || state.status === 'playing' ? 'playing' : 'paused'
+      : 'none'
+    return installMediaSessionActions(mediaSession, {
+      play: () => mediaActionsRef.current?.play(),
+      pause: () => mediaActionsRef.current?.pause(),
+      previous: () => mediaActionsRef.current?.previous(),
+      next: () => mediaActionsRef.current?.next(),
+      seek: (details) => mediaActionsRef.current?.seek(details),
+    })
+  }, [current, localPlaying, state.status])
+
+  useEffect(() => {
+    const mediaSession = navigator.mediaSession
+    if (!mediaSession || !current || displayDuration <= 0) return
+    try {
+      mediaSession.setPositionState({
+        duration: displayDuration,
+        playbackRate: audioRef.current?.playbackRate ?? 1,
+        position: Math.min(displayDuration, Math.max(0, currentTime)),
+      })
+    } catch {
+      // Metadata is still useful when position state is temporarily invalid.
+    }
+  }, [current, currentTime, displayDuration])
 
   return (
     <footer className="mini-player global-player">

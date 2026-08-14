@@ -867,7 +867,7 @@ function App() {
                   <button className="btn onboarding-primary" type="button" onClick={() => { void startOnboardingApi() }}>
                     去填写模型设置
                   </button>
-                  <button className="btn sec onboarding-skip" type="button" onClick={() => { void skipOnboarding() }}>
+                  <button data-testid="onboarding-skip" className="btn sec onboarding-skip" type="button" onClick={() => { void skipOnboarding() }}>
                     先逛逛
                   </button>
                 </>
@@ -880,7 +880,7 @@ function App() {
                   <button className="btn onboarding-primary" type="button" onClick={() => { void startOnboardingImport() }}>
                     开始导入歌单
                   </button>
-                  <button className="btn sec onboarding-skip" type="button" onClick={() => { void skipOnboarding() }}>
+                  <button data-testid="onboarding-skip" className="btn sec onboarding-skip" type="button" onClick={() => { void skipOnboarding() }}>
                     先逛逛
                   </button>
                 </>

@@ -204,7 +204,7 @@ export function FirstRunWelcome({ onContinue }: FirstRunWelcomeProps) {
     >
       <audio ref={audioRef} src={WELCOME_AUDIO_SRC} preload="auto" />
       <WindowField mode="welcome" />
-      <button className="first-run-skip" type="button" onClick={continueToOnboarding} disabled={leaving}>跳过前奏</button>
+      <button data-testid="first-run-skip" className="first-run-skip" type="button" onClick={continueToOnboarding} disabled={leaving}>跳过前奏</button>
       {started && (
         <button className="first-run-mute" type="button" onClick={toggleMute} aria-label={muted ? '打开声音' : '静音'}>
           {muted ? <VolumeX size={15} /> : <Volume2 size={15} />}
@@ -219,10 +219,10 @@ export function FirstRunWelcome({ onContinue }: FirstRunWelcomeProps) {
             <h1>让我们从一段声音开始。</h1>
             <p>这段前奏只在第一次见面时播放。</p>
             <div className="first-run-gate-actions">
-              <button className="first-run-sound" type="button" onClick={() => { void startExperience(true) }}>
+              <button data-testid="first-run-sound" className="first-run-sound" type="button" onClick={() => { void startExperience(true) }}>
                 <Volume2 size={15} />开启声音
               </button>
-              <button className="first-run-silent" type="button" onClick={() => { void startExperience(false) }}>
+              <button data-testid="first-run-silent" className="first-run-silent" type="button" onClick={() => { void startExperience(false) }}>
                 <VolumeX size={15} />静音进入
               </button>
             </div>
@@ -238,7 +238,7 @@ export function FirstRunWelcome({ onContinue }: FirstRunWelcomeProps) {
             </div>
             {audioUnavailable && <p className="first-run-audio-note">声音设备没有接上，先静静进入也没关系。</p>}
             {continueError && <p className="first-run-audio-note" role="alert">刚才没能保存这次开始。再点一次，我重新接上。</p>}
-            <button className="first-run-cta" type="button" onClick={continueToOnboarding} disabled={leaving}>
+            <button data-testid="first-run-continue" className="first-run-cta" type="button" onClick={continueToOnboarding} disabled={leaving}>
               开始认识彼此
             </button>
           </div>

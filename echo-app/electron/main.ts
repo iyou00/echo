@@ -22,6 +22,7 @@ import { loadActiveStageContext } from '../src/main/domain/stageContext/reposito
 import { recoverInterruptedAgentActions } from '../src/main/domain/agentAction/repository'
 import { reconcileCarePingOutcomes } from '../src/main/services/carePings'
 import { windowSizeForPreset } from '../src/shared/windowSize'
+import { configureElectronE2E, runElectronE2E, shouldForceStartupFailure } from './e2eCapture'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -45,6 +46,7 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 
 
 app.disableHardwareAcceleration()
 app.commandLine.appendSwitch('disable-gpu')
+configureElectronE2E()
 
 if (VITE_DEV_SERVER_URL) {
   app.setPath('userData', path.join(process.env.APP_ROOT, '.electron-user-data'))
@@ -157,6 +159,8 @@ function createWindow() {
     win?.webContents.send('app:close-requested')
   })
 
+  target.webContents.once('did-finish-load', () => runElectronE2E(target, 'app'))
+
   const load = VITE_DEV_SERVER_URL
     ? target.loadURL(VITE_DEV_SERVER_URL)
     : target.loadFile(path.join(RENDERER_DIST, 'index.html'))
@@ -256,6 +260,9 @@ function createStartupFailureWindow(error: unknown): void {
   win.on('closed', () => {
     isQuitting = true
     app.quit()
+  })
+  win.webContents.once('did-finish-load', () => {
+    if (win) runElectronE2E(win, 'recovery')
   })
   void win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch((loadError) => {
     console.error('[startup] recovery window failed to load', loadError)
@@ -433,6 +440,7 @@ if (gotSingleInstanceLock) {
   app.whenReady()
     .then(() => {
       try {
+        if (shouldForceStartupFailure()) throw new Error('E2E startup recovery verification')
         Menu.setApplicationMenu(null)
         checkSecureStorage()
         upgradeLegacySettingsSecrets()

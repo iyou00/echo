@@ -52,10 +52,12 @@
   Delete "$INSTDIR\vk_swiftshader_icd.json"
   Delete "$INSTDIR\vk_swiftshader.dll"
   Delete "$INSTDIR\vulkan-1.dll"
+  Delete "$INSTDIR\uninstallerIcon.ico"
   Delete "$INSTDIR\Uninstall Echo.exe"
 
   RMDir /r "$INSTDIR\locales"
   RMDir /r "$INSTDIR\resources"
+  RMDir "$INSTDIR"
 !macroend
 
 !macro customInstall

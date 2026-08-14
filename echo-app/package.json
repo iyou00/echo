@@ -7,13 +7,18 @@
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
+    "postinstall": "node scripts/rebuild-native.mjs",
     "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && vite build",
-    "dist": "npm run build && electron-builder --win nsis",
-    "rebuild:native": "electron-builder install-app-deps",
+    "dist": "npm run verify && electron-builder --win nsis",
+    "rebuild:native": "node scripts/rebuild-native.mjs",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "test": "vitest run --config vitest.config.ts --passWithNoTests",
-    "test:watch": "vitest --config vitest.config.ts",
+    "test": "node scripts/run-vitest.mjs run --config vitest.config.ts --passWithNoTests",
+    "test:watch": "node scripts/run-vitest.mjs --config vitest.config.ts",
+    "test:e2e:electron": "node scripts/run-electron-e2e.mjs",
+    "test:installer": "node scripts/run-installer-smoke.mjs",
+    "verify": "npm run lint && npm test && npm run build && npm run test:e2e:electron",
+    "release:verify": "npm run dist && npm run test:installer",
     "preview": "vite preview"
   },
   "dependencies": {
