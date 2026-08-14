@@ -76,6 +76,7 @@ function App() {
     playbackNotice,
     careMuteToast,
     careMuteCountdown,
+    carePingId,
     voiceAutoStartToken,
     voiceContinuous,
     closeDialogOpen,
@@ -326,7 +327,7 @@ function App() {
         voiceAutoStartToken: payload.action === 'start_listening' ? current.voiceAutoStartToken + 1 : current.voiceAutoStartToken,
       }))
       if (payload.canMuteToday) {
-        dispatch({ careMuteToast: true, careMuteCountdown: 5 })
+        dispatch({ careMuteToast: true, careMuteCountdown: 5, carePingId: payload.carePingId ?? null })
       }
     })
   }, [dispatch, echo])
@@ -337,7 +338,7 @@ function App() {
       dispatch((current) => {
         if (current.careMuteCountdown <= 1) {
           window.clearInterval(timer)
-          return { careMuteCountdown: 0, careMuteToast: false }
+          return { careMuteCountdown: 0, careMuteToast: false, carePingId: null }
         }
         return { careMuteCountdown: current.careMuteCountdown - 1 }
       })
@@ -408,8 +409,8 @@ function App() {
 
   async function muteCareToday() {
     try {
-      await echo.carePings.muteToday()
-      dispatch({ careMuteToast: false })
+      await echo.carePings.muteToday(carePingId ?? undefined)
+      dispatch({ careMuteToast: false, carePingId: null })
     } catch (error) { logAppAsyncError('muteCareToday', error) }
   }
 

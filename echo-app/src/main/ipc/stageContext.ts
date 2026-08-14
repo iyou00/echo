@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import type { StageContextCorrection } from '../../types/ipc'
+import type { AgentActionOrigin, StageContextCorrection } from '../../types/ipc'
 import { loadActiveStageContext } from '../domain/stageContext/repository'
 import { correctActiveStageContext, endActiveStageContext, removeStageContext } from '../domain/stageContext/service'
 import { listRecentAgentActions } from '../db/agentActions'
@@ -12,5 +12,5 @@ export function registerStageContextIpc(): void {
     removeStageContext(id)
     return { ok: true }
   })
-  ipcMain.handle('stageContext:recentActions', (_event, limit?: number) => listRecentAgentActions(limit))
+  ipcMain.handle('stageContext:recentActions', (_event, limit?: number, origin?: AgentActionOrigin) => listRecentAgentActions(limit, origin))
 }

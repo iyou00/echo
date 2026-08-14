@@ -75,6 +75,25 @@ describe('yinyi quality boundaries', () => {
     expect(tracks.map((track) => track.title)).toEqual(['听完的歌'])
   })
 
+  it('uses Agent-owned tracks only after the playback action actually executed', () => {
+    const tracks = yinyiTestHelpers.filterYinyiTracksByExecutedActions([
+      {
+        title: '只是推荐', artist: 'Echo', listenedAt: '2026-06-17 09:00:00',
+        source: 'recommended_by_echo', queueStatus: 'playing', agentActionItemId: 'pending-item',
+      },
+      {
+        title: '真的开播', artist: 'Echo', listenedAt: '2026-06-17 09:05:00',
+        source: 'recommended_by_echo', queueStatus: 'playing', agentActionItemId: 'started-item',
+      },
+      {
+        title: '外部播放', artist: 'User', listenedAt: '2026-06-17 09:10:00',
+        source: 'netease_history', queueStatus: 'playing',
+      },
+    ], new Set(['started-item']))
+
+    expect(tracks.map((track) => track.title)).toEqual(['真的开播', '外部播放'])
+  })
+
   it('keeps dismissed tracks out of positive fallback metadata', () => {
     const entry = yinyiTestHelpers.fallbackYinyiEntry('2026-06-17', [], [
       {

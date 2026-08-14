@@ -1,3 +1,4 @@
+import type Database from 'better-sqlite3'
 import { getDb } from './index'
 
 export type CarePingScheduleStatus = 'planned' | 'completed' | 'failed' | 'skipped'
@@ -12,6 +13,9 @@ export interface CarePingScheduleRecord {
   ranAt?: string | null
   message?: string | null
   error?: string | null
+  eligibleAfter?: string | null
+  deferCount: number
+  decisionCode?: string | null
 }
 
 function toRecord(row: Record<string, unknown>): CarePingScheduleRecord {
@@ -25,6 +29,9 @@ function toRecord(row: Record<string, unknown>): CarePingScheduleRecord {
     ranAt: typeof row.ran_at === 'string' ? row.ran_at : null,
     message: typeof row.message === 'string' ? row.message : null,
     error: typeof row.error === 'string' ? row.error : null,
+    eligibleAfter: typeof row.eligible_after === 'string' ? row.eligible_after : null,
+    deferCount: Number(row.defer_count ?? 0),
+    decisionCode: typeof row.decision_code === 'string' ? row.decision_code : null,
   }
 }
 
@@ -66,12 +73,31 @@ export function updateCarePingPlanStatus(
     .run(status, message, error, new Date().toLocaleString('sv-SE', { hour12: false }), id)
 }
 
-export function restoreCarePingPlan(id: number): void {
-  getDb()
+export function restoreCarePingPlan(
+  id: number,
+  preserveDefer = false,
+  database: Database.Database = getDb(),
+): CarePingScheduleRecord | null {
+  database
     .prepare(`
       UPDATE care_ping_schedule
-      SET status = 'planned', message = '', error = '', ran_at = NULL
+      SET status = 'planned', message = '', error = '', ran_at = NULL,
+          eligible_after = CASE WHEN ? THEN eligible_after ELSE NULL END,
+          defer_count = CASE WHEN ? THEN defer_count ELSE 0 END,
+          decision_code = CASE WHEN ? THEN decision_code ELSE NULL END
       WHERE id = ?
     `)
-    .run(id)
+    .run(preserveDefer ? 1 : 0, preserveDefer ? 1 : 0, preserveDefer ? 1 : 0, id)
+  const row = database.prepare('SELECT * FROM care_ping_schedule WHERE id = ?').get(id) as Record<string, unknown> | undefined
+  return row ? toRecord(row) : null
+}
+
+export function deferCarePingPlan(id: number, eligibleAfter: string, decisionCode: string): boolean {
+  const result = getDb().prepare(`
+    UPDATE care_ping_schedule
+    SET eligible_after = ?, defer_count = defer_count + 1, decision_code = ?,
+        message = ?, error = '', ran_at = NULL
+    WHERE id = ? AND status = 'planned' AND defer_count = 0
+  `).run(eligibleAfter, decisionCode, `延后到 ${eligibleAfter}`, id)
+  return result.changes === 1
 }

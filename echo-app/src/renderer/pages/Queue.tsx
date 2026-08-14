@@ -8,6 +8,17 @@ import { trackIdentity as trackKey } from '../../shared/trackIdentity'
 
 const FAVORITE_PAGE_SIZE = 80
 
+function asFreshPlaybackTrack(track: Track, sourceContext: NonNullable<Track['sourceContext']>): Track {
+  return {
+    ...track,
+    sourceContext,
+    agentActionId: undefined,
+    agentActionItemId: undefined,
+    stageContextId: undefined,
+    playbackInstanceId: undefined,
+  }
+}
+
 interface QueuePageProps extends AppPageProps {
   queue: Track[]
   echo: EchoApi
@@ -225,11 +236,19 @@ export function QueuePage({
   }
 
   async function playFavorite(track: Track) {
-    await playTrackWithContext(track, favorites, false)
+    await playTrackWithContext(
+      asFreshPlaybackTrack(track, 'favorite'),
+      favorites.map((item) => asFreshPlaybackTrack(item, 'queue')),
+      false,
+    )
   }
 
   async function playHistoryTrack(track: Track, dayTracks: Track[]) {
-    await playTrackWithContext(track, dayTracks, false)
+    await playTrackWithContext(
+      asFreshPlaybackTrack(track, 'history'),
+      dayTracks.map((item) => asFreshPlaybackTrack(item, 'queue')),
+      false,
+    )
   }
 
   async function playNowTrack(track: Track) {

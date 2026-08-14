@@ -55,9 +55,30 @@ function playbackOrigin(track: Track) {
   return 'playback' as const
 }
 
+function playbackUserAgency(track: Track) {
+  if (track.sourceContext === 'favorite' || track.sourceContext === 'history') return 'active' as const
+  if (track.sourceContext === 'queue') return 'passive' as const
+  return 'reactive' as const
+}
+
 function createAttributedPlayback(track: Track): Track {
   const context = loadActiveStageContext()
   const playbackInstanceId = randomUUID()
+  const existingActionStatus = track.agentActionId ? loadAgentActionStatus(track.agentActionId) : null
+  const existingItemStatus = track.agentActionItemId ? loadAgentActionItemStatus(track.agentActionItemId) : null
+  const reusableStatuses = new Set(['planned', 'started', 'succeeded'])
+  if (
+    track.sourceContext !== 'favorite'
+    && track.sourceContext !== 'history'
+    && track.agentActionId
+    && track.agentActionItemId
+    && existingActionStatus
+    && existingItemStatus
+    && reusableStatuses.has(existingActionStatus)
+    && reusableStatuses.has(existingItemStatus)
+  ) {
+    return { ...track, playbackInstanceId }
+  }
   const action = createAgentAction({
     origin: playbackOrigin(track),
     actionType: track.sourceContext === 'voice' ? 'silent_play' : 'play',
@@ -95,8 +116,6 @@ function markAttributedPlaybackStarted(track: Track): void {
 
 function markAttributedPlaybackSucceeded(track: Track): void {
   if (!track.agentActionId || !track.agentActionItemId) return
-  if (loadAgentActionItemStatus(track.agentActionItemId) === 'started') transitionAgentActionItem(track.agentActionItemId, 'succeeded')
-  if (loadAgentActionStatus(track.agentActionId) === 'started') transitionAgentAction(track.agentActionId, 'succeeded')
   if (track.playbackInstanceId) {
     recordAgentActionOutcome({
       actionId: track.agentActionId,
@@ -105,9 +124,11 @@ function markAttributedPlaybackSucceeded(track: Track): void {
       outcomeType: 'playback_started',
       polarity: 'system',
       strength: 'weak',
-      metadata: { userAgency: track.sourceContext === 'queue' ? 'passive' : 'reactive' },
+      metadata: { userAgency: playbackUserAgency(track) },
     })
   }
+  if (loadAgentActionItemStatus(track.agentActionItemId) === 'started') transitionAgentActionItem(track.agentActionItemId, 'succeeded')
+  if (loadAgentActionStatus(track.agentActionId) === 'started') transitionAgentAction(track.agentActionId, 'succeeded')
 }
 
 function markAttributedPlaybackFailed(track: Track, failureKind: string): void {
@@ -138,7 +159,7 @@ function attributedPlaybackOutcome(track: Track, reason: 'ended' | 'next' | 'sto
     positionMs: state.position,
     durationMs: state.duration,
     reason,
-    userAgency: track.sourceContext === 'queue' ? 'passive' : 'reactive',
+    userAgency: playbackUserAgency(track),
   })
 }
 
@@ -237,11 +258,11 @@ async function applyPlaybackFeedback(track: Track, completionRate: number, reaso
   getDb().transaction(() => {
     if (outcome) shouldApplyLegacy = recordAgentActionOutcome(outcome).inserted
     if (!shouldApplyLegacy) return
-    if (rate >= 0.8) recordTrackFeedback('played', track, rate)
-    else if (rate < 0.3) recordTrackFeedback('skipped', track, rate)
+    if (outcome?.outcomeType === 'completed' || (!outcome && rate >= 0.8)) recordTrackFeedback('played', track, rate)
+    else if (outcome?.outcomeType === 'quick_skip' || (!outcome && rate < 0.3)) recordTrackFeedback('skipped', track, rate)
   })()
   if (!shouldApplyLegacy) return
-  if (rate >= 0.8) {
+  if (outcome?.outcomeType === 'completed' || (!outcome && rate >= 0.8)) {
     await applyMemorySignal('played', { artist: track.artist, trackId: track.id ?? track.neteaseId, title: track.title, completionRate: rate }, { source: 'playback', track })
     const key = trackKey(track)
     const now = Date.now()
@@ -257,7 +278,7 @@ async function applyPlaybackFeedback(track: Track, completionRate: number, reaso
     }
     return
   }
-  if (rate < 0.3) {
+  if (outcome?.outcomeType === 'quick_skip' || (!outcome && rate < 0.3)) {
     await applyMemorySignal('skipped', { artist: track.artist, trackId: track.id ?? track.neteaseId, title: track.title, completionRate: rate }, { source: 'playback', track })
   }
 }

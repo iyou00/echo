@@ -13,6 +13,8 @@ describe('playback outcome policy', () => {
   it('uses explicit boundary rules for skips, effective listens and completion', () => {
     expect(classifyPlaybackOutcome({ ...base, positionMs: 29_000, reason: 'next' }).outcomeType).toBe('quick_skip')
     expect(classifyPlaybackOutcome({ ...base, positionMs: 30_000, reason: 'next' }).outcomeType).toBe('effective_listen')
+    expect(classifyPlaybackOutcome({ ...base, durationMs: 200_000, positionMs: 35_000, reason: 'next' }).outcomeType).toBe('user_stop')
+    expect(classifyPlaybackOutcome({ ...base, durationMs: 200_000, positionMs: 60_000, reason: 'next' }).outcomeType).toBe('effective_listen')
     expect(classifyPlaybackOutcome({ ...base, positionMs: 80_000, reason: 'ended' }).outcomeType).toBe('completed')
   })
 })

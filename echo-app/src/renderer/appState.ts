@@ -19,6 +19,7 @@ export interface AppState {
   playbackNotice: string
   careMuteToast: boolean
   careMuteCountdown: number
+  carePingId: number | null
   voiceAutoStartToken: number
   voiceContinuous: boolean
   closeDialogOpen: boolean
@@ -64,6 +65,7 @@ function initialAppState(): AppState {
     playbackNotice: '',
     careMuteToast: false,
     careMuteCountdown: 5,
+    carePingId: null,
     voiceAutoStartToken: 0,
     voiceContinuous: false,
     closeDialogOpen: false,

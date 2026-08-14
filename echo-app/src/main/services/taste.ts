@@ -372,8 +372,7 @@ function groupEventsByTrack(events: ProfileTrackEvent[]): Map<string, ProfileTra
 
 function filterProfileEventsByActionOutcome(events: ProfileTrackEvent[], qualifiedActionItemIds: Set<string>): ProfileTrackEvent[] {
   return events.filter((event) => (
-    event.queueStatus === 'skipped'
-    || !event.track.agentActionItemId
+    !event.track.agentActionItemId
     || qualifiedActionItemIds.has(event.track.agentActionItemId)
   ))
 }

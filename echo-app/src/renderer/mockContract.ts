@@ -27,7 +27,7 @@ export const ECHO_API_CONTRACT: ContractShape = {
   tts: ['synthesize', 'test'],
   weather: ['get'],
   listening: ['generateSegment', 'endSession'],
-  carePings: ['test', 'muteToday', 'schedule'],
+  carePings: ['test', 'muteToday', 'pause', 'schedule'],
   netease: ['getLoginState', 'createQrLogin', 'checkQrLogin', 'sendCaptcha', 'loginWithCaptcha', 'importCookie', 'logout', 'listPlaylists', 'importPlaylist'],
 }
 

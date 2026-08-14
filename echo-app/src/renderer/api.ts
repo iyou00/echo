@@ -65,6 +65,8 @@ const mockSettings: Settings = {
     enabled: false,
     frequency: 'normal',
     detectFullscreen: true,
+    quietHours: { enabled: true, start: '22:30', end: '08:30' },
+    pausedUntil: '',
   },
   chat: {
     restoreOnStart: true,
@@ -1268,7 +1270,23 @@ const mockEcho: EchoApi = {
       })
     },
     async muteToday() {
-      return { ok: true, message: '今天先不提醒了' }
+      return { ok: true, message: 'Echo 会安静到明早 8 点。' }
+    },
+    async pause(mode: 'today' | 'week' | 'resume') {
+      const pauseDate = new Date()
+      if (mode === 'today') {
+        pauseDate.setDate(pauseDate.getDate() + 1)
+        pauseDate.setHours(8, 0, 0, 0)
+      } else if (mode === 'week') {
+        pauseDate.setDate(pauseDate.getDate() + 7)
+      }
+      const pausedUntil = mode === 'resume' ? '' : pauseDate.toISOString()
+      settingsState.carePings.pausedUntil = pausedUntil
+      return {
+        ok: true,
+        message: mode === 'resume' ? 'Echo 可以重新在合适的时候出现了。' : mode === 'week' ? 'Echo 会安静 7 天。' : 'Echo 会安静到明早 8 点。',
+        settings: structuredClone(settingsState),
+      }
     },
   },
   netease: {

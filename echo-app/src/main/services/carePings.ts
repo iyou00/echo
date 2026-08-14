@@ -1,26 +1,38 @@
 import { app, BrowserWindow, Notification, nativeImage } from 'electron'
+import type Database from 'better-sqlite3'
 import path from 'node:path'
 import type { PingType, Track } from '../../types/ipc'
 import { trackIdentity } from '../../shared/trackIdentity'
-import { getSettings } from '../db/settings'
+import { getDb } from '../db'
+import { getSettings, updateSetting } from '../db/settings'
 import {
+  getCarePingById,
   getRecentCarePingBodies,
   getRecentCarePingTracks,
   insertCarePing,
   isCarePingsMutedToday,
+  listDueCarePingObservations,
   markCarePingClicked,
+  markCarePingDeliveryFailed,
+  markCarePingDismissed,
+  markCarePingShown,
   muteCarePingsToday,
+  unmuteCarePingsToday,
   type CarePingRecord,
 } from '../db/carePings'
 import { loadRecentConversations, appendConversation } from '../db/conversations'
+import { loadProactiveActionSnapshot } from '../db/agentActions'
 import { loadActiveEvents, type ActiveEvent } from '../db/events'
+import { loadActiveListeningSession } from '../db/listening'
 import { appendRecommendedTracks } from '../db/tracks'
 import { getTasteProfile } from '../db/taste'
 import { completeChat } from '../llm/client'
 import { stripKnownSystemBlocks } from '../llm/outputSanitize'
 import { loadActiveStageContext } from '../domain/stageContext/repository'
-import { beginAgentAction, completeAgentAction, failAgentAction } from '../domain/agentAction/service'
+import { attributeTracksToAgentAction, beginAgentAction, completeAgentAction, failAgentAction } from '../domain/agentAction/service'
 import { recordAgentActionOutcome } from '../domain/agentAction/repository'
+import type { ProactiveBudgetDecision, ProactiveBudgetInput } from '../domain/proactiveBudget/contracts'
+import { decideProactiveBudget } from '../domain/proactiveBudget/policy'
 import { safePromptJson } from '../llm/promptData'
 import { buildSoulPolicyPrompt } from '../skills/soul/policy'
 import { readRootFile } from '../utils/paths'
@@ -33,6 +45,7 @@ import { stableDaySeed, stableInt } from './recommendation/deterministic'
 import { carePingReadiness } from './scheduler/readiness'
 import { buildMemoryEvidencePrompt } from './memoryEvidence'
 import { hasExplicitMemorySource, hasMemorySourceLeak } from './memorySourceGuard'
+import { getCurrentScene } from './scene'
 
 export interface TimeSlot {
   key?: string
@@ -43,13 +56,18 @@ export interface TimeSlot {
 
 export interface CarePingRunResult {
   triggered: boolean
-  status: 'completed' | 'failed' | 'skipped'
+  status: 'completed' | 'failed' | 'skipped' | 'deferred'
   message: string
   error?: string
+  deferredUntil?: string
+  decisionCode?: string
 }
 
 export interface CarePingRunOptions {
   signal?: AbortSignal
+  now?: Date
+  evaluationWindowEndAt?: string
+  budgetDecision?: ProactiveBudgetDecision
 }
 
 interface CarePingPromptContext {
@@ -70,6 +88,14 @@ interface CarePingPromptContext {
 }
 
 const activeNotifications = new Set<Notification>()
+type CareTerminalOutcome = 'opened' | 'dismissed' | 'ignored'
+
+class CarePingBudgetChangedError extends Error {
+  constructor(readonly decision: ProactiveBudgetDecision) {
+    super(decisionMessage(decision))
+    this.name = 'CarePingBudgetChangedError'
+  }
+}
 
 function assertCarePingActive(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException('任务已取消', 'AbortError')
@@ -349,18 +375,7 @@ function showMainWindow(payload: { page: 'chat' | 'voice'; action?: 'start_liste
 }
 
 async function handleNotificationClick(record: CarePingRecord): Promise<void> {
-  markCarePingClicked(record.id)
-  if (record.payload.agentActionId) {
-    recordAgentActionOutcome({
-      actionId: record.payload.agentActionId,
-      actionItemId: record.payload.agentActionItemId,
-      sourceEventKey: `care_opened:${record.id}`,
-      outcomeType: 'opened',
-      polarity: 'neutral',
-      strength: 'medium',
-      metadata: { userAgency: 'active' },
-    })
-  }
+  recordCareTerminalOutcome(record, 'opened')
   if (record.type === 'recommend_track' && record.payload.track) {
     appendRecommendedTracks([record.payload.track])
     const message = appendConversation('assistant', record.body, [record.payload.track])
@@ -376,6 +391,90 @@ async function handleNotificationClick(record: CarePingRecord): Promise<void> {
   const message = appendConversation('assistant', record.body)
   BrowserWindow.getAllWindows()[0]?.webContents.send('chat:message-injected', message)
   showMainWindow({ page: 'chat', carePingId: record.id, canMuteToday: true })
+}
+
+function recordCareTerminalOutcome(
+  record: CarePingRecord,
+  outcome: CareTerminalOutcome,
+  at = new Date(),
+  database: Database.Database = getDb(),
+): boolean {
+  const actionId = record.payload.agentActionId
+  if (!actionId) return false
+  return database.transaction(() => {
+    const existing = database.prepare(`
+      SELECT outcome_type
+      FROM agent_action_outcomes
+      WHERE action_id = ? AND outcome_type IN ('opened', 'dismissed', 'ignored')
+    `).all(actionId) as Array<{ outcome_type: CareTerminalOutcome }>
+    const existingTypes = new Set(existing.map((item) => item.outcome_type))
+    if (existingTypes.has(outcome)) return false
+    if (outcome === 'ignored' && existingTypes.size > 0) return false
+    if (outcome === 'opened' && (existingTypes.has('dismissed') || existingTypes.has('ignored'))) return false
+    if (outcome === 'dismissed' && existingTypes.has('ignored')) return false
+    if (outcome === 'opened') markCarePingClicked(record.id, at, database)
+    if (outcome === 'dismissed') markCarePingDismissed(record.id, at, database)
+    return recordAgentActionOutcome({
+      actionId,
+      actionItemId: record.payload.agentActionItemId,
+      sourceEventKey: `care_${outcome}:${record.id}`,
+      outcomeType: outcome,
+      polarity: outcome === 'opened' ? 'neutral' : 'negative',
+      strength: outcome === 'dismissed' ? 'strong' : outcome === 'ignored' ? 'weak' : 'medium',
+      occurredAt: at.toISOString(),
+      metadata: { userAgency: outcome === 'ignored' ? 'passive' : 'active' },
+    }, database).inserted
+  })()
+}
+
+function recordCareDeliveryFailure(record: CarePingRecord, error?: string): void {
+  const actionId = record.payload.agentActionId
+  if (!actionId) return
+  const database = getDb()
+  database.transaction(() => {
+    markCarePingDeliveryFailed(record.id, database)
+    recordAgentActionOutcome({
+      actionId,
+      actionItemId: record.payload.agentActionItemId,
+      sourceEventKey: `care_system_failure:${record.id}`,
+      outcomeType: 'system_failure',
+      polarity: 'neutral',
+      strength: 'weak',
+      metadata: { userAgency: 'passive', ...(error ? { failureKind: error.slice(0, 120) } : {}) },
+    }, database)
+  })()
+}
+
+export function reconcileCarePingOutcomes(now = new Date(), database: Database.Database = getDb()): number {
+  let inserted = 0
+  for (const record of listDueCarePingObservations(now, database)) {
+    if (recordCareTerminalOutcome(record, 'ignored', now, database)) inserted += 1
+  }
+  return inserted
+}
+
+export function pauseCarePings(
+  mode: 'today' | 'week' | 'resume',
+  now = new Date(),
+): { ok: boolean; message: string; settings: ReturnType<typeof getSettings> } {
+  if (mode === 'resume') {
+    unmuteCarePingsToday()
+    return { ok: true, message: 'Echo 可以重新在合适的时候出现了。', settings: updateSetting('carePings.pausedUntil', '') }
+  }
+  const pausedUntil = new Date(now)
+  if (mode === 'today') {
+    pausedUntil.setDate(pausedUntil.getDate() + 1)
+    pausedUntil.setHours(8, 0, 0, 0)
+    muteCarePingsToday()
+  } else {
+    pausedUntil.setDate(pausedUntil.getDate() + 7)
+  }
+  const settings = updateSetting('carePings.pausedUntil', pausedUntil.toISOString())
+  return {
+    ok: true,
+    message: mode === 'today' ? 'Echo 会安静到明早 8 点。' : 'Echo 会安静 7 天。',
+    settings,
+  }
 }
 
 function sendNotification(record: CarePingRecord): void {
@@ -396,11 +495,24 @@ function sendNotification(record: CarePingRecord): void {
     })
   })
   notification.on('action', () => {
-    muteCarePingsToday()
+    try {
+      recordCareTerminalOutcome(record, 'dismissed')
+      pauseCarePings('today')
+    } catch (error) {
+      recordSchedulerHealth('care-ping', 'degraded', '通知暂停操作失败。', error instanceof Error ? error.message : String(error))
+    }
   })
   notification.on('close', release)
-  notification.on('failed', release)
+  notification.on('failed', (_event, error) => {
+    release()
+    try {
+      recordCareDeliveryFailure(record, error)
+    } catch (failureError) {
+      recordSchedulerHealth('care-ping', 'degraded', '通知失败结果记录失败。', failureError instanceof Error ? failureError.message : String(failureError))
+    }
+  })
   notification.show()
+  markCarePingShown(record.id)
 }
 
 export async function generateAndSendCarePing(type: PingType, options: CarePingRunOptions = {}): Promise<CarePingRecord> {
@@ -410,14 +522,26 @@ export async function generateAndSendCarePing(type: PingType, options: CarePingR
     if (!track) return generateAndSendCarePing('casual_check', options)
     const body = await writePingBody('recommend_track', track, options)
     assertCarePingActive(options.signal)
-    return persistCarePingAction('recommend_track', body, track)
+    const finalDecision = recheckCarePingBudget(options)
+    return persistCarePingAction('recommend_track', body, track, finalDecision)
   }
   const body = await writePingBody(type, undefined, options)
   assertCarePingActive(options.signal)
-  return persistCarePingAction(type, body)
+  const finalDecision = recheckCarePingBudget(options)
+  return persistCarePingAction(type, body, undefined, finalDecision)
 }
 
-function persistCarePingAction(type: PingType, body: string, track?: Track): CarePingRecord {
+function recheckCarePingBudget(
+  options: CarePingRunOptions,
+  currentDecision: () => ProactiveBudgetDecision = () => decideProactiveBudget(buildProactiveBudgetInput({ ...options, now: options.now ?? new Date() })),
+): ProactiveBudgetDecision | undefined {
+  if (!options.budgetDecision) return undefined
+  const decision = currentDecision()
+  if (decision.verdict !== 'allow') throw new CarePingBudgetChangedError(decision)
+  return decision
+}
+
+function persistCarePingAction(type: PingType, body: string, track?: Track, budgetDecision?: ProactiveBudgetDecision): CarePingRecord {
   const stageContext = loadActiveStageContext()
   const action = beginAgentAction({
     origin: 'care',
@@ -430,12 +554,14 @@ function persistCarePingAction(type: PingType, body: string, track?: Track): Car
       { itemType: 'message', ordinal: 0, payload: { characterCount: body.length, pingType: type } },
       ...(track ? [{ itemType: 'track' as const, ordinal: 1, entityKey: `${track.id ?? track.neteaseId ?? ''}:${track.title}:${track.artist}`, payload: { title: track.title, artist: track.artist } }] : []),
     ],
-    decision: { policyVersion: 1, pingType: type },
+    decision: { policyVersion: 1, pingType: type, ...(budgetDecision ?? {}) },
   })
   try {
-    const trackItem = action.items.find((item) => item.itemType === 'track')
-    const record = insertCarePing(type, 'Echo', body, track
-      ? { type, track, agentActionId: action.id, agentActionItemId: trackItem?.id }
+    const attributedTrack = track
+      ? attributeTracksToAgentAction(action, [{ ...track, sourceContext: 'care' }])[0]
+      : undefined
+    const record = insertCarePing(type, 'Echo', body, attributedTrack
+      ? { type, track: attributedTrack, agentActionId: action.id, agentActionItemId: attributedTrack.agentActionItemId }
       : { type, agentActionId: action.id, agentActionItemId: action.items[0]?.id })
     sendNotification(record)
     completeAgentAction(action)
@@ -446,18 +572,75 @@ function persistCarePingAction(type: PingType, body: string, track?: Track): Car
   }
 }
 
-function recordCareSilence(reason: string): void {
+function recordCareSilence(decision: ProactiveBudgetDecision): void {
   const stageContext = loadActiveStageContext()
   const action = beginAgentAction({
     origin: 'care',
     actionType: 'stay_silent',
-    reasonCode: 'low_intervention_value',
+    reasonCode: ['disabled', 'paused', 'muted_today', 'fullscreen_blocked'].includes(decision.code)
+      ? 'muted_or_blocked'
+      : 'low_intervention_value',
     goalCode: stageContext?.goal ?? 'none',
     stageContextId: stageContext?.id,
     stageContextRevision: stageContext?.revision,
-    decision: { policyVersion: 1, reason: reason.slice(0, 120) },
+    decision: { ...decision },
   })
   completeAgentAction(action)
+}
+
+function localIsoDate(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function decisionMessage(decision: ProactiveBudgetDecision): string {
+  const messages: Record<ProactiveBudgetDecision['code'], string> = {
+    eligible: '这次适合轻轻出现。',
+    disabled: '主动通知未开启。',
+    paused: '主动关心仍在暂停中。',
+    muted_today: '今天已开启免打扰。',
+    quiet_hours: '现在处于安静时段。',
+    daily_budget_exhausted: '今天出现的次数已经够了。',
+    cooldown: '距离上次主动关心还太近。',
+    recent_negative_feedback: '最近几次主动关心没有得到回应，先安静一阵。',
+    recent_user_activity: '你刚刚还在和 Echo 互动，暂时不额外打扰。',
+    active_session: '当前陪伴还在进行，不重复打扰。',
+    fullscreen_blocked: '检测到全屏状态，暂不打扰。',
+    stage_prefers_quiet: '当前阶段更适合安静陪伴。',
+    safety_caution: '当前状态需要更谨慎，暂停普通主动通知。',
+    insufficient_evidence: 'Echo 还在积累相处线索。',
+  }
+  return messages[decision.code]
+}
+
+function buildProactiveBudgetInput(options: CarePingRunOptions = {}): ProactiveBudgetInput {
+  const now = options.now ?? new Date()
+  const settings = getSettings()
+  const snapshot = loadProactiveActionSnapshot(localIsoDate(now))
+  const lastUserMessage = loadRecentConversations(30).filter((message) => message.role === 'user').at(-1)
+  const readiness = carePingReadiness()
+  const fullscreenBlocked = settings.carePings.detectFullscreen
+    && BrowserWindow.getAllWindows().some((window) => !window.isDestroyed() && window.isFullScreen())
+  return {
+    now,
+    enabled: settings.carePings.enabled,
+    frequency: settings.carePings.frequency,
+    quietHours: settings.carePings.quietHours,
+    pausedUntil: settings.carePings.pausedUntil,
+    mutedToday: isCarePingsMutedToday(),
+    activeStage: loadActiveStageContext(now),
+    lastUserInteractionAt: lastUserMessage?.createdAt,
+    activeListeningSession: Boolean(loadActiveListeningSession(now)),
+    activeSceneSession: Boolean(getCurrentScene()),
+    fullscreenBlocked,
+    sentToday: snapshot.sentToday,
+    lastSentAt: snapshot.lastSentAt,
+    recentInterventionOutcomes: snapshot.recentOutcomes,
+    evidenceReady: readiness.ready,
+    evaluationWindowEndAt: options.evaluationWindowEndAt,
+  }
 }
 
 export async function maybeTriggerCarePing(slot: TimeSlot, options: CarePingRunOptions = {}): Promise<boolean> {
@@ -466,24 +649,42 @@ export async function maybeTriggerCarePing(slot: TimeSlot, options: CarePingRunO
 
 export async function runCarePingSlot(slot: TimeSlot, options: CarePingRunOptions = {}): Promise<CarePingRunResult> {
   assertCarePingActive(options.signal)
-  const settings = getSettings()
-  if (!settings.carePings.enabled) {
-    return { triggered: false, status: 'skipped', message: '主动通知未开启。' }
-  }
-  if (isCarePingsMutedToday()) {
-    return { triggered: false, status: 'skipped', message: '今天已开启免打扰。' }
-  }
-  const readiness = carePingReadiness()
-  if (!readiness.ready) {
-    recordCareSilence(readiness.reason ?? 'insufficient_evidence')
-    return { triggered: false, status: 'skipped', message: readiness.reason ?? 'Echo 还在积累相处线索。' }
+  const decision = options.budgetDecision ?? decideProactiveBudget(buildProactiveBudgetInput(options))
+  if (decision.verdict !== 'allow') {
+    recordCareSilence(decision)
+    const message = decisionMessage(decision)
+    if (decision.verdict === 'defer' && decision.eligibleAt) {
+      return {
+        triggered: false,
+        status: 'deferred',
+        message,
+        deferredUntil: decision.eligibleAt,
+        decisionCode: decision.code,
+      }
+    }
+    return { triggered: false, status: 'skipped', message, decisionCode: decision.code }
   }
 
   try {
-    await generateAndSendCarePing(pickPingType(), options)
-    return { triggered: true, status: 'completed', message: `${slot.label ?? '主动通知'}已发送。` }
+    await generateAndSendCarePing(pickPingType(), { ...options, budgetDecision: decision })
+    return { triggered: true, status: 'completed', message: `${slot.label ?? '主动通知'}已发送。`, decisionCode: decision.code }
   } catch (error) {
     assertCarePingActive(options.signal)
+    if (error instanceof CarePingBudgetChangedError) {
+      const finalDecision = error.decision
+      recordCareSilence(finalDecision)
+      const message = decisionMessage(finalDecision)
+      if (finalDecision.verdict === 'defer' && finalDecision.eligibleAt) {
+        return {
+          triggered: false,
+          status: 'deferred',
+          message,
+          deferredUntil: finalDecision.eligibleAt,
+          decisionCode: finalDecision.code,
+        }
+      }
+      return { triggered: false, status: 'skipped', message, decisionCode: finalDecision.code }
+    }
     const message = error instanceof Error ? error.message : '主动通知生成失败'
     return { triggered: false, status: 'failed', message: '主动通知生成失败。', error: message }
   }
@@ -510,9 +711,16 @@ export const carePingTestHelpers = {
   isUnsafeBody,
   isCarePingBodyUsableForTrack,
   buildCarePingPromptInput,
+  decisionMessage,
+  recordCareTerminalOutcome,
+  recheckCarePingBudget,
 }
 
-export function muteToday(): { ok: boolean; message: string } {
-  muteCarePingsToday()
-  return { ok: true, message: '今天先不提醒了' }
+export function muteToday(carePingId?: number): { ok: boolean; message: string } {
+  if (carePingId) {
+    const record = getCarePingById(carePingId)
+    if (record) recordCareTerminalOutcome(record, 'dismissed')
+  }
+  pauseCarePings('today')
+  return { ok: true, message: 'Echo 会安静到明早 8 点。' }
 }

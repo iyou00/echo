@@ -4,7 +4,7 @@ import { getCompanionProfile, loadLatestAssistantResponseStrategy } from '../db/
 import { loadActiveEvents, type ActiveEvent } from '../db/events'
 import { appendListeningSegment, bindListeningSessionStageContext, getOrCreateListeningSession, loadListeningSegments } from '../db/listening'
 import { loadActiveStageContext } from '../domain/stageContext/repository'
-import { beginAgentAction, completeAgentAction, failAgentAction } from '../domain/agentAction/service'
+import { attributeTracksToAgentAction, beginAgentAction, completeAgentAction, failAgentAction } from '../domain/agentAction/service'
 import { appendRecommendedTracks, loadListenedTrackWindows, loadListenedTracksSince, loadRecentRecommendedTracks, loadRecentTracks } from '../db/tracks'
 import { getAllImportedTracks } from '../db/playlists'
 import { getTasteProfile } from '../db/taste'
@@ -928,7 +928,7 @@ function recordListeningDecision(input: {
   stageContext: StageContext | null
   succeeded: boolean
   failureKind?: string
-}): void {
+}): Track | null {
   const action = beginAgentAction({
     origin: 'listening',
     actionType: input.delivery === 'silent'
@@ -951,6 +951,7 @@ function recordListeningDecision(input: {
   })
   if (input.succeeded) completeAgentAction(action)
   else failAgentAction(action, input.failureKind ?? 'listening_delivery_failed')
+  return input.track ? attributeTracksToAgentAction(action, [input.track])[0] : null
 }
 
 export async function generateListeningSegment(options: ListeningSegmentOptions = {}): Promise<ListeningSegmentResult> {
@@ -1044,7 +1045,10 @@ export async function generateListeningSegment(options: ListeningSegmentOptions 
   if (listeningPlan.delivery === 'silent') {
     if (track) {
       track = withVoiceSourceContext(track, listeningPlan)
+      track = recordListeningDecision({ track, text: '', delivery: listeningPlan.delivery, stageContext, succeeded: true }) ?? track
       appendRecommendedTracks([track])
+    } else {
+      recordListeningDecision({ track: null, text: '', delivery: listeningPlan.delivery, stageContext, succeeded: true })
     }
     rememberScenario('', track)
     appendListeningSegment({
@@ -1061,7 +1065,6 @@ export async function generateListeningSegment(options: ListeningSegmentOptions 
       consumedEventKeys: listeningPlan.topicSource === 'active_event' ? unusedActiveEvents.map(activeEventKey) : [],
       generatedAt,
     })
-    recordListeningDecision({ track, text: '', delivery: listeningPlan.delivery, stageContext, succeeded: true })
     options.onProgress?.({ phase: 'done', current: 4, total: 4, message: '这首先安静地听。' })
     return {
       text: '',
@@ -1148,7 +1151,24 @@ export async function generateListeningSegment(options: ListeningSegmentOptions 
   assertListeningActive(options.signal)
   if (track) {
     track = withVoiceSourceContext(track, listeningPlan, text)
+    track = recordListeningDecision({
+      track,
+      text,
+      delivery: listeningPlan.delivery,
+      stageContext,
+      succeeded: Boolean(audio.ok && audio.audioUrl),
+      failureKind: 'tts_failed',
+    }) ?? track
     appendRecommendedTracks([track])
+  } else {
+    recordListeningDecision({
+      track: null,
+      text,
+      delivery: listeningPlan.delivery,
+      stageContext,
+      succeeded: Boolean(audio.ok && audio.audioUrl),
+      failureKind: 'tts_failed',
+    })
   }
   rememberScenario(text, track)
   appendListeningSegment({
@@ -1166,11 +1186,9 @@ export async function generateListeningSegment(options: ListeningSegmentOptions 
     generatedAt,
   })
   if (audio.ok && audio.audioUrl) {
-    recordListeningDecision({ track, text, delivery: listeningPlan.delivery, stageContext, succeeded: true })
     options.onProgress?.({ phase: 'done', current: 4, total: 4, message: '回声片段已生成。' })
     return { text, track, delivery: listeningPlan.delivery, density: listeningPlan.density, sessionId: session.id, audioUrl: audio.audioUrl, generatedAt }
   }
-  recordListeningDecision({ track, text, delivery: listeningPlan.delivery, stageContext, succeeded: false, failureKind: 'tts_failed' })
   options.onProgress?.({ phase: 'done', current: 4, total: 4, message: audio.error?.message ?? 'Echo 现在说不出话来' })
   return { text, track, delivery: listeningPlan.delivery, density: listeningPlan.density, sessionId: session.id, error: audio.error?.message ?? 'Echo 现在说不出话来', generatedAt }
 }

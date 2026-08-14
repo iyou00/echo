@@ -1,6 +1,7 @@
 import cron, { type ScheduledTask } from 'node-cron'
 import type { CareFrequency, CarePingScheduleItem } from '../../../types/ipc'
 import {
+  deferCarePingPlan,
   listCarePingSchedule,
   restoreCarePingPlan,
   updateCarePingPlanStatus,
@@ -10,7 +11,7 @@ import {
 import { insertScheduledJob } from '../../db/scheduledJobs'
 import { getSettings } from '../../db/settings'
 import { recordSchedulerHealth } from '../health'
-import { runCarePingSlot } from '../carePings'
+import { reconcileCarePingOutcomes, runCarePingSlot } from '../carePings'
 import { stableInt } from '../recommendation/deterministic'
 import { runSchedulerResultTask } from './runtimeTask'
 
@@ -63,6 +64,16 @@ function parsePlannedAt(value: string): Date {
   return new Date(year, month - 1, day, hour, minute, 0, 0)
 }
 
+function effectivePlannedAt(record: CarePingScheduleRecord): Date {
+  return record.eligibleAfter ? new Date(record.eligibleAfter) : parsePlannedAt(record.plannedAt)
+}
+
+function carePingWindowEndAt(record: CarePingScheduleRecord): Date {
+  const window = CARE_PING_WINDOWS.find((candidate) => candidate.key === record.windowKey)
+  const [year, month, day] = record.date.split('-').map(Number)
+  return new Date(year, month - 1, day, window?.endHour ?? 23, 0, 0, 0)
+}
+
 function randomPlannedAt(window: CarePingWindow, date: string): string | null {
   const [year, month, day] = date.split('-').map(Number)
   const start = new Date(year, month - 1, day, window.startHour, 0, 0, 0)
@@ -84,13 +95,13 @@ function activeCarePingWindows(frequency: CareFrequency): CarePingWindow[] {
 }
 
 function shouldCatchUpCarePing(record: CarePingScheduleRecord, now = new Date()): boolean {
-  const planned = parsePlannedAt(record.plannedAt)
+  const planned = effectivePlannedAt(record)
   const age = now.getTime() - planned.getTime()
   return age >= 0 && age <= CARE_PING_CATCHUP_GRACE_MS
 }
 
 function shouldExpireCarePing(record: CarePingScheduleRecord, now = new Date()): boolean {
-  const planned = parsePlannedAt(record.plannedAt)
+  const planned = effectivePlannedAt(record)
   return now.getTime() - planned.getTime() > CARE_PING_CATCHUP_GRACE_MS
 }
 
@@ -132,14 +143,12 @@ export function rescheduleCarePings(): void {
     .map((window) => {
       const current = existing.get(window.key)
       if (current) {
-        const planned = parsePlannedAt(current.plannedAt)
+        const planned = effectivePlannedAt(current)
         if (current.status === 'skipped' && current.message === '当前频率已关闭这个提醒时段。' && planned.getTime() > now.getTime()) {
-          restoreCarePingPlan(current.id)
-          return { ...current, status: 'planned' as const, message: '', error: '', ranAt: null }
+          return restoreCarePingPlan(current.id, true)
         }
         if (current.status === 'skipped' && current.message === 'App 未在计划时间运行，已错过这次主动通知。' && shouldCatchUpCarePing(current, now)) {
-          restoreCarePingPlan(current.id)
-          return { ...current, status: 'planned' as const, message: '', error: '', ranAt: null }
+          return restoreCarePingPlan(current.id)
         }
         return current
       }
@@ -158,7 +167,7 @@ export function rescheduleCarePings(): void {
 
   for (const record of records) {
     if (record.status !== 'planned') continue
-    const planned = parsePlannedAt(record.plannedAt)
+    const planned = effectivePlannedAt(record)
     if (planned.getTime() <= now.getTime()) {
       if (shouldCatchUpCarePing(record, now)) {
         executeCarePingPlan(record).catch((error) => {
@@ -180,6 +189,7 @@ export function rescheduleCarePings(): void {
 }
 
 async function runCarePingWatchdog(): Promise<void> {
+  reconcileCarePingOutcomes()
   const settings = getSettings()
   if (!settings.carePings.enabled) return
   const activeKeys = new Set(activeCarePingWindows(settings.carePings.frequency).map((window) => window.key))
@@ -215,6 +225,16 @@ async function executeCarePingPlan(record: CarePingScheduleRecord): Promise<void
   runningCarePingPlanIds.add(record.id)
   try {
     const result = await runCarePingPlanTask(record)
+    if (result.status === 'deferred') {
+      const deferred = result.deferredUntil && result.decisionCode
+        ? deferCarePingPlan(record.id, result.deferredUntil, result.decisionCode)
+        : false
+      if (!deferred) {
+        updateCarePingPlanStatus(record.id, 'skipped', '这次主动关心不再继续延后。')
+        insertScheduledJob('care_ping', record.plannedAt, 'skipped', '这次主动关心不再继续延后。')
+      }
+      return
+    }
     updateCarePingPlanStatus(record.id, result.status, result.message, result.error)
     insertScheduledJob('care_ping', record.plannedAt, result.status, result.message, result.error)
     if (result.status === 'completed') {
@@ -246,8 +266,18 @@ function runCarePingPlanTask(record: CarePingScheduleRecord): Promise<Awaited<Re
       label: record.label,
       hour: planned.getHours(),
       minute: planned.getMinutes(),
-    }, { signal: context.signal })
+    }, {
+      signal: context.signal,
+      evaluationWindowEndAt: record.deferCount === 0 ? carePingWindowEndAt(record).toISOString() : undefined,
+    })
   })
+}
+
+export const carePingJobsTestHelpers = {
+  effectivePlannedAt,
+  carePingWindowEndAt,
+  shouldCatchUpCarePing,
+  shouldExpireCarePing,
 }
 
 export function stopCarePingScheduler(): void {
