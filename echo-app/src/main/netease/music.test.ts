@@ -65,6 +65,20 @@ describe('netease track normalization', () => {
     })
   })
 
+  it('keeps album artwork for the sound object', () => {
+    const normalized = normalizeNeteaseTrack({
+      id: 2,
+      name: '有封面的歌',
+      ar: [{ name: '陈默之' }],
+      al: { name: '此刻', picUrl: 'https://example.com/cover.jpg' },
+    })
+
+    expect(normalized).toMatchObject({
+      album: '此刻',
+      artworkUrl: 'https://example.com/cover.jpg',
+    })
+  })
+
   it.each([Number.POSITIVE_INFINITY, Number.NaN, 9e15, -1])(
     'ignores an invalid publish time without rejecting the track: %s',
     (publishTime) => {

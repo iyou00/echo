@@ -1,8 +1,8 @@
-﻿import { FormEvent, useEffect, useRef, useState } from 'react'
-import { Send, Square } from 'lucide-react'
+import { FormEvent, useEffect, useRef, useState } from 'react'
+import { Mic2, Send, Square } from 'lucide-react'
 import type { ActiveScene, ChatMessage, EchoApi, PlaybackState, SceneDefinition, SceneKey, ScenePlaybackResult, TasteProfile, Track, UiBoundarySnapshot } from '../../types/ipc'
 import type { AppPageProps } from '../appState'
-import { BrandLogo, EmptyState, SceneRail, TrackCard } from '../components'
+import { EmptyState, SceneRail, TrackCard } from '../components'
 import { latestRunningRuntimeTask, useRuntimeTasks } from '../hooks/useRuntimeTasks'
 import { trackIdentity as trackKey } from '../../shared/trackIdentity'
 import { friendlyOperationError } from '../../shared/runtimeRecovery'
@@ -59,7 +59,7 @@ function friendlyChatError() {
   return '这次连接没有完成。你的输入和正在播放的歌都还在，可以再试一次。'
 }
 
-export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasLlmConfig, profile, refreshQueue, restoreOnStart, scenes, currentScene, playScene, endScene, autoPlayNext, updateAutoPlayNext, focusApiSettings, boundaries }: ChatPageProps) {
+export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasLlmConfig, profile, refreshQueue, restoreOnStart, scenes, currentScene, playScene, endScene, autoPlayNext, updateAutoPlayNext, boundaries }: ChatPageProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
@@ -546,29 +546,43 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
       )
     }
 
-    return (
-      <EmptyState
-        icon={<BrandLogo className="empty-logo" size={56} />}
-        title={"我粗看了你的歌单。\n现在开始,你可以直接问我该听什么。"}
-        body={'比如“来点慢的”“我想睡了”“这个下午适合什么”。\n我会先挑能播的歌。'}
-        sign="— Echo"
-        action={<button className="primary-button empty-cta" type="button" onClick={() => setDraft('这个时候有什么值得听的吗')}>开 始 聊</button>}
-      />
-    )
+    return null
   }
 
+  const latestUser = [...messages].reverse().find((message) => message.role === 'user')
+  const latestAssistant = [...messages].reverse().find((message) => message.role === 'assistant')
+  const stageMessageIds = new Set([latestUser?.id, latestAssistant?.id].filter((id): id is number => typeof id === 'number'))
+  const stageMessages = messages.filter((message) => stageMessageIds.has(message.id))
+  const hasDialogue = stageMessages.length > 0
+  const isListening = Boolean(playbackState.current) && (playbackState.status === 'playing' || playbackState.status === 'loading')
+  const hasBoundary = !hasLlmConfig || !profile
+  const presenceTitle = !hasLlmConfig
+    ? '还差一条模型连接。'
+    : !profile
+      ? '先让我听见你的音乐。'
+      : currentScene?.line
+        ?? (isListening
+          ? playbackState.current?.echoNote ?? playbackState.current?.reason ?? '这首不用听懂，先让它把眼前撑开一点。'
+          : hasDialogue || sending
+            ? '你说，我听着。'
+            : '你继续忙。歌我接着，想说话时叫我。')
   return (
-    <div className="phone-surface chat-page">
-      <div className="d2-now-presence" aria-hidden="true">
-        <span>{currentScene ? '场景正在继续' : sending ? 'Echo 正在回应' : '此刻'}</span>
-        <h1>{currentScene?.line ?? (sending ? '你继续说，我在听。' : '把今天放到这里。')}</h1>
-        <p>{currentScene ? `${currentScene.label} · 音乐会沿着这个方向继续` : '一句心情、一段工作，或者只是想听点什么。'}</p>
+    <div className={`phone-surface chat-page ${hasDialogue ? 'stage-chat' : 'stage-idle'}${hasBoundary ? ' stage-boundary' : ''}`}>
+      <div className="d2-now-presence">
+        <span>{currentScene ? 'ECHO · 场景正在继续' : isListening ? 'ECHO · 一起听' : hasDialogue || sending ? 'ECHO · 正在交流' : 'ECHO · 此刻'}</span>
+        <h1>{presenceTitle}</h1>
+        <p>{currentScene ? `${currentScene.label} · 音乐会沿着这个方向继续` : isListening ? '音乐在走，你不用一直回应。' : '想说话时就说，安静也算一种回答。'}</p>
       </div>
-      {!hasLlmConfig && (
-        <button className="setup-banner" onClick={() => { focusApiSettings?.(); navigate('settings') }}>
-          先填好模型设置，Echo 才能开口。
-        </button>
-      )}
+      <div className="d2-ambient-facts" aria-hidden="true">
+        <div><small>此刻节奏</small><strong>{currentScene?.label ?? (isListening ? '正在一起听' : '保持安静')}</strong></div>
+        <div><small>声音状态</small><strong>{playbackState.current ? playbackState.current.title : '等你开口'}</strong></div>
+        <div><small>Echo</small><strong>{sending ? '正在组织回应' : '在这里'}</strong></div>
+      </div>
+      <blockquote className="d2-quiet-mark">
+        你不需要一直有话说。忙你的，想起我的时候再开口。
+        <small>Echo · 此刻记下</small>
+      </blockquote>
+
       {chatNotice && (
         <div className="status-ind err chat-notice" role="alert">
           <span className="status-dot" />
@@ -576,13 +590,21 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
         </div>
       )}
 
-      <div className="conversation" ref={scrollRef} onScroll={handleConversationScroll}>
+      {hasDialogue && (
+        <div className="d2-dialogue-history" aria-label="最近对话节点">
+          <i /><i /><i className="active" />
+          <small>{latestUser ? timeLabel(latestUser.createdAt) : '此刻'}</small>
+        </div>
+      )}
+
+      <div className="conversation stage-dialogue" ref={scrollRef} onScroll={handleConversationScroll}>
         {messages.length === 0 ? (
           renderEmptyChat()
         ) : (
-          messages.map((message) => (
+          stageMessages.map((message) => (
             <div key={message.id} className={message.role === 'user' ? 'msg me' : 'msg ai'}>
               <div className="message-stack">
+                <div className="stage-turn-label">{message.role === 'user' ? '你' : 'ECHO'}</div>
                 <div className="bubble">
                   {message.content || (pendingDisplayIds.has(message.id) ? (
                     <span className="waiting-line">
@@ -594,7 +616,7 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
                       </span>
                     </span>
                   ) : '')}
-                  {message.tracks?.map((track) => (
+                  {message.tracks?.filter((track) => trackKey(track) !== activeTrackKey).map((track) => (
                     <TrackCard
                       key={`${message.id}-${track.title}`}
                       track={track}
@@ -654,6 +676,9 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
             placeholder={hasLlmConfig ? '和 Echo 说点什么...' : '先填好 LLM 才能说话...'}
             disabled={!hasLlmConfig || sceneTaskRunning}
           />
+          <button className="voice-entry-button" type="button" onClick={() => navigate('voice')} title="听 Echo 说几句" aria-label="听 Echo 说几句">
+            <Mic2 size={16} />
+          </button>
           {sending ? (
             <button className="cancel-button" type="button" onClick={cancelMessage} title="让 Echo 先停一下">
               <Square size={13} fill="currentColor" />

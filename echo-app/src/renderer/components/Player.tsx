@@ -1,5 +1,5 @@
 import { KeyboardEvent, MouseEvent, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ListMusic, Pause, Play, RefreshCw } from 'lucide-react'
+import { Heart, ListMusic, Pause, Play, RefreshCw, SkipBack, SkipForward, ThumbsDown, ThumbsUp } from 'lucide-react'
 import type { ActiveScene, EchoApi, PlaybackState, PlaybackStatus, Track, UiBoundarySnapshot } from '../../types/ipc'
 import { WaveBars } from '../components'
 import { pageLabels } from '../labels'
@@ -51,8 +51,12 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
   const [localPlaying, setLocalPlaying] = useState(false)
   const [playbackError, setPlaybackError] = useState<string | null>(null)
   const [playbackBoundary, setPlaybackBoundary] = useState<UiBoundarySnapshot | null>(null)
+  const [favorited, setFavorited] = useState(false)
+  const [feedbackState, setFeedbackState] = useState<'more_like_this' | 'not_right' | null>(null)
   const current = state.current
   const currentId = trackId(current)
+  const currentTrackRef = useRef(current)
+  currentTrackRef.current = current
   const displayDuration = duration || (current?.durationMs ? current.durationMs / 1000 : 0)
   const progressRatio = displayDuration > 0 ? Math.min(1, currentTime / displayDuration) : 0
   const activeSegments = Math.round(progressRatio * 30)
@@ -133,7 +137,14 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
     endingRef.current = false
     retryCountRef.current = 0
     setPlaybackError(null)
-  }, [currentId])
+    setFeedbackState(null)
+    const track = currentTrackRef.current
+    if (!track) {
+      setFavorited(false)
+      return
+    }
+    echo.favorites.isFavorite(track).then(setFavorited).catch(() => setFavorited(Boolean(track.favorited)))
+  }, [currentId, echo])
 
   useEffect(() => {
     const audio = audioRef.current
@@ -401,12 +412,27 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
     }
   }, [current, currentTime, displayDuration])
 
+  async function toggleCurrentFavorite() {
+    if (!current) return
+    const result = await echo.favorites.toggle(current)
+    setFavorited(result.favorited)
+  }
+
+  async function recordCurrentFeedback(action: 'more_like_this' | 'not_right') {
+    if (!current) return
+    await echo.feedback.record(current, action, 'sound_object')
+    setFeedbackState(action)
+  }
+  const companionArtwork = './visuals/context-companion.png'
+  const artwork = current?.artworkUrl || companionArtwork
+
   return (
-    <footer className="mini-player global-player">
+    <footer className={`mini-player global-player ${current ? 'has-track' : 'empty-track'}`}>
       <audio
         ref={audioRef}
         onPlay={() => {
           setLocalPlaying(true)
+          setState({ ...state, status: 'playing' })
           setPlaybackError(null)
           setPlaybackBoundary(null)
           retryCountRef.current = 0
@@ -438,68 +464,94 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
           sendHeartbeat().catch(() => undefined)
         }}
       />
-      <WaveBars active={localPlaying} />
-      <div className="player-row">
-        <div className="player-copy">
-          <div className="player-title">{current?.title ?? `还没有${pageLabels.queue}`}</div>
-          <div className="player-artist">
-            {playbackBoundaryCopy ? (
-              <span className="player-recovery">
-                <span>{playbackBoundaryCopy.title}</span>
-                <button type="button" title="重试播放链接" aria-label="重试播放链接" onClick={() => {
-                  retryCountRef.current = 0
-                  void recoverUrl()
-                }}>
-                  <RefreshCw size={11} />
-                </button>
-              </span>
-            ) : playbackError ? (
-              <span className="error-text" style={{ color: '#ff6b6b', fontSize: '0.85em' }}>
-                {playbackError}
-              </span>
-            ) : (
-              current?.artist ?? '让 Echo 推荐后，这里开始播放'
-            )}
+      <figure className="d2-sound-object">
+        <div className="d2-sound-art">
+          <img
+            src={artwork}
+            alt={current?.artworkUrl ? `${current.title} 的专辑封面` : 'Echo 情境视觉，两段声音在同一路径相遇'}
+            onError={(event) => {
+              if (!event.currentTarget.src.includes('/visuals/context-companion.png')) event.currentTarget.src = companionArtwork
+            }}
+          />
+          <div className="d2-sound-tools">
+            <button type="button" onClick={() => playPrevious().catch(() => undefined)} disabled={!canPlayPrevious} title="上一曲" aria-label="上一曲"><SkipBack size={14} /></button>
+            <button type="button" onClick={() => togglePlayback().catch(() => undefined)} disabled={!current?.playUrl} title={localPlaying ? '暂停' : '播放'} aria-label={localPlaying ? '暂停' : '播放'}>
+              {localPlaying ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
+            </button>
+            <button type="button" onClick={() => playNext().catch(() => undefined)} disabled={!canPlayNext} title="下一曲" aria-label="下一曲"><SkipForward size={14} /></button>
+            {onOpenQueue && <button type="button" onClick={onOpenQueue} title="打开队列" aria-label="打开队列"><ListMusic size={14} /></button>}
           </div>
         </div>
-        <div className="player-controls">
-          <button type="button" onClick={() => playPrevious().catch(() => undefined)} disabled={!canPlayPrevious} title="上一曲">‹</button>
-          <button className="main" type="button" onClick={() => togglePlayback().catch(() => undefined)} disabled={!current?.playUrl}>
-            {localPlaying ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
+        <figcaption>
+          <div className="player-copy">
+            <div className="player-title">{current?.title ?? `还没有${pageLabels.queue}`}</div>
+            <div className="player-artist">
+              {playbackBoundaryCopy ? (
+                <span className="player-recovery">
+                  <span>{playbackBoundaryCopy.title}</span>
+                  <button type="button" title="重试播放链接" aria-label="重试播放链接" onClick={() => {
+                    retryCountRef.current = 0
+                    void recoverUrl()
+                  }}>
+                    <RefreshCw size={11} />
+                  </button>
+                </span>
+              ) : playbackError ? (
+                <span className="error-text">{playbackError}</span>
+              ) : (
+                current ? `${current.artist}${current.album ? ` · ${current.album}` : ''}` : '你开口以后，声音会在这里出现'
+              )}
+            </div>
+            {current && (
+              <div className="d2-object-feedback" aria-label="歌曲反馈">
+                <button className={feedbackState === 'more_like_this' ? 'active' : ''} type="button" onClick={() => { void recordCurrentFeedback('more_like_this').catch(() => setPlaybackError('反馈没记下，可以稍后再试。')) }} title="多来这种" aria-label="多来这种"><ThumbsUp size={12} /></button>
+                <button className={feedbackState === 'not_right' ? 'active' : ''} type="button" onClick={() => { void recordCurrentFeedback('not_right').catch(() => setPlaybackError('反馈没记下，可以稍后再试。')) }} title="这首不对" aria-label="这首不对"><ThumbsDown size={12} /></button>
+                <button className={favorited ? 'active' : ''} type="button" onClick={() => { void toggleCurrentFavorite().catch(() => setPlaybackError('收藏没保存，可以稍后再试。')) }} title={favorited ? '取消收藏' : '收藏'} aria-label={favorited ? '取消收藏' : '收藏'}><Heart size={12} fill={favorited ? 'currentColor' : 'none'} /></button>
+              </div>
+            )}
+          </div>
+          <button className="d2-object-play" type="button" onClick={() => togglePlayback().catch(() => undefined)} disabled={!current?.playUrl} title={localPlaying ? '暂停' : '播放'}>
+            {localPlaying ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}
           </button>
-          <button type="button" onClick={() => playNext().catch(() => undefined)} disabled={!canPlayNext} title="下一曲">›</button>
-          {onOpenQueue && (
-            <button className="d2-player-queue" type="button" onClick={onOpenQueue} title="打开队列" aria-label="打开队列">
-              <ListMusic size={15} />
-            </button>
-          )}
+        </figcaption>
+      </figure>
+
+      <section className="d2-listening-panel" aria-live="polite">
+        <span className="d2-listening-kicker">ECHO · 一起听</span>
+        <h2>{current?.reason ?? current?.echoNote ?? '这首不用听懂，先让它把眼前撑开一点。'}</h2>
+        <p>{current ? '音乐继续走，你不用一直回应。' : '你想听点什么时，叫我一声。'}</p>
+        <div className="player-controls d2-listen-controls">
+          <button type="button" onClick={() => playPrevious().catch(() => undefined)} disabled={!canPlayPrevious} title="上一曲"><SkipBack size={15} /></button>
+          <button className="main" type="button" onClick={() => togglePlayback().catch(() => undefined)} disabled={!current?.playUrl}>
+            {localPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}
+          </button>
+          <button type="button" onClick={() => playNext().catch(() => undefined)} disabled={!canPlayNext} title="下一曲"><SkipForward size={15} /></button>
+          <div className="seg-progress">
+            <div
+              className="seg-track"
+              onClick={(event) => seekFromEvent(event).catch(() => undefined)}
+              onPointerDown={startSeekDrag}
+              onPointerMove={moveSeekDrag}
+              onPointerUp={stopSeekDrag}
+              onPointerCancel={stopSeekDrag}
+              onKeyDown={(event) => { void seekFromKeyboard(event).catch(() => undefined) }}
+              role="slider"
+              tabIndex={current ? 0 : -1}
+              aria-label="播放进度"
+              aria-valuemin={0}
+              aria-valuemax={Math.max(0, Math.floor(displayDuration))}
+              aria-valuenow={Math.max(0, Math.floor(currentTime))}
+              aria-valuetext={`${formatClock(currentTime)} / ${formatClock(displayDuration)}`}
+              aria-disabled={!current}
+            >
+              {Array.from({ length: 30 }).map((_, index) => <i key={index} className={index < activeSegments ? 'on' : ''} />)}
+            </div>
+            <div className="d2-progress-time"><span>{formatClock(currentTime)}</span><span>{formatClock(displayDuration)}</span></div>
+          </div>
         </div>
-      </div>
-      <div className="seg-progress">
-        <span>{formatClock(currentTime)}</span>
-        <div
-          className="seg-track"
-          onClick={(e) => seekFromEvent(e).catch(() => undefined)}
-          onPointerDown={startSeekDrag}
-          onPointerMove={moveSeekDrag}
-          onPointerUp={stopSeekDrag}
-          onPointerCancel={stopSeekDrag}
-          onKeyDown={(event) => { void seekFromKeyboard(event).catch(() => undefined) }}
-          role="slider"
-          tabIndex={current ? 0 : -1}
-          aria-label="播放进度"
-          aria-valuemin={0}
-          aria-valuemax={Math.max(0, Math.floor(displayDuration))}
-          aria-valuenow={Math.max(0, Math.floor(currentTime))}
-          aria-valuetext={`${formatClock(currentTime)} / ${formatClock(displayDuration)}`}
-          aria-disabled={!current}
-        >
-          {Array.from({ length: 30 }).map((_, index) => (
-            <i key={index} className={index < activeSegments ? 'on' : ''} />
-          ))}
-        </div>
-        <span>{formatClock(displayDuration)}</span>
-      </div>
+        <div className="d2-listening-status"><span>{voiceContinuous ? '连续回声 · 正在继续' : '安静陪伴'}</span><strong>{canPlayNext ? '下一首已经接好' : '听完这一首再决定'}</strong></div>
+        <WaveBars active={localPlaying} />
+      </section>
     </footer>
   )
 }

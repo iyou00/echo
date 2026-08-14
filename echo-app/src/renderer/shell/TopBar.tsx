@@ -1,21 +1,11 @@
-import { History, ListMusic, MessageCircle, Mic2, Settings, UserRound } from 'lucide-react'
+import { History, MessageCircle, Settings, UserRound } from 'lucide-react'
 import type { PageKey } from '../appState'
 import { WindowControls } from '../components'
 
 const mainDestinations: Array<{ key: PageKey; label: string; icon: typeof MessageCircle }> = [
-  { key: 'chat', label: '絮语', icon: MessageCircle },
   { key: 'yinyi', label: '风信', icon: MessageCircle },
-  { key: 'voice', label: '回声', icon: Mic2 },
   { key: 'review', label: '回望', icon: History },
-  { key: 'queue', label: '拾音', icon: ListMusic },
 ]
-
-function pageTitle(page: PageKey): string {
-  if (page === 'profile') return 'Echo 眼里的你'
-  if (page === 'settings') return '设置'
-  if (page === 'about') return '关于 Echo'
-  return mainDestinations.find((item) => item.key === page)?.label ?? '此刻'
-}
 
 export function TopBar({
   page,
@@ -32,7 +22,8 @@ export function TopBar({
   onMinimize: () => void
   onClose: () => void
 }) {
-  const today = new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', weekday: 'short' }).format(new Date())
+  const today = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', weekday: 'short' }).format(new Date())
+  const now = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date())
 
   return (
     <header className="d2-topbar">
@@ -41,8 +32,8 @@ export function TopBar({
         <span className={connected ? 'connected' : 'offline'}>{connected ? '在这里' : '等待连接'}</span>
       </button>
       <div className="d2-context" aria-live="polite">
-        <span>{today}</span>
-        <strong>{pageTitle(page)}</strong>
+        <span>{today} · {now}</span>
+        <strong>{connected ? '在这里' : '等待连接'}</strong>
       </div>
       <nav className="d2-nav" aria-label="Echo 页面">
         {mainDestinations.map(({ key, label, icon: Icon }) => (
@@ -54,16 +45,16 @@ export function TopBar({
             title={label}
             aria-label={label}
           >
-            <Icon size={16} strokeWidth={1.7} />
+            <Icon size={14} strokeWidth={1.7} />
             <span>{label}</span>
             {key === 'yinyi' && yinyiUnread && <i aria-label="有新风信" />}
           </button>
         ))}
         <button className={page === 'profile' ? 'd2-icon-button active' : 'd2-icon-button'} type="button" onClick={() => onNavigate('profile')} title="品味" aria-label="品味">
-          <UserRound size={17} strokeWidth={1.7} />
+          <UserRound size={17} strokeWidth={1.7} /><span>品味</span>
         </button>
         <button className={page === 'settings' || page === 'about' ? 'd2-icon-button active' : 'd2-icon-button'} type="button" onClick={() => onNavigate('settings')} title="设置" aria-label="设置">
-          <Settings size={17} strokeWidth={1.7} />
+          <Settings size={17} strokeWidth={1.7} /><span>设置</span>
         </button>
       </nav>
       <WindowControls onMinimize={onMinimize} onClose={onClose} />

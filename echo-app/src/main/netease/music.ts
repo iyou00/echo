@@ -96,6 +96,7 @@ export function normalizeNeteaseTrack(item: unknown): Track | null {
     title,
     artist: artists.join(' / '),
     album: typeof album.name === 'string' ? album.name : undefined,
+    artworkUrl: typeof album.picUrl === 'string' ? album.picUrl : undefined,
     year,
     publishedAt,
     source: 'netease',

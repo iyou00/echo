@@ -6,6 +6,7 @@ export interface Track {
   title: string
   artist: string
   album?: string
+  artworkUrl?: string
   year?: number
   publishedAt?: string
   reason?: string

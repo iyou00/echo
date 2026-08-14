@@ -129,6 +129,11 @@ async function captureFirstRun(target: BrowserWindow): Promise<CaptureMetric[]> 
   await click(target, '[data-testid="onboarding-skip"]')
   await waitForMissing(target, '[data-testid="onboarding-skip"]')
   metrics.push(await capture(target, 'shell-empty.png'))
+  await click(target, '.voice-entry-button')
+  await waitForSelector(target, '.field-voice')
+  metrics.push(await capture(target, 'voice-idle-stage.png'))
+  await click(target, '.d2-brand')
+  await waitForSelector(target, '.chat-page')
   await target.webContents.executeJavaScript(`window.echo.playback.play({
     id: 'e2e-media-track',
     title: 'Echo 媒体键测试',
@@ -138,6 +143,7 @@ async function captureFirstRun(target: BrowserWindow): Promise<CaptureMetric[]> 
     durationMs: 30000
   })`, true)
   await waitForExpression(target, `document.querySelector('.player-title')?.textContent?.includes('媒体键测试') && document.querySelector('.global-player audio')?.paused === false && navigator.mediaSession.metadata?.title === 'Echo 媒体键测试' && navigator.mediaSession.playbackState === 'playing'`)
+  await waitForSelector(target, '.field-listening')
   metrics.push(await capture(target, 'player-media-session.png'))
   await target.webContents.executeJavaScript('window.echo.window.close()', true)
   await waitForSelector(target, '.close-dialog')

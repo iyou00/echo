@@ -101,8 +101,20 @@ await runProcess(appExecutable, [], {
 const packagedResultPath = path.join(captureDirectory, 'result.json')
 assertFile(packagedResultPath, 'packaged first-run result')
 const packagedResult = JSON.parse(fs.readFileSync(packagedResultPath, 'utf8'))
-if (!packagedResult.ok || packagedResult.captures?.length !== 8) {
-  throw new Error('Packaged first-run verification did not complete all eight captures')
+const expectedPackagedCaptures = [
+  'first-run-compact.png',
+  'first-run-standard.png',
+  'first-run-large.png',
+  'first-run-sequence.png',
+  'onboarding.png',
+  'shell-empty.png',
+  'voice-idle-stage.png',
+  'player-media-session.png',
+  'close-dialog-busy.png',
+]
+const packagedCaptureNames = packagedResult.captures?.map((capture) => capture.file) ?? []
+if (!packagedResult.ok || expectedPackagedCaptures.some((name) => !packagedCaptureNames.includes(name))) {
+  throw new Error(`Packaged first-run verification missed required captures: ${expectedPackagedCaptures.filter((name) => !packagedCaptureNames.includes(name)).join(', ')}`)
 }
 
 const retentionMarker = path.join(profileDirectory, 'update-retention.marker')

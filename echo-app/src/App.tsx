@@ -790,7 +790,7 @@ function App() {
             <div className="d2-drawer-view"><AboutEchoPage {...commonProps} /></div>
           )}
         </ContextDrawer>
-        <div className={page === 'voice' ? 'voice-mode-active' : ''}>
+        <div className={`d2-player-layer player-${fieldMode} page-${page}${page === 'voice' ? ' voice-mode-active' : ''}`}>
           <Player
             echo={echo}
             state={playbackState}
