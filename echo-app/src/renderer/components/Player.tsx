@@ -1,5 +1,5 @@
 import { KeyboardEvent, MouseEvent, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Pause, Play } from 'lucide-react'
+import { ListMusic, Pause, Play } from 'lucide-react'
 import type { ActiveScene, EchoApi, PlaybackState, PlaybackStatus, Track } from '../../types/ipc'
 import { WaveBars } from '../components'
 import { pageLabels } from '../labels'
@@ -15,6 +15,7 @@ interface PlayerProps {
   voiceContinuous?: boolean
   onSceneTrackEnded?: (scene: ActiveScene, mode: 'continue' | 'refill') => void | Promise<void>
   onVoiceTrackEnded?: () => void
+  onOpenQueue?: () => void
 }
 
 function formatClock(seconds: number) {
@@ -32,7 +33,7 @@ function trackId(track?: Track | null): string {
 // 避免与正在进行的拖拽、或拖拽完瞬间收到的旧心跳互相打架，造成听感上的来回跳。
 const USER_SEEK_QUIET_MS = 1000
 
-export function Player({ echo, state, setState, refreshQueue, autoPlayNext, currentScene = null, voiceContinuous = false, onSceneTrackEnded, onVoiceTrackEnded }: PlayerProps) {
+export function Player({ echo, state, setState, refreshQueue, autoPlayNext, currentScene = null, voiceContinuous = false, onSceneTrackEnded, onVoiceTrackEnded, onOpenQueue }: PlayerProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const loadedTrackRef = useRef('')
   const applyingSeekRef = useRef(false)
@@ -376,6 +377,11 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
             {localPlaying ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
           </button>
           <button type="button" onClick={() => playNext().catch(() => undefined)} disabled={!canPlayNext} title="下一曲">›</button>
+          {onOpenQueue && (
+            <button className="d2-player-queue" type="button" onClick={onOpenQueue} title="打开队列" aria-label="打开队列">
+              <ListMusic size={15} />
+            </button>
+          )}
         </div>
       </div>
       <div className="seg-progress">

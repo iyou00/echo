@@ -1,4 +1,4 @@
-import { ListMusic, MessageCircle, Mic2, Settings, UserRound } from 'lucide-react'
+import { History, ListMusic, MessageCircle, Mic2, Settings, UserRound } from 'lucide-react'
 import type { PageKey } from '../appState'
 import { WindowControls } from '../components'
 
@@ -6,6 +6,7 @@ const mainDestinations: Array<{ key: PageKey; label: string; icon: typeof Messag
   { key: 'chat', label: '絮语', icon: MessageCircle },
   { key: 'yinyi', label: '风信', icon: MessageCircle },
   { key: 'voice', label: '回声', icon: Mic2 },
+  { key: 'review', label: '回望', icon: History },
   { key: 'queue', label: '拾音', icon: ListMusic },
 ]
 

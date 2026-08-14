@@ -5,12 +5,14 @@ import { AboutEchoPage } from './renderer/pages/AboutEcho'
 import { ChatPage } from './renderer/pages/Chat'
 import { EchoProfilePage } from './renderer/pages/EchoProfile'
 import { QueuePage } from './renderer/pages/Queue'
+import { ReviewPage } from './renderer/pages/Review'
 import { SettingsPage } from './renderer/pages/Settings'
 import { VoicePage } from './renderer/pages/Voice'
 import { YinyiPage } from './renderer/pages/Yinyi'
 import { FirstRunWelcome } from './renderer/components/FirstRunWelcome'
 import { Player } from './renderer/components/Player'
 import { EchoShell } from './renderer/shell/EchoShell'
+import { ContextDrawer } from './renderer/shell/ContextDrawer'
 import type { WindowFieldMode } from './renderer/shell/WindowField'
 import {
   isVoiceContinuousActive,
@@ -589,7 +591,7 @@ function App() {
 
   const fieldMode: WindowFieldMode = page === 'settings' || page === 'about'
     ? 'quiet'
-    : voiceContinuous
+    : page === 'voice' || voiceContinuous
       ? 'voice'
       : currentScene
         ? 'scene'
@@ -598,8 +600,19 @@ function App() {
           : page === 'chat'
             ? 'chat'
             : 'idle'
+  const drawerOpen = page === 'review' || page === 'queue' || page === 'profile' || page === 'settings' || page === 'about'
+  const drawerTitle = page === 'review'
+    ? '回望今天'
+    : page === 'queue'
+    ? '音乐与队列'
+    : page === 'profile'
+      ? 'Echo 对你的理解'
+      : page === 'about'
+        ? '关于 Echo'
+        : '设置与连接'
 
   const commonProps: AppPageProps = { navigate: setPage }
+  const closeDrawer = useCallback(() => setPage('chat'), [setPage])
 
   if (!bootReady) {
     return (
@@ -637,7 +650,7 @@ function App() {
             避免每次切回去都重新 loadRecent / fetch history、闪一下空白。
             画像与关于页按需挂载。
           */}
-          <div className="shell-page" style={{ display: page === 'chat' ? 'flex' : 'none' }}>
+          <div className="shell-page d2-now-page" style={{ display: page === 'chat' || drawerOpen ? 'flex' : 'none' }}>
             <ChatPage
               {...commonProps}
               echo={echo}
@@ -678,7 +691,12 @@ function App() {
               setVoiceContinuous={setVoiceContinuous}
             />
           </div>
-          <div className="shell-page" style={{ display: page === 'queue' ? 'flex' : 'none' }}>
+        </section>
+        <ContextDrawer open={drawerOpen} title={drawerTitle} onClose={closeDrawer}>
+          <div className="d2-drawer-view" style={{ display: page === 'review' ? 'flex' : 'none' }}>
+            <ReviewPage echo={echo} isActive={page === 'review'} />
+          </div>
+          <div className="d2-drawer-view" style={{ display: page === 'queue' ? 'flex' : 'none' }}>
             <QueuePage
               {...commonProps}
               queue={queue}
@@ -691,17 +709,19 @@ function App() {
             />
           </div>
           {page === 'profile' && (
-            <EchoProfilePage
-              {...commonProps}
-              echo={echo}
-              profile={profile}
-              playbackState={playbackState}
-              setPlaybackState={setPlaybackState}
-              refreshQueue={refreshQueue}
-              refreshProfile={refreshProfile}
-            />
+            <div className="d2-drawer-view">
+              <EchoProfilePage
+                {...commonProps}
+                echo={echo}
+                profile={profile}
+                playbackState={playbackState}
+                setPlaybackState={setPlaybackState}
+                refreshQueue={refreshQueue}
+                refreshProfile={refreshProfile}
+              />
+            </div>
           )}
-          <div className="shell-page" style={{ display: page === 'settings' ? 'flex' : 'none' }}>
+          <div className="d2-drawer-view" style={{ display: page === 'settings' ? 'flex' : 'none' }}>
             <SettingsPage
               {...commonProps}
               echo={echo}
@@ -719,9 +739,9 @@ function App() {
             />
           </div>
           {page === 'about' && (
-            <AboutEchoPage {...commonProps} />
+            <div className="d2-drawer-view"><AboutEchoPage {...commonProps} /></div>
           )}
-        </section>
+        </ContextDrawer>
         <div className={page === 'voice' ? 'voice-mode-active' : ''}>
           <Player
             echo={echo}
@@ -740,6 +760,7 @@ function App() {
               setPage('voice')
               dispatch((current) => ({ voiceAutoStartToken: current.voiceAutoStartToken + 1 }))
             }}
+            onOpenQueue={() => setPage('queue')}
           />
         </div>
         {firstRunWelcomeOpen && <FirstRunWelcome onContinue={completeFirstRunWelcome} />}

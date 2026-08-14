@@ -22,8 +22,9 @@ export function EchoShell({
   onMinimize: () => void
   onClose: () => void
 }) {
+  const drawerOpen = page === 'review' || page === 'queue' || page === 'profile' || page === 'settings' || page === 'about'
   return (
-    <div className={`echo-shell d2-shell field-${fieldMode}`}>
+    <div className={`echo-shell d2-shell field-${fieldMode}${drawerOpen ? ' drawer-open' : ''}`}>
       <main className="app-frame has-global-player">
         <WindowField mode={fieldMode} />
         <TopBar

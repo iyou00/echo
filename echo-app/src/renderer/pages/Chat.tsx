@@ -553,6 +553,11 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
 
   return (
     <div className="phone-surface chat-page">
+      <div className="d2-now-presence" aria-hidden="true">
+        <span>{currentScene ? '场景正在继续' : sending ? 'Echo 正在回应' : '此刻'}</span>
+        <h1>{currentScene?.line ?? (sending ? '你继续说，我在听。' : '把今天放到这里。')}</h1>
+        <p>{currentScene ? `${currentScene.label} · 音乐会沿着这个方向继续` : '一句心情、一段工作，或者只是想听点什么。'}</p>
+      </div>
       {!hasLlmConfig && (
         <button className="setup-banner" onClick={() => { focusApiSettings?.(); navigate('settings') }}>
           先填好模型设置，Echo 才能开口。
