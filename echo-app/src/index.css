@@ -1383,6 +1383,10 @@ button:disabled {
   animation-delay: 0.36s;
 }
 
+.wave-bars.measured.active span {
+  animation: none;
+}
+
 @keyframes wavePulse {
   0%, 100% {
     transform: scaleY(0.45);

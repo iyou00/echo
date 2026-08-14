@@ -9,6 +9,7 @@ import { friendlyOperationError } from '../../shared/runtimeRecovery'
 import { pickWaitingLineFor } from './chatWaitingLines'
 import { mergeReturnedTracksIntoMessage } from './chatMessageTracks'
 import { BoundaryState } from '../components/BoundaryState'
+import { deriveChatStageMode, type ChatStageMode } from '../stageMode'
 
 interface ChatPageProps extends AppPageProps {
   echo: EchoApi
@@ -27,6 +28,7 @@ interface ChatPageProps extends AppPageProps {
   updateAutoPlayNext: (value: boolean) => Promise<void>
   focusApiSettings?: () => void
   boundaries: UiBoundarySnapshot[]
+  onStageModeChange?: (mode: ChatStageMode) => void
 }
 
 // 让 Echo 看起来像在"打字思考":
@@ -59,7 +61,7 @@ function friendlyChatError() {
   return '这次连接没有完成。你的输入和正在播放的歌都还在，可以再试一次。'
 }
 
-export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasLlmConfig, profile, refreshQueue, restoreOnStart, scenes, currentScene, playScene, endScene, autoPlayNext, updateAutoPlayNext, boundaries }: ChatPageProps) {
+export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasLlmConfig, profile, refreshQueue, restoreOnStart, scenes, currentScene, playScene, endScene, autoPlayNext, updateAutoPlayNext, boundaries, onStageModeChange }: ChatPageProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
@@ -89,6 +91,7 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
   const activeTrackKey = trackKey(playbackState.current)
   const runtimeTasks = useRuntimeTasks(echo)
   const sceneTask = latestRunningRuntimeTask(runtimeTasks, ['scene-playback'], { includeChildren: false })
+  const chatTask = latestRunningRuntimeTask(runtimeTasks, ['chat-send'], { includeChildren: false })
   const sceneTaskRunning = Boolean(sceneTask)
   const runtimeSceneSource = sceneTask?.sourceName
   const runtimeSceneKey = sceneTaskRunning && scenes.some((scene) => scene.key === runtimeSceneSource)
@@ -554,6 +557,17 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
   const stageMessageIds = new Set([latestUser?.id, latestAssistant?.id].filter((id): id is number => typeof id === 'number'))
   const stageMessages = messages.filter((message) => stageMessageIds.has(message.id))
   const hasDialogue = stageMessages.length > 0
+  const latestHasBoundary = Boolean(latestAssistant && messageBoundaries[latestAssistant.id])
+  const chatStageMode = deriveChatStageMode({
+    hasDialogue,
+    sending: sending || Boolean(chatTask),
+    taskPhase: chatTask?.phase,
+    hasError: Boolean(chatNotice) || latestHasBoundary,
+  })
+  const recentUserMessages = messages.filter((message) => message.role === 'user').slice(-3)
+  useEffect(() => {
+    onStageModeChange?.(chatStageMode)
+  }, [chatStageMode, onStageModeChange])
   const isListening = Boolean(playbackState.current) && (playbackState.status === 'playing' || playbackState.status === 'loading')
   const hasBoundary = !hasLlmConfig || !profile
   const presenceTitle = !hasLlmConfig
@@ -563,13 +577,17 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
       : currentScene?.line
         ?? (isListening
           ? playbackState.current?.echoNote ?? playbackState.current?.reason ?? '这首不用听懂，先让它把眼前撑开一点。'
-          : hasDialogue || sending
+          : chatStageMode === 'searching'
+            ? '我沿着你刚才的话，找一首合适的。'
+            : chatStageMode === 'streaming'
+              ? '你继续说，我在听。'
+              : hasDialogue
             ? '你说，我听着。'
             : '你继续忙。歌我接着，想说话时叫我。')
   return (
-    <div className={`phone-surface chat-page ${hasDialogue ? 'stage-chat' : 'stage-idle'}${hasBoundary ? ' stage-boundary' : ''}`}>
+    <div className={`phone-surface chat-page stage-${chatStageMode}${hasDialogue ? ' stage-chat' : ''}${hasBoundary ? ' stage-boundary' : ''}`}>
       <div className="d2-now-presence">
-        <span>{currentScene ? 'ECHO · 场景正在继续' : isListening ? 'ECHO · 一起听' : hasDialogue || sending ? 'ECHO · 正在交流' : 'ECHO · 此刻'}</span>
+        <span>{currentScene ? 'ECHO · 场景正在继续' : isListening ? 'ECHO · 一起听' : chatStageMode === 'searching' ? 'ECHO · 正在找声音' : chatStageMode === 'streaming' ? 'ECHO · 正在回应' : chatStageMode === 'error' ? 'ECHO · 这里没接上' : hasDialogue ? 'ECHO · 正在交流' : 'ECHO · 此刻'}</span>
         <h1>{presenceTitle}</h1>
         <p>{currentScene ? `${currentScene.label} · 音乐会沿着这个方向继续` : isListening ? '音乐在走，你不用一直回应。' : '想说话时就说，安静也算一种回答。'}</p>
       </div>
@@ -592,7 +610,16 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
 
       {hasDialogue && (
         <div className="d2-dialogue-history" aria-label="最近对话节点">
-          <i /><i /><i className="active" />
+          {recentUserMessages.map((message, index) => (
+            <button
+              type="button"
+              key={message.id}
+              className={index === recentUserMessages.length - 1 ? 'active' : ''}
+              onClick={() => navigate('review')}
+              title={`回看：${message.content.slice(0, 24)}`}
+              aria-label={`回看 ${timeLabel(message.createdAt)} 的对话`}
+            />
+          ))}
           <small>{latestUser ? timeLabel(latestUser.createdAt) : '此刻'}</small>
         </div>
       )}

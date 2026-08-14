@@ -277,11 +277,12 @@ export function EmptyState({
   )
 }
 
-export function WaveBars({ count = 36, active = false }: { count?: number; active?: boolean }) {
+export function WaveBars({ count = 36, active = false, levels }: { count?: number; active?: boolean; levels?: number[] }) {
+  const measured = Boolean(levels?.length)
   return (
-    <div className={active ? 'wave-bars active' : 'wave-bars'} aria-hidden="true">
+    <div className={`wave-bars${active ? ' active' : ''}${measured ? ' measured' : ''}`} aria-hidden="true">
       {Array.from({ length: count }).map((_, index) => (
-        <span key={index} style={{ height: `${26 + ((index * 17) % 60)}%` }} />
+        <span key={index} style={{ height: measured ? `${Math.max(5, Math.round((levels?.[index] ?? 0) * 100))}%` : `${26 + ((index * 17) % 60)}%` }} />
       ))}
     </div>
   )

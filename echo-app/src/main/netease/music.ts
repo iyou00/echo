@@ -173,6 +173,23 @@ function searchSongMatches(track: Track, song: Record<string, unknown>, options:
   return artistHit
 }
 
+function mergeNeteaseSearchSong(track: Track, song: Record<string, unknown>): Track {
+  const artists = asArray(song.ar ?? song.artists)
+    .map((artist) => String(asObject(artist).name ?? ''))
+    .filter(Boolean)
+  const album = asObject(song.al ?? song.album)
+  return {
+    ...track,
+    id: String(song.id ?? track.id ?? ''),
+    title: String(song.name ?? track.title),
+    artist: artists.length > 0 ? artists.join(' / ') : (track.artist || '未知艺人'),
+    album: typeof album.name === 'string' ? album.name : track.album,
+    artworkUrl: typeof album.picUrl === 'string' ? album.picUrl : track.artworkUrl,
+    durationMs: Number(song.dt ?? song.duration ?? track.durationMs ?? 0) || track.durationMs,
+    source: 'netease',
+  }
+}
+
 async function findNeteaseSong(track: Track, cookie: string, options: ResolvePlayableTrackOptions = {}): Promise<Track | null> {
   assertPlayableFilterActive(options.signal)
   if (track.id) {
@@ -193,19 +210,7 @@ async function findNeteaseSong(track: Track, cookie: string, options: ResolvePla
   const id = song.id ? String(song.id) : ''
   if (!id) return null
 
-  const artists = asArray(song.ar ?? song.artists)
-    .map((artist) => String(asObject(artist).name ?? ''))
-    .filter(Boolean)
-  const album = asObject(song.al ?? song.album)
-  return {
-    ...track,
-    id,
-    title: String(song.name ?? track.title),
-    artist: artists.length > 0 ? artists.join(' / ') : (track.artist || '未知艺人'),
-    album: typeof album.name === 'string' ? album.name : track.album,
-    durationMs: Number(song.dt ?? song.duration ?? track.durationMs ?? 0) || track.durationMs,
-    source: 'netease',
-  }
+  return mergeNeteaseSearchSong(track, song)
 }
 
 export async function resolvePlayableTrack(track: Track, options: ResolvePlayableTrackOptions = {}): Promise<Track | null> {
@@ -301,6 +306,7 @@ async function collectPlayableTracksInOrder(
 
 export const neteaseMusicTestHelpers = {
   collectPlayableTracksInOrder,
+  mergeNeteaseSearchSong,
 }
 
 export async function filterPlayableTracks(candidates: Track[], limit = 3, signal?: AbortSignal): Promise<Track[]> {

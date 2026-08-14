@@ -144,6 +144,37 @@ async function captureFirstRun(target: BrowserWindow): Promise<CaptureMetric[]> 
   })`, true)
   await waitForExpression(target, `document.querySelector('.player-title')?.textContent?.includes('媒体键测试') && document.querySelector('.global-player audio')?.paused === false && navigator.mediaSession.metadata?.title === 'Echo 媒体键测试' && navigator.mediaSession.playbackState === 'playing'`)
   await waitForSelector(target, '.field-listening')
+  await waitForSelector(target, '.wave-bars.measured')
+  try {
+    await waitForExpression(target, `Array.from(document.querySelectorAll('.wave-bars.measured span')).some((bar) => Number.parseFloat(bar.style.height) > 5)`, 5_000)
+  } catch (error) {
+    const diagnostics = await target.webContents.executeJavaScript(`(() => {
+      const audio = document.querySelector('.global-player audio')
+      return {
+        captureStream: typeof audio?.captureStream,
+        audioContext: typeof AudioContext,
+        paused: audio?.paused,
+        currentTime: audio?.currentTime,
+        heights: Array.from(document.querySelectorAll('.wave-bars.measured span')).slice(0, 8).map((bar) => bar.style.height),
+      }
+    })()`, true)
+    throw new Error(`${error instanceof Error ? error.message : String(error)}; diagnostics=${JSON.stringify(diagnostics)}`)
+  }
+  await click(target, '.d2-sound-art')
+  await waitForExpression(target, `document.querySelector('.global-player audio')?.paused === true`)
+  await click(target, '.d2-sound-art')
+  await waitForExpression(target, `document.querySelector('.global-player audio')?.paused === false`)
+  await target.webContents.executeJavaScript(`(() => {
+    const input = document.querySelector('.d2-volume-control input')
+    if (!(input instanceof HTMLInputElement)) return false
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    valueSetter?.call(input, '37')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    return true
+  })()`, true)
+  await waitForExpression(target, `document.querySelector('.d2-volume-control input')?.value === '37'`)
+  const persistedVolume = await target.webContents.executeJavaScript('window.echo.playback.getVolume()', true)
+  if (persistedVolume !== 37) throw new Error(`Volume control did not persist: ${persistedVolume}`)
   metrics.push(await capture(target, 'player-media-session.png'))
   await target.webContents.executeJavaScript('window.echo.window.close()', true)
   await waitForSelector(target, '.close-dialog')

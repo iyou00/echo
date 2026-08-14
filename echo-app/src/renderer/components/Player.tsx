@@ -1,11 +1,13 @@
 import { KeyboardEvent, MouseEvent, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Heart, ListMusic, Pause, Play, RefreshCw, SkipBack, SkipForward, ThumbsDown, ThumbsUp } from 'lucide-react'
+import { Heart, ListMusic, Pause, Play, RefreshCw, SkipBack, SkipForward, ThumbsDown, ThumbsUp, Volume2 } from 'lucide-react'
 import type { ActiveScene, EchoApi, PlaybackState, PlaybackStatus, Track, UiBoundarySnapshot } from '../../types/ipc'
 import { WaveBars } from '../components'
 import { pageLabels } from '../labels'
 import { decidePlaybackCompletionAction } from './playerCompletion'
 import { boundaryPresentation } from '../boundaryPresentation'
 import { installMediaSessionActions } from './mediaSession'
+import { trackIdentity as trackKey } from '../../shared/trackIdentity'
+import { AUDIO_ENERGY_EVENT, energyFromLevels, levelsFromFrequencyData, type AudioEnergyDetail } from '../audioAnalysis'
 
 interface PlayerProps {
   echo: EchoApi
@@ -18,6 +20,7 @@ interface PlayerProps {
   onSceneTrackEnded?: (scene: ActiveScene, mode: 'continue' | 'refill') => void | Promise<void>
   onVoiceTrackEnded?: () => void
   onOpenQueue?: () => void
+  onLocalPlayingChange?: (playing: boolean) => void
 }
 
 function formatClock(seconds: number) {
@@ -35,7 +38,7 @@ function trackId(track?: Track | null): string {
 // 避免与正在进行的拖拽、或拖拽完瞬间收到的旧心跳互相打架，造成听感上的来回跳。
 const USER_SEEK_QUIET_MS = 1000
 
-export function Player({ echo, state, setState, refreshQueue, autoPlayNext, currentScene = null, voiceContinuous = false, onSceneTrackEnded, onVoiceTrackEnded, onOpenQueue }: PlayerProps) {
+export function Player({ echo, state, setState, refreshQueue, autoPlayNext, currentScene = null, voiceContinuous = false, onSceneTrackEnded, onVoiceTrackEnded, onOpenQueue, onLocalPlayingChange }: PlayerProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const loadedTrackRef = useRef('')
   const applyingSeekRef = useRef(false)
@@ -46,6 +49,11 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
   const lastUserSeekAtRef = useRef(0)
   const retryCountRef = useRef(0)
   const lastRetryTimeRef = useRef(0)
+  const analysisFrameRef = useRef(0)
+  const analysisContextRef = useRef<AudioContext | null>(null)
+  const analysisSourceRef = useRef<AudioNode | null>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const analysisMirrorRef = useRef<HTMLAudioElement | null>(null)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [localPlaying, setLocalPlaying] = useState(false)
@@ -53,8 +61,10 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
   const [playbackBoundary, setPlaybackBoundary] = useState<UiBoundarySnapshot | null>(null)
   const [favorited, setFavorited] = useState(false)
   const [feedbackState, setFeedbackState] = useState<'more_like_this' | 'not_right' | null>(null)
+  const [audioLevels, setAudioLevels] = useState<number[]>([])
   const current = state.current
   const currentId = trackId(current)
+  const currentKey = trackKey(current)
   const currentTrackRef = useRef(current)
   currentTrackRef.current = current
   const displayDuration = duration || (current?.durationMs ? current.durationMs / 1000 : 0)
@@ -70,6 +80,100 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
     next: () => void
     seek: (details: MediaSessionActionDetails) => void
   } | null>(null)
+
+  const publishAudioEnergy = useCallback((detail: AudioEnergyDetail) => {
+    window.dispatchEvent(new CustomEvent<AudioEnergyDetail>(AUDIO_ENERGY_EVENT, { detail }))
+  }, [])
+
+  const stopAudioAnalysis = useCallback(() => {
+    window.cancelAnimationFrame(analysisFrameRef.current)
+    analysisFrameRef.current = 0
+    analysisMirrorRef.current?.pause()
+    setAudioLevels([])
+    publishAudioEnergy({ energy: 0, levels: [] })
+  }, [publishAudioEnergy])
+
+  const startAudioAnalysis = useCallback(async () => {
+    const audio = audioRef.current as (HTMLAudioElement & { captureStream?: () => MediaStream }) | null
+    if (!audio) return
+    let context = analysisContextRef.current
+    let analyser = analyserRef.current
+    if (!context || !analyser) {
+      context = new AudioContext()
+      analyser = context.createAnalyser()
+      analyser.fftSize = 128
+      analyser.smoothingTimeConstant = 0.72
+      let source: AudioNode | null = null
+      if (audio.captureStream) {
+        try {
+          const stream = audio.captureStream()
+          if (stream.getAudioTracks().length > 0) source = context.createMediaStreamSource(stream)
+        } catch {
+          source = null
+        }
+      }
+      if (!source) {
+        const mirror = new Audio()
+        mirror.preload = 'auto'
+        const sourceUrl = audio.currentSrc || audio.src
+        const resolvedSource = new URL(sourceUrl, window.location.href)
+        if (resolvedSource.protocol.startsWith('http') && resolvedSource.origin !== window.location.origin) mirror.crossOrigin = 'anonymous'
+        mirror.src = sourceUrl
+        mirror.currentTime = audio.currentTime
+        analysisMirrorRef.current = mirror
+        source = context.createMediaElementSource(mirror)
+      }
+      const silentOutput = context.createGain()
+      silentOutput.gain.value = 0
+      source.connect(analyser)
+      analyser.connect(silentOutput)
+      silentOutput.connect(context.destination)
+      analysisContextRef.current = context
+      analysisSourceRef.current = source
+      analyserRef.current = analyser
+    }
+    await context.resume()
+    const mirror = analysisMirrorRef.current
+    if (mirror) {
+      const sourceUrl = audio.currentSrc || audio.src
+      if (mirror.src !== sourceUrl && mirror.currentSrc !== sourceUrl) {
+        mirror.src = sourceUrl
+        mirror.load()
+      }
+      if (Math.abs(mirror.currentTime - audio.currentTime) > 0.35) mirror.currentTime = audio.currentTime
+      await mirror.play()
+    }
+    window.cancelAnimationFrame(analysisFrameRef.current)
+    const bins = new Uint8Array(analyser.frequencyBinCount)
+    let lastPublishedAt = 0
+    const sample = (now: number) => {
+      analyser.getByteFrequencyData(bins)
+      if (now - lastPublishedAt >= 70) {
+        const levels = levelsFromFrequencyData(bins)
+        setAudioLevels(levels)
+        publishAudioEnergy({ energy: energyFromLevels(levels), levels })
+        lastPublishedAt = now
+      }
+      analysisFrameRef.current = window.requestAnimationFrame(sample)
+    }
+    analysisFrameRef.current = window.requestAnimationFrame(sample)
+  }, [publishAudioEnergy])
+
+  useEffect(() => {
+    onLocalPlayingChange?.(localPlaying)
+  }, [localPlaying, onLocalPlayingChange])
+
+  useEffect(() => () => onLocalPlayingChange?.(false), [onLocalPlayingChange])
+
+  useEffect(() => () => {
+    window.cancelAnimationFrame(analysisFrameRef.current)
+    publishAudioEnergy({ energy: 0, levels: [] })
+    analysisMirrorRef.current?.pause()
+    analysisMirrorRef.current?.removeAttribute('src')
+    analysisMirrorRef.current?.load()
+    analysisSourceRef.current?.disconnect()
+    analysisContextRef.current?.close().catch(() => undefined)
+  }, [publishAudioEnergy])
 
   const handleAudioPlayFailure = useCallback(async (message: string) => {
     setLocalPlaying(false)
@@ -143,8 +247,12 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
       setFavorited(false)
       return
     }
-    echo.favorites.isFavorite(track).then(setFavorited).catch(() => setFavorited(Boolean(track.favorited)))
-  }, [currentId, echo])
+    let cancelled = false
+    echo.favorites.isFavorite(track)
+      .then((value) => { if (!cancelled) setFavorited(value) })
+      .catch(() => { if (!cancelled) setFavorited(Boolean(track.favorited)) })
+    return () => { cancelled = true }
+  }, [currentKey, echo])
 
   useEffect(() => {
     const audio = audioRef.current
@@ -432,7 +540,7 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
         ref={audioRef}
         onPlay={() => {
           setLocalPlaying(true)
-          setState({ ...state, status: 'playing' })
+          void startAudioAnalysis().catch(() => stopAudioAnalysis())
           setPlaybackError(null)
           setPlaybackBoundary(null)
           retryCountRef.current = 0
@@ -445,6 +553,7 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
         }}
         onPause={() => {
           setLocalPlaying(false)
+          stopAudioAnalysis()
           if (isNearEnd(audioRef.current)) {
             completePlayback().catch(() => undefined)
             return
@@ -464,7 +573,21 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
           sendHeartbeat().catch(() => undefined)
         }}
       />
-      <figure className="d2-sound-object">
+      <figure
+        className="d2-sound-object"
+        role="button"
+        tabIndex={current?.playUrl ? 0 : -1}
+        aria-label={current ? `${localPlaying ? '暂停' : '播放'} ${current.title}` : '还没有可播放歌曲'}
+        onClick={(event) => {
+          if ((event.target as HTMLElement).closest('button, input, label')) return
+          void togglePlayback().catch(() => undefined)
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return
+          event.preventDefault()
+          void togglePlayback().catch(() => undefined)
+        }}
+      >
         <div className="d2-sound-art">
           <img
             src={artwork}
@@ -480,6 +603,19 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
             </button>
             <button type="button" onClick={() => playNext().catch(() => undefined)} disabled={!canPlayNext} title="下一曲" aria-label="下一曲"><SkipForward size={14} /></button>
             {onOpenQueue && <button type="button" onClick={onOpenQueue} title="打开队列" aria-label="打开队列"><ListMusic size={14} /></button>}
+            <label className="d2-volume-control" title={`音量 ${state.volume}%`}>
+              <Volume2 size={14} aria-hidden="true" />
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={state.volume}
+                aria-label="播放音量"
+                onChange={(event) => {
+                  void echo.playback.setVolume(Number(event.target.value)).then(setState).catch(() => undefined)
+                }}
+              />
+            </label>
           </div>
         </div>
         <figcaption>
@@ -550,7 +686,7 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
           </div>
         </div>
         <div className="d2-listening-status"><span>{voiceContinuous ? '连续回声 · 正在继续' : '安静陪伴'}</span><strong>{canPlayNext ? '下一首已经接好' : '听完这一首再决定'}</strong></div>
-        <WaveBars active={localPlaying} />
+        <WaveBars active={localPlaying} levels={audioLevels} />
       </section>
     </footer>
   )

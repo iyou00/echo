@@ -1,4 +1,4 @@
-import { Component, useCallback, useEffect, useMemo, useRef, type ErrorInfo, type ReactNode } from 'react'
+import { Component, useCallback, useEffect, useMemo, useRef, useState, type ErrorInfo, type ReactNode } from 'react'
 import type { ActiveScene, PlaybackState, SceneKey, SettingUpdatePatch, Settings, Track } from './types/ipc'
 import { getEchoApi } from './renderer/api'
 import { AboutEchoPage } from './renderer/pages/AboutEcho'
@@ -34,6 +34,7 @@ import {
   onboardingPatchesAfterLlmReady,
 } from './shared/onboardingPolicy'
 import { remainingStartupDelay } from './shared/startupPresentation'
+import { deriveWindowFieldMode, type ChatStageMode } from './renderer/stageMode'
 
 const SCENE_CONTINUATION_RETRY_DELAYS_MS = [8000, 20_000]
 
@@ -69,6 +70,8 @@ function App() {
   const sceneRetryAttemptsRef = useRef(0)
   const onboardingDeferredForSessionRef = useRef(false)
   const voiceContinuousRef = useRef(false)
+  const [chatStageMode, setChatStageMode] = useState<ChatStageMode>('idle')
+  const [localPlaybackActive, setLocalPlaybackActive] = useState(false)
   const {
     page,
     settings,
@@ -629,17 +632,14 @@ function App() {
     }
   }
 
-  const fieldMode: WindowFieldMode = page === 'settings' || page === 'about'
-    ? 'quiet'
-    : page === 'voice' || voiceContinuous
-      ? 'voice'
-      : currentScene
-        ? 'scene'
-        : playbackState.status === 'playing'
-          ? 'listening'
-          : page === 'chat'
-            ? 'chat'
-            : 'idle'
+  const fieldMode: WindowFieldMode = deriveWindowFieldMode({
+    page,
+    voiceContinuous,
+    currentScene: Boolean(currentScene),
+    playbackStatus: playbackState.status,
+    localPlaybackActive,
+    chatStageMode,
+  })
   const drawerOpen = page === 'review' || page === 'queue' || page === 'profile' || page === 'settings' || page === 'about'
   const offlineBoundary = boundaries.find((item) => item.code === 'offline')
   const modelInvalidBoundary = boundaries.find((item) => item.code === 'model_invalid')
@@ -713,6 +713,7 @@ function App() {
               updateAutoPlayNext={updateAutoPlayNext}
               focusApiSettings={() => dispatch((current) => ({ settingsApiFocusToken: current.settingsApiFocusToken + 1 }))}
               boundaries={boundaries}
+              onStageModeChange={setChatStageMode}
             />
           </div>
           <div className="shell-page" style={{ display: page === 'yinyi' ? 'flex' : 'none' }}>
@@ -809,6 +810,7 @@ function App() {
               dispatch((current) => ({ voiceAutoStartToken: current.voiceAutoStartToken + 1 }))
             }}
             onOpenQueue={() => setPage('queue')}
+            onLocalPlayingChange={setLocalPlaybackActive}
           />
         </div>
         {firstRunWelcomeOpen && <FirstRunWelcome onContinue={completeFirstRunWelcome} />}

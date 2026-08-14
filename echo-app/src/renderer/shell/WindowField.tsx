@@ -1,10 +1,14 @@
 import { useEffect, useRef } from 'react'
+import { AUDIO_ENERGY_EVENT, type AudioEnergyDetail } from '../audioAnalysis'
 
-export type WindowFieldMode = 'idle' | 'chat' | 'listening' | 'voice' | 'scene' | 'quiet' | 'welcome'
+export type WindowFieldMode = 'idle' | 'chat' | 'streaming' | 'searching' | 'error' | 'listening' | 'voice' | 'scene' | 'quiet' | 'welcome'
 
 const MODE_ENERGY: Record<WindowFieldMode, { green: number; red: number; speed: number }> = {
   idle: { green: 5, red: 3, speed: 0.18 },
   chat: { green: 7, red: 9, speed: 0.28 },
+  streaming: { green: 9, red: 12, speed: 0.42 },
+  searching: { green: 13, red: 6, speed: 0.58 },
+  error: { green: 3, red: 14, speed: 0.18 },
   listening: { green: 12, red: 7, speed: 0.55 },
   voice: { green: 8, red: 14, speed: 0.72 },
   scene: { green: 10, red: 10, speed: 0.46 },
@@ -14,6 +18,15 @@ const MODE_ENERGY: Record<WindowFieldMode, { green: number; red: number; speed: 
 
 export function WindowField({ mode }: { mode: WindowFieldMode }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const audioEnergyRef = useRef(0)
+
+  useEffect(() => {
+    const updateEnergy = (event: Event) => {
+      audioEnergyRef.current = (event as CustomEvent<AudioEnergyDetail>).detail?.energy ?? 0
+    }
+    window.addEventListener(AUDIO_ENERGY_EVENT, updateEnergy)
+    return () => window.removeEventListener(AUDIO_ENERGY_EVENT, updateEnergy)
+  }, [])
 
   useEffect(() => {
     if (!canvasRef.current) return
@@ -60,10 +73,11 @@ export function WindowField({ mode }: { mode: WindowFieldMode }) {
     function draw(now: number) {
       if (width === 0 || height === 0) resize()
       const energy = MODE_ENERGY[mode]
+      const audioBoost = mode === 'listening' ? audioEnergyRef.current * 34 : 0
       const elapsed = reducedMotion ? 0 : (now - startedAt) / 1000
       drawingContext.clearRect(0, 0, width, height)
-      strokeField('rgba(77, 140, 67, 0.78)', height * 0.64, energy.green, elapsed * energy.speed)
-      strokeField('rgba(194, 78, 72, 0.76)', height * 0.43, energy.red, elapsed * energy.speed * 0.86 + 1.7, true)
+      strokeField('rgba(77, 140, 67, 0.78)', height * 0.64, energy.green + audioBoost, elapsed * energy.speed)
+      strokeField('rgba(194, 78, 72, 0.76)', height * 0.43, energy.red + audioBoost * 0.58, elapsed * energy.speed * 0.86 + 1.7, true)
       if (!reducedMotion) animationFrame = window.requestAnimationFrame(draw)
     }
 

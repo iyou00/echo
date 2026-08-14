@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { History, MessageCircle, Settings, UserRound } from 'lucide-react'
 import type { PageKey } from '../appState'
 import { WindowControls } from '../components'
@@ -22,8 +23,13 @@ export function TopBar({
   onMinimize: () => void
   onClose: () => void
 }) {
-  const today = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', weekday: 'short' }).format(new Date())
-  const now = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date())
+  const [clock, setClock] = useState(() => new Date())
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(new Date()), 30_000)
+    return () => window.clearInterval(timer)
+  }, [])
+  const today = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', weekday: 'short' }).format(clock)
+  const now = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(clock)
 
   return (
     <header className="d2-topbar">

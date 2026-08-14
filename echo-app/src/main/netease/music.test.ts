@@ -95,3 +95,21 @@ describe('netease track normalization', () => {
     },
   )
 })
+
+describe('netease search result merge', () => {
+  it('carries cloud-search artwork into the playable sound object', () => {
+    const merged = neteaseMusicTestHelpers.mergeNeteaseSearchSong(
+      { title: '未定', artist: '未定', source: 'llm' },
+      { id: 42, name: '找到的歌', ar: [{ name: '歌手' }], al: { name: '专辑', picUrl: 'https://example.com/search-cover.jpg' } },
+    )
+    expect(merged).toMatchObject({ id: '42', title: '找到的歌', artworkUrl: 'https://example.com/search-cover.jpg' })
+  })
+
+  it('does not discard existing artwork when search omits a cover', () => {
+    const merged = neteaseMusicTestHelpers.mergeNeteaseSearchSong(
+      { title: '歌', artist: '歌手', source: 'llm', artworkUrl: 'https://example.com/original.jpg' },
+      { id: 42, name: '歌', ar: [{ name: '歌手' }], al: {} },
+    )
+    expect(merged.artworkUrl).toBe('https://example.com/original.jpg')
+  })
+})
