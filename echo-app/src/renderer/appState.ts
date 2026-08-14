@@ -1,5 +1,5 @@
 import { useReducer, type Dispatch } from 'react'
-import type { ActiveScene, AppPageKey, ImportTaskSnapshot, PlaybackState, SceneDefinition, Settings, TasteProfile, Track, UiBoundarySnapshot } from '../types/ipc'
+import type { ActiveScene, AppPageKey, CloseReadiness, ImportTaskSnapshot, PlaybackState, SceneDefinition, Settings, TasteProfile, Track, UiBoundarySnapshot } from '../types/ipc'
 
 export type PageKey = AppPageKey
 
@@ -23,6 +23,7 @@ export interface AppState {
   voiceAutoStartToken: number
   voiceContinuous: boolean
   closeDialogOpen: boolean
+  closeReadiness: CloseReadiness | null
   rememberCloseChoice: boolean
   latestYinyiDate: string
   onboardingOpen: boolean
@@ -70,6 +71,7 @@ function initialAppState(): AppState {
     voiceAutoStartToken: 0,
     voiceContinuous: false,
     closeDialogOpen: false,
+    closeReadiness: null,
     rememberCloseChoice: false,
     latestYinyiDate: '',
     onboardingOpen: false,

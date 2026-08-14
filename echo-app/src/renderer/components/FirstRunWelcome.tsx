@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Volume2, VolumeX } from 'lucide-react'
+import { WindowField } from '../shell/WindowField'
+import { welcomeExitDelay } from './firstRunWelcomePolicy'
 
 interface FirstRunWelcomeProps {
   onContinue: () => Promise<void> | void
@@ -7,7 +9,6 @@ interface FirstRunWelcomeProps {
 
 const TARGET_VOLUME = 0.22
 const FADE_IN_MS = 3600
-const FADE_OUT_MS = 1000
 const DEVICE_CHANGE_RETRY_MS = 600
 const WELCOME_AUDIO_SRC = './welcome/first-run-welcome.mp3'
 
@@ -33,12 +34,18 @@ export function FirstRunWelcome({ onContinue }: FirstRunWelcomeProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const cancelFadeRef = useRef<(() => void) | null>(null)
   const deviceRetryTimerRef = useRef<number | null>(null)
+  const continueTimerRef = useRef<number | null>(null)
   const playAttemptRef = useRef(0)
   const userMutedRef = useRef(false)
   const leavingRef = useRef(false)
+  const startedRef = useRef(false)
   const mountedRef = useRef(true)
   const [muted, setMuted] = useState(false)
   const [leaving, setLeaving] = useState(false)
+  const [started, setStarted] = useState(false)
+  const [audioUnavailable, setAudioUnavailable] = useState(false)
+  const [continueError, setContinueError] = useState(false)
+  const [reducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
 
   const stopFade = useCallback(() => {
     cancelFadeRef.current?.()
@@ -105,14 +112,13 @@ export function FirstRunWelcome({ onContinue }: FirstRunWelcomeProps) {
 
   useEffect(() => {
     mountedRef.current = true
-    void startWelcomeAudio()
 
     const mediaDevices = navigator.mediaDevices
     const handleOutputMayHaveChanged = () => {
-      scheduleOutputRetry()
+      if (startedRef.current) scheduleOutputRetry()
     }
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') scheduleOutputRetry()
+      if (startedRef.current && document.visibilityState === 'visible') scheduleOutputRetry()
     }
     mediaDevices?.addEventListener?.('devicechange', handleOutputMayHaveChanged)
     window.addEventListener('focus', handleOutputMayHaveChanged)
@@ -123,9 +129,21 @@ export function FirstRunWelcome({ onContinue }: FirstRunWelcomeProps) {
       mediaDevices?.removeEventListener?.('devicechange', handleOutputMayHaveChanged)
       window.removeEventListener('focus', handleOutputMayHaveChanged)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
+      if (continueTimerRef.current !== null) window.clearTimeout(continueTimerRef.current)
       stopWelcomeAudio({ releaseSource: true })
     }
-  }, [scheduleOutputRetry, startWelcomeAudio, stopWelcomeAudio])
+  }, [scheduleOutputRetry, stopWelcomeAudio])
+
+  async function startExperience(withSound: boolean) {
+    userMutedRef.current = !withSound
+    startedRef.current = true
+    setMuted(!withSound)
+    setStarted(true)
+    setAudioUnavailable(false)
+    if (!withSound) return
+    const played = await startWelcomeAudio({ restart: true, reloadSource: true })
+    if (!played && mountedRef.current) setAudioUnavailable(true)
+  }
 
   function toggleMute() {
     const audio = audioRef.current
@@ -146,11 +164,32 @@ export function FirstRunWelcome({ onContinue }: FirstRunWelcomeProps) {
   }
 
   function continueToOnboarding() {
-    if (leaving) return
+    if (leavingRef.current) return
     leavingRef.current = true
     setLeaving(true)
-    stopWelcomeAudio({ releaseSource: true })
-    window.setTimeout(() => { void onContinue() }, FADE_OUT_MS)
+    setContinueError(false)
+    const exitDelay = welcomeExitDelay(reducedMotion)
+    const audio = audioRef.current
+    if (audio && !audio.paused && audio.volume > 0) {
+      stopFade()
+      cancelFadeRef.current = fadeAudio(audio, audio.volume, 0, exitDelay, () => {
+        stopWelcomeAudio({ releaseSource: true })
+      })
+    } else {
+      stopWelcomeAudio({ releaseSource: true })
+    }
+    continueTimerRef.current = window.setTimeout(() => {
+      continueTimerRef.current = null
+      Promise.resolve(onContinue()).catch(() => {
+        if (!mountedRef.current) return
+        leavingRef.current = false
+        setLeaving(false)
+        setContinueError(true)
+        if (startedRef.current && !userMutedRef.current) {
+          void startWelcomeAudio({ restart: true, reloadSource: true })
+        }
+      })
+    }, exitDelay)
   }
 
   return (
@@ -158,29 +197,52 @@ export function FirstRunWelcome({ onContinue }: FirstRunWelcomeProps) {
       className={leaving ? 'first-run-welcome-layer first-run-leaving' : 'first-run-welcome-layer'}
       onPointerDownCapture={() => {
         const audio = audioRef.current
-        if (!userMutedRef.current && audio?.paused && !leaving) {
+        if (started && !userMutedRef.current && audio?.paused && !leaving) {
           void startWelcomeAudio({ restart: audio.ended })
         }
       }}
     >
       <audio ref={audioRef} src={WELCOME_AUDIO_SRC} preload="auto" />
-      <button className="first-run-mute" type="button" onClick={toggleMute} aria-label={muted ? '打开声音' : '静音'}>
-        {muted ? <VolumeX size={15} /> : <Volume2 size={15} />}
-        <span>{muted ? '打开声音' : '静音'}</span>
-      </button>
+      <WindowField mode="welcome" />
+      <button className="first-run-skip" type="button" onClick={continueToOnboarding} disabled={leaving}>跳过前奏</button>
+      {started && (
+        <button className="first-run-mute" type="button" onClick={toggleMute} aria-label={muted ? '打开声音' : '静音'}>
+          {muted ? <VolumeX size={15} /> : <Volume2 size={15} />}
+          <span>{muted ? '打开声音' : '静音'}</span>
+        </button>
+      )}
 
       <section className="first-run-welcome-stage" aria-label="Echo 首次欢迎">
-        <div className="first-run-orb" aria-hidden="true" />
-        <div className="first-run-lines">
-          <div className="first-run-line first-run-line-1">你 好。</div>
-          <div className="first-run-line first-run-line-2">我 是 Echo。</div>
-          <div className="first-run-line first-run-line-3">
-            我 还 不 认 识 你 ——<br />你 给 我 看 看 你 听 什 么？
+        {!started ? (
+          <div className="first-run-gate">
+            <div className="first-run-kicker">E C H O · F I R S T L I G H T</div>
+            <h1>让我们从一段声音开始。</h1>
+            <p>这段前奏只在第一次见面时播放。</p>
+            <div className="first-run-gate-actions">
+              <button className="first-run-sound" type="button" onClick={() => { void startExperience(true) }}>
+                <Volume2 size={15} />开启声音
+              </button>
+              <button className="first-run-silent" type="button" onClick={() => { void startExperience(false) }}>
+                <VolumeX size={15} />静音进入
+              </button>
+            </div>
           </div>
-        </div>
-        <button className="first-run-cta" type="button" onClick={continueToOnboarding} disabled={leaving}>
-          没&nbsp;&nbsp;问&nbsp;&nbsp;题
-        </button>
+        ) : (
+          <div className="first-run-sequence">
+            <div className="first-run-legend" aria-hidden="true"><span>你</span><span>Echo</span></div>
+            <div className="first-run-lines">
+              <div className="first-run-line first-run-line-1">你好。</div>
+              <div className="first-run-line first-run-line-2">我是 Echo。</div>
+              <div className="first-run-line first-run-line-3">以后，你把此刻放在这里。</div>
+              <div className="first-run-line first-run-line-4">我用音乐，陪你把它听完。</div>
+            </div>
+            {audioUnavailable && <p className="first-run-audio-note">声音设备没有接上，先静静进入也没关系。</p>}
+            {continueError && <p className="first-run-audio-note" role="alert">刚才没能保存这次开始。再点一次，我重新接上。</p>}
+            <button className="first-run-cta" type="button" onClick={continueToOnboarding} disabled={leaving}>
+              开始认识彼此
+            </button>
+          </div>
+        )}
       </section>
     </div>
   )

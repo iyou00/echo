@@ -6,6 +6,7 @@ import { getRecentTasks } from '../runtime/runtime'
 import { getServiceHealth } from './health'
 import { getProductReadiness } from './scheduler/readiness'
 import { getRange as getYinyiRange } from './yinyi'
+import { buildCloseReadiness } from '../../shared/closeReadiness'
 
 export function getUiBoundaries(online: boolean): UiBoundarySnapshot[] {
   const readiness = getProductReadiness()
@@ -33,4 +34,8 @@ export function getUiBoundaries(online: boolean): UiBoundarySnapshot[] {
     }))
   }
   return result
+}
+
+export function getCloseReadiness() {
+  return buildCloseReadiness(getPlaybackState(), getRecentTasks('user'))
 }

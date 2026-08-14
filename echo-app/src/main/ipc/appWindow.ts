@@ -30,7 +30,7 @@ export function registerAppWindowIpc(): void {
     return { ok: true, preset, ...size }
   })
   ipcMain.handle('window:close', () => {
-    BrowserWindow.getFocusedWindow()?.hide()
+    BrowserWindow.getFocusedWindow()?.close()
     return { ok: true }
   })
 }

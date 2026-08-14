@@ -39,6 +39,7 @@ function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
 const echoApi: EchoApi = {
   boundary: {
     get: () => invoke('boundary:get'),
+    getCloseReadiness: () => invoke('boundary:getCloseReadiness'),
   },
   runtime: {
     getTask: (id) => invoke('runtime:getTask', id),

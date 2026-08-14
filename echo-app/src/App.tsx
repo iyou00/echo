@@ -14,7 +14,8 @@ import { Player } from './renderer/components/Player'
 import { EchoShell } from './renderer/shell/EchoShell'
 import { ContextDrawer } from './renderer/shell/ContextDrawer'
 import { BoundaryState } from './renderer/components/BoundaryState'
-import type { WindowFieldMode } from './renderer/shell/WindowField'
+import { X } from 'lucide-react'
+import { WindowField, type WindowFieldMode } from './renderer/shell/WindowField'
 import {
   isVoiceContinuousActive,
   scenePlaybackStatePatch,
@@ -32,6 +33,7 @@ import {
   onboardingPatchesAfterImport,
   onboardingPatchesAfterLlmReady,
 } from './shared/onboardingPolicy'
+import { remainingStartupDelay } from './shared/startupPresentation'
 
 const SCENE_CONTINUATION_RETRY_DELAYS_MS = [8000, 20_000]
 
@@ -83,6 +85,7 @@ function App() {
     voiceAutoStartToken,
     voiceContinuous,
     closeDialogOpen,
+    closeReadiness,
     rememberCloseChoice,
     latestYinyiDate,
     onboardingOpen,
@@ -119,6 +122,16 @@ function App() {
       }, autoHideMs)
     }
   }, [dispatch])
+
+  const openCloseDialog = useCallback(async () => {
+    try {
+      const readiness = await echo.boundary.getCloseReadiness()
+      dispatch({ closeDialogOpen: true, closeReadiness: readiness })
+    } catch (error) {
+      logAppAsyncError('load close readiness', error)
+      dispatch({ closeDialogOpen: true, closeReadiness: null })
+    }
+  }, [dispatch, echo])
 
   useEffect(() => () => {
     if (playbackNoticeTimerRef.current !== null) window.clearTimeout(playbackNoticeTimerRef.current)
@@ -190,6 +203,7 @@ function App() {
 
   useEffect(() => {
     let alive = true
+    const bootStartedAt = performance.now()
 
     function bootTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
       return Promise.race([
@@ -263,6 +277,8 @@ function App() {
           playbackNotice: friendlyOperationError(error, 'Echo 启动初始化失败，请重新载入。'),
         })
       } finally {
+        const delay = remainingStartupDelay(bootStartedAt, performance.now())
+        if (delay > 0) await new Promise((resolve) => window.setTimeout(resolve, delay))
         if (alive) dispatch({ bootReady: true })
       }
     }
@@ -332,9 +348,18 @@ function App() {
 
   useEffect(() => {
     return echo.app.onCloseRequested(() => {
-      dispatch({ closeDialogOpen: true })
+      void openCloseDialog()
     })
-  }, [dispatch, echo])
+  }, [echo, openCloseDialog])
+
+  useEffect(() => {
+    if (!closeDialogOpen) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') dispatch({ closeDialogOpen: false, closeReadiness: null })
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [closeDialogOpen, dispatch])
 
   useEffect(() => {
     return echo.app.onNavigate((payload) => {
@@ -410,7 +435,7 @@ function App() {
   async function minimizeToTray() {
     try {
       await rememberCloseChoiceAs('minimize')
-      dispatch({ closeDialogOpen: false })
+      dispatch({ closeDialogOpen: false, closeReadiness: null })
       await echo.app.minimizeToTray()
     } catch (error) { logAppAsyncError('minimizeToTray', error) }
   }
@@ -418,7 +443,7 @@ function App() {
   async function quitEcho() {
     try {
       await rememberCloseChoiceAs('quit')
-      dispatch({ closeDialogOpen: false })
+      dispatch({ closeDialogOpen: false, closeReadiness: null })
       await echo.app.quit()
     } catch (error) { logAppAsyncError('quitEcho', error) }
   }
@@ -446,7 +471,10 @@ function App() {
       setSettings(next)
       const onboardingComplete = isOnboardingComplete(next, Boolean(profile))
       dispatch({ firstRunWelcomeOpen: false, onboardingOpen: !onboardingComplete })
-    } catch (error) { logAppAsyncError('completeFirstRunWelcome', error) }
+    } catch (error) {
+      logAppAsyncError('completeFirstRunWelcome', error)
+      throw error
+    }
   }
 
   async function startOnboardingApi() {
@@ -593,13 +621,11 @@ function App() {
         await echo.app.quit()
         return
       }
-      dispatch({ closeDialogOpen: true })
+      await openCloseDialog()
     } catch (error) {
       logAppAsyncError('closeWindow', error)
-      dispatch({
-        closeDialogOpen: true,
-        playbackNotice: friendlyOperationError(error, '关闭窗口失败，请重试。'),
-      })
+      dispatch({ playbackNotice: friendlyOperationError(error, '关闭窗口失败，请重试。') })
+      await openCloseDialog()
     }
   }
 
@@ -632,11 +658,12 @@ function App() {
 
   if (!bootReady) {
     return (
-      <div className="echo-shell">
+      <div className="echo-shell boot-shell">
+        <WindowField mode="quiet" />
         <main className="app-frame has-global-player">
           <div className="boot-splash" role="status" aria-live="polite">
             <div className="boot-splash-mark">E C H O</div>
-            <div className="boot-splash-tip">在醒过来...</div>
+            <div className="boot-splash-tip">正在重新接上</div>
           </div>
         </main>
       </div>
@@ -788,11 +815,30 @@ function App() {
         {closeDialogOpen && (
           <div className="close-dialog-layer" role="presentation">
             <section className="close-dialog" role="dialog" aria-modal="true" aria-labelledby="close-dialog-title">
+              <button
+                className="close-dialog-dismiss"
+                type="button"
+                title="继续使用 Echo"
+                aria-label="继续使用 Echo"
+                onClick={() => dispatch({ closeDialogOpen: false, closeReadiness: null })}
+              >
+                <X size={15} />
+              </button>
               <div className="close-dialog-kicker">E C H O · C L O S E</div>
-              <h2 id="close-dialog-title">要让我先待在托盘里吗？</h2>
-              <p>
-                我可以安静地留在后台，音乐继续，下次点开还能接着刚才的位置。你也可以直接退出，下次见。
-              </p>
+              <h2 id="close-dialog-title">{closeReadiness?.boundary ? '还有事情正在继续。' : '要让我先待在托盘里吗？'}</h2>
+              {closeReadiness?.activities.length ? (
+                <div className="close-activity-list">
+                  {closeReadiness.activities.map((activity, index) => (
+                    <div className="close-activity" key={`${activity.kind}-${activity.sourceId ?? index}`}>
+                      <span className={activity.kind} aria-hidden="true" />
+                      {activity.label}
+                    </div>
+                  ))}
+                  <p>留在托盘会继续这些事情。直接退出会明确结束本次运行，不会把未完成任务记成成功。</p>
+                </div>
+              ) : (
+                <p>我可以安静地留在后台，音乐继续，下次点开还能接着刚才的位置。你也可以直接退出，下次见。</p>
+              )}
               <label className="close-dialog-check">
                 <input
                   type="checkbox"

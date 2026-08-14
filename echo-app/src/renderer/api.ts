@@ -426,6 +426,21 @@ const mockEcho: EchoApi = {
       if (!playbackState.current && playbackState.queue.length === 0) boundaries.push({ code: 'queue_empty' as const, scope: 'surface' as const, retryable: true, preserved: ['currentTrack'], occurredAt })
       return boundaries
     },
+    async getCloseReadiness() {
+      const activities = []
+      if (playbackState.current && (playbackState.status === 'playing' || playbackState.status === 'loading')) {
+        activities.push({ kind: 'playback' as const, sourceId: playbackState.current.playbackInstanceId, label: `正在播放《${playbackState.current.title}》` })
+      }
+      for (const task of runtimeTasks.filter((item) => item.status === 'running')) {
+        activities.push({ kind: 'task' as const, sourceId: task.id, label: task.message ?? '有任务正在进行' })
+      }
+      return {
+        activities,
+        boundary: activities.length > 0
+          ? { code: 'close_busy' as const, scope: 'system' as const, retryable: false, preserved: ['runningTasks', 'currentTrack'], occurredAt: new Date().toISOString() }
+          : undefined,
+      }
+    },
   },
   runtime: {
     async getTask(id) {

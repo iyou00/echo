@@ -167,6 +167,15 @@ export interface UiBoundarySnapshot {
   }
 }
 
+export interface CloseReadiness {
+  boundary?: UiBoundarySnapshot
+  activities: Array<{
+    kind: 'playback' | 'task'
+    sourceId?: string
+    label: string
+  }>
+}
+
 export interface RuntimeTaskSnapshot {
   id: string
   parentTaskId?: string
@@ -708,6 +717,7 @@ export interface VoiceLine {
 export interface EchoApi {
   boundary: {
     get(): Promise<UiBoundarySnapshot[]>
+    getCloseReadiness(): Promise<CloseReadiness>
   }
   runtime: {
     getTask(id: string): Promise<RuntimeTaskSnapshot | null>

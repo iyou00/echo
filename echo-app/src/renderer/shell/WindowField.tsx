@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 
-export type WindowFieldMode = 'idle' | 'chat' | 'listening' | 'voice' | 'scene' | 'quiet'
+export type WindowFieldMode = 'idle' | 'chat' | 'listening' | 'voice' | 'scene' | 'quiet' | 'welcome'
 
 const MODE_ENERGY: Record<WindowFieldMode, { green: number; red: number; speed: number }> = {
   idle: { green: 5, red: 3, speed: 0.18 },
@@ -9,6 +9,7 @@ const MODE_ENERGY: Record<WindowFieldMode, { green: number; red: number; speed: 
   voice: { green: 8, red: 14, speed: 0.72 },
   scene: { green: 10, red: 10, speed: 0.46 },
   quiet: { green: 3, red: 2, speed: 0.08 },
+  welcome: { green: 18, red: 18, speed: 0.42 },
 }
 
 export function WindowField({ mode }: { mode: WindowFieldMode }) {

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, nativeImage, Notification, Tray } from 'electron'
+import { app, BrowserWindow, Menu, nativeImage, Notification, shell, Tray } from 'electron'
 import type { MenuItemConstructorOptions } from 'electron'
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -167,29 +167,38 @@ function createWindow() {
   })
 }
 
-function logStartupFailure(error: unknown): void {
+function startupLogDirectory(): string {
+  return path.join(app.getPath('userData'), 'logs')
+}
+
+function logStartupFailure(error: unknown): string | null {
   try {
-    const logDir = path.join(app.getPath('userData'), 'logs')
+    const logDir = startupLogDirectory()
     fs.mkdirSync(logDir, { recursive: true })
     const detail = error instanceof Error ? error.stack ?? error.message : String(error)
-    fs.appendFileSync(path.join(logDir, 'startup-error.log'), `[${new Date().toISOString()}]\n${detail}\n\n`, 'utf8')
+    const logPath = path.join(logDir, 'startup-error.log')
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}]\n${detail}\n\n`, 'utf8')
+    return logPath
   } catch (logError) {
     console.warn('[startup] failed to write recovery log', logError)
+    return null
   }
 }
 
 function createStartupFailureWindow(error: unknown): void {
   console.error('[startup] initialization failed', error)
   logStartupFailure(error)
+  if (win && !win.isDestroyed()) win.destroy()
   win = new BrowserWindow({
-    title: 'Echo',
-    width: 440,
-    height: 720,
-    minWidth: 380,
-    minHeight: 600,
+    title: 'Echo 启动恢复',
+    width: 680,
+    height: 440,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
     autoHideMenuBar: true,
     center: true,
-    backgroundColor: '#F5FAED',
+    backgroundColor: '#EEF0EB',
     icon: createAppIcon(),
     webPreferences: {
       contextIsolation: true,
@@ -197,21 +206,51 @@ function createStartupFailureWindow(error: unknown): void {
       sandbox: true,
     },
   })
+  win.webContents.on('will-navigate', (event, url) => {
+    if (!url.startsWith('echo-action://')) return
+    event.preventDefault()
+    if (url === 'echo-action://retry') {
+      isQuitting = true
+      app.relaunch()
+      app.quit()
+      return
+    }
+    if (url === 'echo-action://logs') {
+      void shell.openPath(startupLogDirectory()).catch((openError) => {
+        console.warn('[startup] failed to open diagnostics directory', openError)
+      })
+      return
+    }
+    if (url === 'echo-action://quit') {
+      isQuitting = true
+      app.quit()
+    }
+  })
   const html = `<!doctype html>
 <html lang="zh-CN">
 <meta charset="utf-8">
 <title>Echo 启动恢复</title>
 <style>
-  body{margin:0;background:#f5faed;color:#26331f;font-family:"Microsoft YaHei",sans-serif;display:grid;place-items:center;min-height:100vh}
-  main{width:min(340px,calc(100vw - 48px));text-align:center}
-  h1{font:600 22px Georgia,serif;margin:0 0 16px}
-  p{font-size:14px;line-height:1.8;margin:0 0 18px;color:#53634a}
-  button{margin-top:22px;border:1px solid #8eb966;background:#639922;color:white;padding:9px 18px;border-radius:6px;cursor:pointer}
+  *{box-sizing:border-box}body{margin:0;background:#eef0eb;color:#19201b;font-family:"Microsoft YaHei",sans-serif;display:grid;place-items:center;min-height:100vh}
+  main{width:min(540px,calc(100vw - 64px));border-left:3px solid #d94d38;padding:8px 0 8px 28px}
+  small{display:block;margin-bottom:18px;color:#d94d38;font-size:10px;letter-spacing:3px}
+  h1{font:400 28px/1.4 Georgia,"SimSun",serif;margin:0 0 14px;letter-spacing:0}
+  p{max-width:470px;font-size:13px;line-height:1.8;margin:0;color:#6e766f;letter-spacing:0}
+  .code{margin-top:12px;color:#6e766f;font:10px/1.4 Consolas,monospace}
+  nav{display:flex;flex-wrap:wrap;gap:9px;margin-top:28px}
+  a{display:inline-flex;min-height:36px;align-items:center;padding:7px 14px;border:1px solid #c8cec7;border-radius:2px;background:#f8f8f3;color:#19201b;font-size:12px;text-decoration:none}
+  a.primary{border-color:#184734;background:#184734;color:white}
 </style>
 <main>
+  <small>E C H O · R E C O V E R Y</small>
   <h1>Echo 这次没有顺利醒来</h1>
-  <p>本地数据或启动服务遇到了问题。诊断信息已经保存在本地日志中，重新打开仍然失败时请提交反馈。</p>
-  <button onclick="window.close()">退出后重新打开</button>
+  <p>你的本地数据没有被清理。可以先重新启动；如果仍然失败，打开诊断目录，把 startup-error.log 留给排查。</p>
+  <div class="code">STARTUP_FAILED · 本地数据已保留</div>
+  <nav>
+    <a class="primary" href="echo-action://retry">重新启动 Echo</a>
+    <a href="echo-action://logs">打开诊断目录</a>
+    <a href="echo-action://quit">退出</a>
+  </nav>
 </main>
 </html>`
   win.on('closed', () => {
