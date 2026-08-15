@@ -1273,7 +1273,7 @@
 .d2-now-page .conversation.stage-dialogue > .empty-state, .d2-now-page .conversation.stage-dialogue > .boundary-state { position: absolute; top: 230px; left: 17%; width: min(420px, 40%); pointer-events: auto; }
 .d2-now-page .stage-chat .d2-ambient-facts, .d2-now-page .stage-chat .d2-quiet-mark { opacity: 0; pointer-events: none; }
 .d2-now-page .stage-chat .d2-now-presence { top: 62px; left: 7.2%; width: 440px; }
-.d2-now-page .stage-chat .d2-now-presence h1 { margin-top: 12px; font-size: 35px; }
+.d2-now-page .stage-chat .d2-now-presence h1 { margin-top: 12px; font-size: 31px; }
 .d2-now-page .stage-chat .d2-now-presence p { display: none; }
 .d2-now-page .stage-dialogue .msg { position: absolute; margin: 0; pointer-events: auto; }
 .d2-now-page .stage-dialogue .msg.me { top: 139px; right: 10.8%; width: min(410px, 34%); }

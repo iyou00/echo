@@ -9,7 +9,7 @@ const projectRoot = path.resolve(scriptDirectory, '..')
 const rendererEntry = path.join(projectRoot, 'dist', 'index.html')
 const runStamp = new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-')
 const runDirectory = path.join(projectRoot, 'artifacts', 'electron-e2e', runStamp)
-const scenarios = ['first-run', 'first-run-sound', 'offline', 'startup-failure']
+const scenarios = ['first-run', 'first-run-sound', 'offline', 'boundary-model-invalid', 'startup-failure']
 
 if (!fs.existsSync(rendererEntry)) {
   console.error('[e2e] dist/index.html is missing. Run npm run build first.')
@@ -30,6 +30,7 @@ function runScenario(scenario) {
         ...process.env,
         ECHO_E2E: '1',
         ECHO_E2E_SCENARIO: scenario,
+        ECHO_E2E_BOUNDARY: scenario.startsWith('boundary-') ? scenario.replace('boundary-', '').replaceAll('-', '_') : '',
         ECHO_E2E_OUTPUT_DIR: scenarioDirectory,
         ECHO_E2E_USER_DATA: userDataDirectory,
       },

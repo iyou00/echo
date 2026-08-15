@@ -174,6 +174,19 @@ async function captureFirstRun(target: BrowserWindow): Promise<CaptureMetric[]> 
   metrics.push(await capture(target, 'queue-drawer.png'))
   await click(target, '.d2-brand')
   await waitForMissing(target, '.d2-drawer-layer.open')
+  await click(target, '.d2-icon-button[aria-label="设置"]')
+  await waitForSelector(target, '.d2-drawer-layer.open .settings-page')
+  await wait(200)
+  const aboutButton = await target.webContents.executeJavaScript(
+    `(() => { const buttons = [...document.querySelectorAll('.d2-settings-links button')]; const hit = buttons.find((b) => b.textContent?.includes('关于 Echo')); if (hit instanceof HTMLElement) { hit.click(); return true } return false })()`,
+    true,
+  )
+  if (!aboutButton) throw new Error('Could not find about entry in settings overview')
+  await waitForSelector(target, '.d2-about')
+  await wait(300)
+  metrics.push(await capture(target, 'about-drawer.png'))
+  await click(target, '.d2-brand')
+  await waitForMissing(target, '.d2-drawer-layer.open')
   await click(target, '.voice-entry-button')
   await waitForSelector(target, '.field-voice')
   metrics.push(await capture(target, 'voice-idle-stage.png'))
@@ -250,6 +263,17 @@ async function captureOffline(target: BrowserWindow): Promise<CaptureMetric[]> {
   return [await capture(target, 'offline.png')]
 }
 
+async function captureBoundaryModelInvalid(target: BrowserWindow): Promise<CaptureMetric[]> {
+  await waitForSelector(target, '[data-testid="first-run-skip"]')
+  await click(target, '[data-testid="first-run-skip"]')
+  await waitForSelector(target, '[data-testid="onboarding-skip"]')
+  await click(target, '[data-testid="onboarding-skip"]')
+  await waitForMissing(target, '[data-testid="onboarding-skip"]')
+  await waitForSelector(target, '.chat-page .d2-empty')
+  await wait(300)
+  return [await capture(target, 'boundary-model-invalid.png')]
+}
+
 async function captureRecovery(target: BrowserWindow): Promise<CaptureMetric[]> {
   await waitForSelector(target, 'main')
   return [await capture(target, 'startup-recovery.png')]
@@ -293,7 +317,9 @@ export function runElectronE2E(target: BrowserWindow, kind: E2EWindowKind): void
           ? await captureFirstRunSound(target)
           : scenario === 'offline'
             ? await captureOffline(target)
-            : await captureRecovery(target)
+            : scenario === 'boundary-model-invalid'
+              ? await captureBoundaryModelInvalid(target)
+              : await captureRecovery(target)
       const security = kind === 'app' ? await securitySnapshot(target) : null
       if (security && (!security.contextIsolation || !security.nodeIntegrationDisabled)) {
         throw new Error('Electron renderer security contract failed')

@@ -537,3 +537,28 @@
   color: var(--d2-ink);
   font: 500 10px/1.6 var(--d2-sans);
 }
+
+/* ---- D1.3 关于抽屉（复用 d2-profile 行样式） ---- */
+.d2-about {
+  padding: 2px 0 40px;
+}
+
+.d2-about .about-letter {
+  max-width: none;
+  margin: 16px 0 0;
+}
+
+.d2-about .about-greet,
+.d2-about .about-line,
+.d2-about .about-sign-name {
+  color: var(--d2-ink);
+}
+
+.d2-about .about-privacy {
+  margin: 20px 0 4px;
+  color: var(--d2-muted);
+}
+
+.d2-about-rows {
+  margin-top: 6px;
+}

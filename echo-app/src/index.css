@@ -837,14 +837,6 @@ button:disabled {
 }
 
 /* About Echo page */
-.about-page {
-  background: linear-gradient(180deg, var(--bg-primary) 0%, #fbfbf8 100%);
-}
-
-.about-scroll {
-  padding: 36px 36px 32px;
-}
-
 .about-letter {
   max-width: 360px;
   margin: 0 auto;
