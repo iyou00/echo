@@ -2248,10 +2248,10 @@ export function SettingsPage({
               <span>我知道这会清空本地数据</span>
             </label>
             <div className="close-dialog-actions">
-              <button className="btn close-quit-btn" type="button" onClick={() => setShowResetConfirm(false)} disabled={busy}>
+              <button className="d2-dialog-btn close-quit-btn" type="button" onClick={() => setShowResetConfirm(false)} disabled={busy}>
                 先不清
               </button>
-              <button className="btn settings-reset-confirm" type="button" onClick={resetData} disabled={busy || anyRuntimeTaskRunning || !resetConfirmChecked}>
+              <button className="d2-dialog-btn danger settings-reset-confirm" type="button" onClick={resetData} disabled={busy || anyRuntimeTaskRunning || !resetConfirmChecked}>
                 {busy ? '清空中' : '清空 Echo'}
               </button>
             </div>

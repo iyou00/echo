@@ -1603,3 +1603,204 @@
   border-bottom-color: var(--d2-ink);
   color: var(--d2-ink);
 }
+
+.d2-dialog-btn.danger {
+  border-color: var(--d2-red);
+  color: var(--d2-red);
+}
+
+.d2-dialog-btn.danger:hover:not(:disabled) {
+  background: var(--d2-red);
+  color: #f5f5ec;
+}
+
+/* ---- D1.3 工具栏（回望 / 风信共用） ---- */
+.d2-shell .page-toolbar {
+  margin: 12px 0 4px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--d2-line);
+  background: transparent;
+}
+
+.d2-shell .page-toolbar .tb-status {
+  color: var(--d2-muted);
+  font: 9px/1.6 var(--d2-sans);
+  letter-spacing: 1px;
+}
+
+.d2-shell .page-toolbar .tb-btn {
+  min-height: 0;
+  padding: 6px 0 4px;
+  border: 0;
+  border-bottom: 1px solid var(--d2-line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--d2-muted);
+  font: 9px/1.4 var(--d2-sans);
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.d2-shell .page-toolbar .tb-btn:hover:not(:disabled) {
+  border-bottom-color: var(--d2-ink);
+  color: var(--d2-ink);
+}
+
+.d2-shell .page-toolbar .tb-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.d2-shell .status-ind {
+  margin: 0;
+  padding: 8px 0;
+  border: 0;
+  border-top: 1px solid var(--d2-line);
+  border-bottom: 1px solid var(--d2-line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--d2-muted);
+  font: 10px/1.6 var(--d2-sans);
+  letter-spacing: 0;
+}
+
+.d2-shell .status-ind .status-dot {
+  display: none;
+}
+
+.d2-shell .status-ind.err {
+  color: var(--d2-red);
+}
+
+/* ---- D1.3 网易云歌单选择（居中对话框替代底部弹层） ---- */
+.d2-shell .drawer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 14;
+  background: rgba(15, 18, 15, 0.36);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  backdrop-filter: none;
+}
+
+.d2-shell .drawer-overlay.active {
+  opacity: 1;
+}
+
+.d2-shell .drawer-sheet {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  width: min(460px, calc(100vw - 64px));
+  max-height: min(600px, 72vh);
+  border: 1px solid var(--d2-ink);
+  border-radius: 0;
+  background: var(--d2-surface);
+  box-shadow: 0 24px 70px rgba(25, 32, 27, 0.2);
+  transform: translate(-50%, -46%);
+  opacity: 0;
+  transition: transform 0.28s ease, opacity 0.25s ease;
+}
+
+.d2-shell .drawer-sheet.active {
+  transform: translate(-50%, -50%);
+  opacity: 1;
+}
+
+.d2-shell .drawer-drag-bar {
+  display: none;
+}
+
+.d2-shell .drawer-sheet .drawer-header {
+  display: flex;
+  align-items: center;
+  padding: 24px 26px 14px;
+  border-bottom: 1px solid var(--d2-ink);
+}
+
+.d2-shell .drawer-sheet .drawer-title {
+  color: var(--d2-ink);
+  font: 500 20px/1.4 var(--d2-serif);
+}
+
+.d2-shell .drawer-sheet .drawer-close {
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--d2-muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.d2-shell .drawer-sheet .drawer-close:hover {
+  color: var(--d2-ink);
+}
+
+.d2-shell .drawer-sheet .drawer-body {
+  flex: 1;
+  overflow: auto;
+  padding: 4px 26px 20px;
+}
+
+.d2-shell .drawer-sheet .playlist-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--d2-line);
+  border-radius: 0;
+  background: transparent;
+}
+
+.d2-shell .drawer-sheet .playlist-item:hover {
+  background: transparent;
+}
+
+.d2-shell .drawer-sheet .playlist-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.d2-shell .drawer-sheet .playlist-name {
+  color: var(--d2-ink);
+  font: 500 13px/1.5 var(--d2-serif);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.d2-shell .drawer-sheet .playlist-count {
+  margin-top: 4px;
+  color: var(--d2-muted);
+  font: 9px/1.5 var(--d2-sans);
+}
+
+.d2-shell .drawer-sheet .playlist-import-btn {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--d2-forest);
+  border-radius: 0;
+  background: transparent;
+  color: var(--d2-forest);
+  font: 500 9px/1 var(--d2-sans);
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.d2-shell .drawer-sheet .playlist-import-btn:hover:not(:disabled) {
+  background: var(--d2-forest);
+  color: #f5f5ec;
+}
+
+.d2-shell .drawer-sheet .playlist-import-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
