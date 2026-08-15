@@ -856,26 +856,26 @@ function App() {
                 <span>下次不再提醒，记住这次选择</span>
               </label>
               <div className="close-dialog-actions">
-                <button className="btn sec close-quit-btn" type="button" onClick={quitEcho}>直接退出</button>
-                <button className="btn close-minimize-btn" type="button" onClick={minimizeToTray}>最小化到托盘</button>
+                <button className="d2-dialog-btn close-quit-btn" type="button" onClick={quitEcho}>直接退出</button>
+                <button className="d2-dialog-btn primary close-minimize-btn" type="button" onClick={minimizeToTray}>最小化到托盘</button>
               </div>
             </section>
           </div>
         )}
         {onboardingOpen && (
-          <div className="onboarding-layer" role="presentation">
-            <section className="onboarding-card" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
-              <div className="onboarding-kicker">E C H O · F I R S T</div>
+          <div className="d2-onboarding-layer" role="presentation">
+            <section className="d2-onboarding" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+              <div className="d2-onboarding-kicker">ECHO · FIRST</div>
               {!hasLlmConfig ? (
                 <>
                   <h2 id="onboarding-title">先给我一颗大脑</h2>
                   <p>
                     填好 AI 模型的地址和密钥后，我才能真正理解你的音乐——标签、情绪、场景都会更准。
                   </p>
-                  <button className="btn onboarding-primary" type="button" onClick={() => { void startOnboardingApi() }}>
+                  <button className="d2-dialog-btn primary d2-onboarding-primary" type="button" onClick={() => { void startOnboardingApi() }}>
                     去填写模型设置
                   </button>
-                  <button data-testid="onboarding-skip" className="btn sec onboarding-skip" type="button" onClick={() => { void skipOnboarding() }}>
+                  <button data-testid="onboarding-skip" className="d2-onboarding-skip" type="button" onClick={() => { void skipOnboarding() }}>
                     先逛逛
                   </button>
                 </>
@@ -885,10 +885,10 @@ function App() {
                   <p>
                     导入一份歌单后，我会先读懂你的口味、常听情绪和反复回来的声音。后面推荐、风信、画像和主动关心都会从这里长出来。
                   </p>
-                  <button className="btn onboarding-primary" type="button" onClick={() => { void startOnboardingImport() }}>
+                  <button className="d2-dialog-btn primary d2-onboarding-primary" type="button" onClick={() => { void startOnboardingImport() }}>
                     开始导入歌单
                   </button>
-                  <button data-testid="onboarding-skip" className="btn sec onboarding-skip" type="button" onClick={() => { void skipOnboarding() }}>
+                  <button data-testid="onboarding-skip" className="d2-onboarding-skip" type="button" onClick={() => { void skipOnboarding() }}>
                     先逛逛
                   </button>
                 </>

@@ -864,7 +864,7 @@ button:disabled {
 .scene-composer .scene-chip.active {
   border-color: rgba(99, 153, 34, 0.38);
   background: rgba(241, 248, 232, 0.95);
-  color: var(--ayin-green-800);
+  color: var(--ayin-green-700);
   box-shadow: inset 0 -2px 0 var(--ayin-green-600);
   animation: scene-breathe 2.4s ease-in-out infinite;
 }
@@ -881,7 +881,7 @@ button:disabled {
 .scene-composer .scene-chip.active.loading {
   border-color: rgba(99, 153, 34, 0.38);
   background: rgba(241, 248, 232, 0.95);
-  color: var(--ayin-green-800);
+  color: var(--ayin-green-700);
   box-shadow: inset 0 -2px 0 var(--ayin-green-600);
   pointer-events: none;
 }
@@ -1083,7 +1083,7 @@ button:disabled {
 }
 
 .about-line b {
-  color: var(--ayin-green-800);
+  color: var(--ayin-green-700);
   font-weight: 500;
 }
 
@@ -1110,7 +1110,7 @@ button:disabled {
   font-family: var(--font-serif);
   font-style: italic;
   font-size: 14px;
-  color: var(--ayin-green-800);
+  color: var(--ayin-green-700);
   margin-bottom: 4px;
 }
 
@@ -1170,68 +1170,6 @@ button:disabled {
   color: var(--danger);
   font-size: 11px;
   text-align: center;
-}
-
-.onboarding-layer {
-  position: absolute;
-  inset: 0;
-  z-index: 35;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 34px;
-  background:
-    radial-gradient(circle at 50% 38%, rgba(190, 218, 156, 0.22), transparent 38%),
-    rgba(230, 235, 224, 0.72);
-  backdrop-filter: blur(8px);
-}
-
-.onboarding-card {
-  width: min(350px, 100%);
-  padding: 28px 26px 24px;
-  border: 1px solid rgba(115, 143, 82, 0.2);
-  border-radius: 10px;
-  background: rgba(255, 255, 252, 0.96);
-  box-shadow: 0 24px 70px rgba(58, 71, 47, 0.18);
-}
-
-.onboarding-kicker {
-  margin-bottom: 14px;
-  color: var(--green-700);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.42em;
-}
-
-.onboarding-card h2 {
-  margin: 0 0 12px;
-  color: var(--ink);
-  font-family: var(--font-serif);
-  font-size: 22px;
-  font-weight: 600;
-}
-
-.onboarding-card p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 14px;
-  line-height: 1.85;
-}
-
-.onboarding-primary {
-  width: 100%;
-  margin-top: 22px;
-}
-
-.onboarding-skip {
-  width: 100%;
-  margin-top: 8px;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.onboarding-skip:hover {
-  color: var(--ink);
 }
 
 .import-focus-anchor {

@@ -266,13 +266,20 @@ export function EmptyState({
   muted?: boolean
   className?: string
 }) {
+  const glyph = typeof icon === 'string' && icon !== 'E' ? icon : null
+  const mark = icon !== 'E' && !glyph ? icon : null
   return (
-    <div className={`empty-state ${muted ? 'muted' : ''} ${className}`}>
-      <div className="empty-dot">{icon}</div>
+    <div className={`d2-empty ${muted ? 'muted' : ''} ${className}`}>
+      <div className="d2-empty-kicker" aria-hidden="true">
+        <span className="d2-empty-kicker-line" />
+        ECHO
+      </div>
+      {glyph && <div className="d2-empty-glyph" aria-hidden="true">{glyph}</div>}
+      {mark && <div className="d2-empty-mark" aria-hidden="true">{mark}</div>}
       <h3>{title.split(/\n/).map((line, i, arr) => <Fragment key={i}>{line}{i < arr.length - 1 && <br />}</Fragment>)}</h3>
       {body && <p>{body}</p>}
-      {action}
-      {sign && <div className="empty-sign">{sign}</div>}
+      {action && <div className="d2-empty-actions">{action}</div>}
+      {sign && <div className="d2-empty-sign">{sign}</div>}
     </div>
   )
 }

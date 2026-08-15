@@ -1405,3 +1405,201 @@
 .d2-shell .empty-track .d2-sound-tools { display: flex; }
 .d2-shell .empty-track .d2-sound-tools button:not(:last-child) { display: none; }
 .d2-shell .empty-track .d2-volume-control { display: none; }
+
+/* ---- D1.3 空状态（EmptyState 统一为边界语言） ---- */
+.d2-shell .d2-empty {
+  min-height: 220px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 13px;
+  padding: 30px 26px;
+  text-align: center;
+}
+
+.d2-empty-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--d2-red);
+  font: 700 9px/1 var(--d2-sans);
+  letter-spacing: 2px;
+}
+
+.d2-empty-kicker-line {
+  width: 28px;
+  height: 1px;
+  background: var(--d2-red);
+}
+
+.d2-empty-glyph {
+  color: var(--d2-ink);
+  font: 500 20px/1 var(--d2-serif);
+}
+
+.d2-empty.muted .d2-empty-glyph { color: var(--d2-muted); }
+.d2-empty-mark { display: grid; place-items: center; }
+.d2-empty-mark svg { color: var(--d2-muted); }
+.d2-empty.muted .d2-empty-mark { opacity: 0.7; }
+
+.d2-empty h3 {
+  margin: 0;
+  max-width: 360px;
+  color: var(--d2-ink);
+  font: 500 19px/1.6 var(--d2-serif);
+  letter-spacing: 0;
+}
+
+.d2-empty p {
+  margin: 0;
+  max-width: 320px;
+  color: var(--d2-muted);
+  font: 12.5px/1.9 var(--d2-serif);
+  letter-spacing: 0;
+}
+
+.d2-empty-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.d2-empty-sign {
+  margin-top: 2px;
+  color: var(--d2-muted);
+  font: 9px/1.5 var(--d2-sans);
+  letter-spacing: 1.4px;
+  opacity: 0.8;
+}
+
+.d2-empty .empty-cta,
+.d2-empty .empty-cta.chat-cta {
+  min-height: 0;
+  padding: 9px 14px;
+  border: 1px solid var(--d2-forest);
+  border-radius: 0;
+  background: transparent;
+  color: var(--d2-forest);
+  font: 500 10px/1 var(--d2-sans);
+  letter-spacing: 1px;
+  box-shadow: none;
+}
+
+.d2-empty .empty-cta:hover {
+  background: var(--d2-forest);
+  color: #f5f5ec;
+}
+
+.d2-empty .empty-cta.sec {
+  border-color: var(--d2-line);
+  color: var(--d2-muted);
+}
+
+.d2-empty .empty-cta.sec:hover {
+  border-color: var(--d2-ink);
+  background: transparent;
+  color: var(--d2-ink);
+}
+
+/* ---- D1.3 对话框按钮（close-dialog / onboarding 共用） ---- */
+.d2-dialog-btn {
+  min-width: 88px;
+  padding: 10px 15px;
+  border: 1px solid var(--d2-line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--d2-ink);
+  font: 500 10px/1 var(--d2-sans);
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.d2-dialog-btn:hover {
+  border-color: var(--d2-ink);
+}
+
+.d2-dialog-btn.primary {
+  border-color: var(--d2-forest);
+  background: var(--d2-forest);
+  color: #f5f5ec;
+}
+
+.d2-dialog-btn.primary:hover {
+  background: #1f523d;
+}
+
+/* ---- D1.3 首次引导卡 ---- */
+.d2-onboarding-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 19;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 18, 15, 0.24);
+}
+
+.d2-onboarding {
+  width: min(440px, calc(100vw - 64px));
+  padding: 30px 32px 28px;
+  border: 1px solid var(--d2-ink);
+  border-radius: 0;
+  background: var(--d2-surface);
+  box-shadow: 0 24px 70px rgba(25, 32, 27, 0.2);
+}
+
+.d2-onboarding-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  color: var(--d2-red);
+  font: 700 9px/1 var(--d2-sans);
+  letter-spacing: 2px;
+}
+
+.d2-onboarding-kicker::before {
+  content: '';
+  width: 28px;
+  height: 1px;
+  background: var(--d2-red);
+}
+
+.d2-onboarding h2 {
+  margin: 0 0 12px;
+  color: var(--d2-ink);
+  font: 500 25px/1.4 var(--d2-serif);
+}
+
+.d2-onboarding p {
+  margin: 0;
+  color: var(--d2-muted);
+  font: 14px/1.8 var(--d2-serif);
+}
+
+.d2-onboarding-primary {
+  width: 100%;
+  margin-top: 22px;
+}
+
+.d2-onboarding-skip {
+  width: 100%;
+  margin-top: 12px;
+  padding: 8px 0 2px;
+  border: 0;
+  border-bottom: 1px solid var(--d2-line);
+  background: transparent;
+  color: var(--d2-muted);
+  font: 11px/1.4 var(--d2-sans);
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.d2-onboarding-skip:hover {
+  border-bottom-color: var(--d2-ink);
+  color: var(--d2-ink);
+}
