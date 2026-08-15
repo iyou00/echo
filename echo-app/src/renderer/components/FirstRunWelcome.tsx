@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Volume2, VolumeX } from 'lucide-react'
-import { WindowField } from '../shell/WindowField'
 import { welcomeExitDelay } from './firstRunWelcomePolicy'
 
 interface FirstRunWelcomeProps {
@@ -11,6 +10,125 @@ const TARGET_VOLUME = 0.22
 const FADE_IN_MS = 3600
 const DEVICE_CHANGE_RETRY_MS = 600
 const WELCOME_AUDIO_SRC = './welcome/first-run-welcome.mp3'
+
+const MEET_DURATION_MS = 5900
+const SIGNATURE_AT_MS = 6450
+const AUTO_CONTINUE_AT_MS = 8000
+
+const PHRASES_NORMAL = [
+  { at: 250, text: '先听一会儿。' },
+  { at: 1700, text: '有些时刻，不必急着说清楚。' },
+  { at: 3350, text: '你留下心情。' },
+  { at: 4950, text: '我替你接住下一首。' },
+]
+
+const PHRASES_REDUCED = [
+  { at: 80, text: '先听一会儿。' },
+  { at: 650, text: '有些时刻，不必急着说清楚。' },
+  { at: 1250, text: '你留下心情。' },
+]
+
+const WELCOME_GREEN = '#5f9b72'
+const WELCOME_RED = '#e45036'
+
+type Cubic = [[number, number], [number, number], [number, number], [number, number]]
+
+const GREEN_CUBIC: Cubic = [[-0.02, 0.68], [0.18, 0.63], [0.39, 0.72], [0.55, 0.51]]
+const RED_CUBIC: Cubic = [[1.02, 0.33], [0.82, 0.36], [0.68, 0.42], [0.55, 0.51]]
+
+function cubicPoint(cubic: Cubic, t: number): [number, number] {
+  const [p0, p1, p2, p3] = cubic
+  const u = 1 - t
+  const a = u * u * u
+  const b = 3 * u * u * t
+  const c = 3 * u * t * t
+  const d = t * t * t
+  return [
+    a * p0[0] + b * p1[0] + c * p2[0] + d * p3[0],
+    a * p0[1] + b * p1[1] + c * p2[1] + d * p3[1],
+  ]
+}
+
+function drawMeetingCurve(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  cubic: Cubic,
+  progress: number,
+  color: string,
+) {
+  const steps = 72
+  const last = Math.max(1, Math.round(steps * progress))
+  ctx.strokeStyle = color
+  ctx.lineWidth = 2
+  ctx.shadowColor = color
+  ctx.shadowBlur = 8
+  ctx.beginPath()
+  for (let index = 0; index <= last; index += 1) {
+    const [nx, ny] = cubicPoint(cubic, (index / steps) * progress)
+    const x = Math.min(w + 2, Math.max(-2, nx * w))
+    const y = ny * h
+    if (index === 0) ctx.moveTo(x, y)
+    else ctx.lineTo(x, y)
+  }
+  ctx.stroke()
+  ctx.shadowBlur = 0
+  const [hx, hy] = cubicPoint(cubic, progress)
+  ctx.fillStyle = color
+  ctx.fillRect(Math.min(w + 2, Math.max(-2, hx * w)) - 2, hy * h - 2, 4, 4)
+}
+
+function WelcomeField({ animate }: { animate: boolean }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+
+  useEffect(() => {
+    if (!animate) return
+    if (!canvasRef.current) return
+    const canvasElement = canvasRef.current as HTMLCanvasElement
+    const candidate = canvasElement.getContext('2d')
+    if (!candidate) return
+    const ctx = candidate as CanvasRenderingContext2D
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    let width = 0
+    let height = 0
+    let frame = 0
+    const startedAt = performance.now()
+
+    function resize() {
+      const bounds = canvasElement.getBoundingClientRect()
+      const scale = Math.min(window.devicePixelRatio || 1, 2)
+      width = Math.max(1, bounds.width)
+      height = Math.max(1, bounds.height)
+      canvasElement.width = Math.round(width * scale)
+      canvasElement.height = Math.round(height * scale)
+      ctx.setTransform(scale, 0, 0, scale, 0, 0)
+    }
+
+    function draw(now: number) {
+      if (width === 0 || height === 0) resize()
+      const raw = reducedMotion ? 1 : Math.min(1, (now - startedAt) / MEET_DURATION_MS)
+      const eased = 1 - (1 - raw) ** 3
+      ctx.clearRect(0, 0, width, height)
+      drawMeetingCurve(ctx, width, height, GREEN_CUBIC, eased, WELCOME_GREEN)
+      drawMeetingCurve(ctx, width, height, RED_CUBIC, eased, WELCOME_RED)
+      if (!reducedMotion && raw < 1) frame = window.requestAnimationFrame(draw)
+    }
+
+    const observer = new ResizeObserver(() => {
+      resize()
+      if (reducedMotion) draw(performance.now())
+    })
+    observer.observe(canvasElement)
+    resize()
+    draw(startedAt)
+    return () => {
+      observer.disconnect()
+      window.cancelAnimationFrame(frame)
+    }
+  }, [animate])
+
+  return <canvas className="first-run-welcome-field" ref={canvasRef} aria-hidden="true" />
+}
 
 function fadeAudio(audio: HTMLAudioElement, from: number, to: number, duration: number, after?: () => void) {
   const startedAt = performance.now()
@@ -45,7 +163,24 @@ export function FirstRunWelcome({ onContinue }: FirstRunWelcomeProps) {
   const [started, setStarted] = useState(false)
   const [audioUnavailable, setAudioUnavailable] = useState(false)
   const [continueError, setContinueError] = useState(false)
+  const [shownPhrases, setShownPhrases] = useState(0)
+  const [showSignature, setShowSignature] = useState(false)
   const [reducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  const phraseTimersRef = useRef<number[]>([])
+
+  const clearPhraseTimers = useCallback(() => {
+    for (const timer of phraseTimersRef.current) window.clearTimeout(timer)
+    phraseTimersRef.current = []
+  }, [])
+
+  const audioEndedRef = useRef<(() => void) | null>(null)
+
+  const detachAudioEnded = useCallback(() => {
+    const audio = audioRef.current
+    const handler = audioEndedRef.current
+    if (audio && handler) audio.removeEventListener('ended', handler)
+    audioEndedRef.current = null
+  }, [])
 
   const stopFade = useCallback(() => {
     cancelFadeRef.current?.()
@@ -130,9 +265,33 @@ export function FirstRunWelcome({ onContinue }: FirstRunWelcomeProps) {
       window.removeEventListener('focus', handleOutputMayHaveChanged)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       if (continueTimerRef.current !== null) window.clearTimeout(continueTimerRef.current)
+      clearPhraseTimers()
+      detachAudioEnded()
       stopWelcomeAudio({ releaseSource: true })
     }
-  }, [scheduleOutputRetry, stopWelcomeAudio])
+  }, [clearPhraseTimers, detachAudioEnded, scheduleOutputRetry, stopWelcomeAudio])
+
+  function scheduleSequence(autoAdvanceMs: number | null) {
+    clearPhraseTimers()
+    const plan = reducedMotion ? PHRASES_REDUCED : PHRASES_NORMAL
+    const timers: number[] = []
+    plan.forEach((phrase, index) => {
+      timers.push(window.setTimeout(() => {
+        if (mountedRef.current && !leavingRef.current) setShownPhrases(index + 1)
+      }, phrase.at))
+    })
+    if (!reducedMotion) {
+      timers.push(window.setTimeout(() => {
+        if (mountedRef.current && !leavingRef.current) setShowSignature(true)
+      }, SIGNATURE_AT_MS))
+    }
+    if (autoAdvanceMs != null) {
+      timers.push(window.setTimeout(() => {
+        if (mountedRef.current && !leavingRef.current) continueToOnboarding()
+      }, autoAdvanceMs))
+    }
+    phraseTimersRef.current = timers
+  }
 
   async function startExperience(withSound: boolean) {
     userMutedRef.current = !withSound
@@ -140,9 +299,26 @@ export function FirstRunWelcome({ onContinue }: FirstRunWelcomeProps) {
     setMuted(!withSound)
     setStarted(true)
     setAudioUnavailable(false)
-    if (!withSound) return
+    if (!withSound) {
+      scheduleSequence(reducedMotion ? 2350 : AUTO_CONTINUE_AT_MS)
+      return
+    }
     const played = await startWelcomeAudio({ restart: true, reloadSource: true })
-    if (!played && mountedRef.current) setAudioUnavailable(true)
+    if (!played && mountedRef.current) {
+      setAudioUnavailable(true)
+      scheduleSequence(reducedMotion ? 2350 : AUTO_CONTINUE_AT_MS)
+      return
+    }
+    scheduleSequence(null)
+    const audio = audioRef.current
+    if (played && audio) {
+      detachAudioEnded()
+      const onEnded = () => {
+        if (mountedRef.current && !leavingRef.current) continueToOnboarding()
+      }
+      audioEndedRef.current = onEnded
+      audio.addEventListener('ended', onEnded)
+    }
   }
 
   function toggleMute() {
@@ -168,6 +344,7 @@ export function FirstRunWelcome({ onContinue }: FirstRunWelcomeProps) {
     leavingRef.current = true
     setLeaving(true)
     setContinueError(false)
+    clearPhraseTimers()
     const exitDelay = welcomeExitDelay(reducedMotion)
     const audio = audioRef.current
     if (audio && !audio.paused && audio.volume > 0) {
@@ -203,7 +380,7 @@ export function FirstRunWelcome({ onContinue }: FirstRunWelcomeProps) {
       }}
     >
       <audio ref={audioRef} src={WELCOME_AUDIO_SRC} preload="auto" />
-      <WindowField mode="welcome" />
+      {started && <WelcomeField animate={started} />}
       <button data-testid="first-run-skip" className="first-run-skip" type="button" onClick={continueToOnboarding} disabled={leaving}>跳过前奏</button>
       {started && (
         <button className="first-run-mute" type="button" onClick={toggleMute} aria-label={muted ? '打开声音' : '静音'}>
@@ -215,9 +392,9 @@ export function FirstRunWelcome({ onContinue }: FirstRunWelcomeProps) {
       <section className="first-run-welcome-stage" aria-label="Echo 首次欢迎">
         {!started ? (
           <div className="first-run-gate">
-            <div className="first-run-kicker">E C H O · F I R S T L I G H T</div>
-            <h1>让我们从一段声音开始。</h1>
-            <p>这段前奏只在第一次见面时播放。</p>
+            <div className="first-run-kicker">ECHO · 第一次见面</div>
+            <h1>先听一会儿。</h1>
+            <p>这段前奏只在第一次见面时播放。你的生活和 Echo 的回应，会在下面汇成一条线。</p>
             <div className="first-run-gate-actions">
               <button data-testid="first-run-sound" className="first-run-sound" type="button" onClick={() => { void startExperience(true) }}>
                 <Volume2 size={15} />开启声音
@@ -229,12 +406,14 @@ export function FirstRunWelcome({ onContinue }: FirstRunWelcomeProps) {
           </div>
         ) : (
           <div className="first-run-sequence">
-            <div className="first-run-legend" aria-hidden="true"><span>你</span><span>Echo</span></div>
+            <div className="first-run-legend" aria-hidden="true"><span>你的生活</span><span>Echo</span></div>
             <div className="first-run-lines">
-              <div className="first-run-line first-run-line-1">你好。</div>
-              <div className="first-run-line first-run-line-2">我是 Echo。</div>
-              <div className="first-run-line first-run-line-3">以后，你把此刻放在这里。</div>
-              <div className="first-run-line first-run-line-4">我用音乐，陪你把它听完。</div>
+              {(reducedMotion ? PHRASES_REDUCED : PHRASES_NORMAL).map((phrase, index) => (
+                <div className={index < shownPhrases ? 'first-run-line in' : 'first-run-line'} key={phrase.text}>
+                  {phrase.text}
+                </div>
+              ))}
+              <div className={showSignature ? 'first-run-signature in' : 'first-run-signature'} aria-hidden="true">Echo</div>
             </div>
             {audioUnavailable && <p className="first-run-audio-note">声音设备没有接上，先静静进入也没关系。</p>}
             {continueError && <p className="first-run-audio-note" role="alert">刚才没能保存这次开始。再点一次，我重新接上。</p>}
