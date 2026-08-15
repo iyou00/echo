@@ -4,14 +4,20 @@ import sys
 CSS_PATH = r"D:/AI文件/echozcode/echo-app/src/index.css"
 
 RETIRED = {
-    "queue-page", "queue-tabs", "queue-scroll", "queue-notice", "queue-section",
-    "queue-section-label", "queue-more-btn", "queue-foot", "queue-status",
-    "now-playing", "np-indicator", "np-info", "np-title", "np-meta", "np-actions",
-    "q-item", "q-num", "q-handle", "q-body", "q-title", "q-meta", "q-scene-tag",
-    "q-tail", "q-tail-favorite", "q-tail-history", "q-act-btn",
-    "favorite-item", "favorite-section", "past-section", "delete-btn",
-    "history-day", "history-head", "history-check", "history-toggle",
-    "history-list", "history-item", "autoplay-toggle",
+    "avatar-button", "clear-button", "connection-result", "danger-button",
+    "divider", "empty-state", "empty-dot", "empty-sign",
+    "hdr-dot", "hdr-meta", "hdr-name", "hdr-name-block", "hdr-row", "hdr-status",
+    "header-copy", "mini-btn", "mini-ctrl",
+    "netease-actions", "netease-playlists",
+    "np-list-meta", "np-list-name", "np-time", "pb-title", "prototype-pill",
+    "q-actions", "q-btn", "q-mark", "q-text", "q-time",
+    "question-item", "setup-banner",
+    "shell-avatar-button", "shell-hdr", "shell-hdr-detail", "shell-return",
+    "shell-tab", "shell-tabs", "shell-title", "small-button", "spinning",
+    "stash-card", "stash-desc", "stash-foot", "stash-grid", "stash-intro",
+    "stash-name", "stash-play", "stash-section", "stash-tag",
+    "tab-btn", "tab-unread", "tabs-bar", "top-tabs",
+    "voice-label", "wc-icon", "wc-max", "wc-min", "wc-x", "window-toast",
 }
 
 RETIRED_KEYFRAMES: set[str] = set()
