@@ -134,7 +134,7 @@
 
 .d2-queue-item {
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) auto;
+  grid-template-columns: 26px minmax(0, 1fr) auto auto;
   align-items: start;
   gap: 10px;
   padding: 14px 0;

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { AUDIO_ENERGY_EVENT, type AudioEnergyDetail } from '../audioAnalysis'
 
-export type WindowFieldMode = 'idle' | 'chat' | 'streaming' | 'searching' | 'error' | 'listening' | 'voice' | 'scene' | 'quiet' | 'welcome'
+export type WindowFieldMode = 'idle' | 'chat' | 'streaming' | 'searching' | 'error' | 'listening' | 'voice' | 'scene' | 'quiet'
 
 const FOREST = '#184734'
 const RED = '#e45036'
@@ -189,7 +189,6 @@ export function WindowField({ mode }: { mode: WindowFieldMode }) {
       switch (mode) {
         case 'idle':
         case 'quiet':
-        case 'welcome':
           drawIdle(tt)
           break
         case 'scene':
