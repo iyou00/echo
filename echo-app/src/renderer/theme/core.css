@@ -30,8 +30,8 @@
   right: 0;
   bottom: 0;
   display: flex;
-  width: min(520px, 46vw);
-  min-width: 430px;
+  width: min(440px, 94vw);
+  min-width: 0;
   flex-direction: column;
   border-left: 1px solid var(--d2-ink);
   background: var(--d2-surface);
@@ -41,9 +41,11 @@
   transition: transform 280ms ease;
 }
 
-.d2-context-drawer.view-settings {
-  width: min(480px, 42vw);
-  min-width: 420px;
+.d2-context-drawer.view-settings,
+.d2-context-drawer.view-profile,
+.d2-context-drawer.view-queue,
+.d2-context-drawer.view-about {
+  width: min(480px, 94vw);
 }
 
 .d2-drawer-layer.open .d2-context-drawer {
@@ -828,8 +830,15 @@
 
 @media (max-width: 1200px) {
   .d2-context-drawer {
-    width: min(500px, 52vw);
-    min-width: 400px;
+    width: min(440px, 96vw);
+    min-width: 0;
+  }
+
+  .d2-context-drawer.view-settings,
+  .d2-context-drawer.view-profile,
+  .d2-context-drawer.view-queue,
+  .d2-context-drawer.view-about {
+    width: min(480px, 96vw);
   }
 
   .d2-now-page .scene-composer {
