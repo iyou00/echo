@@ -150,14 +150,16 @@ export function EchoProfilePage({ echo, navigate, profile, playbackState, setPla
   const profileTaskRunning = Boolean(profileTask)
   const profileBusy = busy || profileTaskRunning
 
-  // Automatically initialize tuner pointer to the strongest valid era signal.
+  // Automatically initialize tuner pointer to the strongest valid era signal,
+  // but keep the user's current selection across profile refreshes.
   useEffect(() => {
     const sorted = profile?.era_preference
       ? Object.entries(profile.era_preference)
           .filter(([, value]) => Number.isFinite(value) && value > 0)
           .sort((a, b) => b[1] - a[1])
       : []
-    setTunerActiveEra(sorted[0]?.[0] ?? '20s')
+    const known = new Set(sorted.map(([era]) => era))
+    setTunerActiveEra((current) => (known.has(current) ? current : sorted[0]?.[0] ?? '20s'))
   }, [profile])
 
   useEffect(() => {
@@ -586,7 +588,7 @@ export function EchoProfilePage({ echo, navigate, profile, playbackState, setPla
                   <div>
                     <strong>{insight.statement}</strong>
                     <small>{insight.evidenceLabel}</small>
-                    <div className="d2-insight-actions" aria-label={`回应：${insight.statement}`}>
+                    <div className="d2-insight-actions" role="group" aria-label={`回应：${insight.statement}`}>
                       <button type="button" disabled={Boolean(savingInsightId)} onClick={() => respondToInsight(insight, 'confirm')}>是我</button>
                       <button type="button" disabled={Boolean(savingInsightId)} onClick={() => respondToInsight(insight, 'temporary')}>只是最近</button>
                       <button type="button" disabled={Boolean(savingInsightId)} onClick={() => respondToInsight(insight, 'reject')}>不太对</button>
@@ -602,8 +604,16 @@ export function EchoProfilePage({ echo, navigate, profile, playbackState, setPla
                   <div className="d2-profile-subtitle">我还没看清</div>
                   <p className="d2-profile-question-copy">{questions[0].content}</p>
                   <div className="d2-profile-question-answer">
-                    <input value={questionDraft} onChange={(event) => setQuestionDraft(event.target.value)} maxLength={180} placeholder="跟 Echo 说一句" />
-                    <button type="button" onClick={answerProfileQuestion} disabled={!questionDraft.trim() || questionSaving}>{questionSaving ? '记着' : '告诉 Echo'}</button>
+                    <form
+                      className="d2-profile-question-form"
+                      onSubmit={(event) => {
+                        event.preventDefault()
+                        void answerProfileQuestion()
+                      }}
+                    >
+                      <input value={questionDraft} onChange={(event) => setQuestionDraft(event.target.value)} maxLength={180} placeholder="跟 Echo 说一句" />
+                      <button type="submit" disabled={!questionDraft.trim() || questionSaving}>{questionSaving ? '记着' : '告诉 Echo'}</button>
+                    </form>
                   </div>
                 </>
               )}

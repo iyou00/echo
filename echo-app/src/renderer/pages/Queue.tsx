@@ -328,7 +328,7 @@ export function QueuePage({
         <nav className="d2-queue-tabs" role="tablist" aria-label="队列视图">
           <button type="button" role="tab" aria-selected={tab === 'now'} className={tab === 'now' ? 'active' : ''} onClick={() => setTab('now')}>正在播放<span>{rest.length + (playing ? 1 : 0)}</span></button>
           <button type="button" role="tab" aria-selected={tab === 'favorites'} className={tab === 'favorites' ? 'active' : ''} onClick={() => setTab('favorites')}>收藏<span>{favoriteTotal}</span></button>
-          <button type="button" role="tab" aria-selected={tab === 'past'} className={tab === 'past' ? 'active' : ''} onClick={() => setTab('past')}>过往<span>{history.length}</span></button>
+          <button type="button" role="tab" aria-selected={tab === 'past'} className={tab === 'past' ? 'active' : ''} onClick={() => setTab('past')}>过往<span>{history.reduce((sum, day) => sum + day.tracks.length, 0)}</span></button>
         </nav>
         <div className="d2-queue-tools">
           {tab === 'now' && (
@@ -403,10 +403,19 @@ export function QueuePage({
             const favorited = favoriteKeys.has(trackKey(track))
             return (
               <div
-                className={`d2-queue-item${dragIndex === index ? ' dragging' : ''}`}
+                className={`d2-queue-item clickable${dragIndex === index ? ' dragging' : ''}`}
                 draggable={canReorderPlaybackQueue}
                 key={`${track.title}-${index}`}
+                role="button"
+                tabIndex={0}
+                aria-label={`播放 ${track.title}`}
                 onClick={() => runQueueAction(() => playNowTrack(track), '播放失败')}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    runQueueAction(() => playNowTrack(track), '播放失败')
+                  }
+                }}
                 onDragStart={() => {
                   if (canReorderPlaybackQueue) setDragIndex(index)
                 }}
@@ -465,6 +474,7 @@ export function QueuePage({
                     <strong>{track.title}</strong>
                     <small>{track.artist}{track.year ? ` · ${track.year}` : track.album ? ` · ${track.album}` : ''}{track.sceneLabel ? ` · ${track.sceneLabel}` : ''}</small>
                   </div>
+                  <span className="d2-queue-status" aria-hidden="true" />
                   <div className="d2-queue-actions">
                     <button className="d2-queue-act" type="button" title="播放" onClick={() => runQueueAction(() => playFavorite(track), '播放失败')}>
                       播放
@@ -536,6 +546,7 @@ export function QueuePage({
                             <strong>{track.title}</strong>
                             <small>{track.artist}{track.year ? ` · ${track.year}` : ''}{track.sceneLabel ? ` · ${track.sceneLabel}` : ''}</small>
                           </div>
+                          <span className="d2-queue-status" aria-hidden="true" />
                           <div className="d2-queue-actions">
                             <button className="d2-queue-act" type="button" title="播放" onClick={() => runQueueAction(() => playHistoryTrack(track, day.tracks), '播放失败')}>
                               播放

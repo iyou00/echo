@@ -116,7 +116,7 @@ function WelcomeField({ animate }: { animate: boolean }) {
 
     const observer = new ResizeObserver(() => {
       resize()
-      if (reducedMotion) draw(performance.now())
+      draw(performance.now())
     })
     observer.observe(canvasElement)
     resize()
@@ -182,6 +182,22 @@ export function FirstRunWelcome({ onContinue }: FirstRunWelcomeProps) {
     audioEndedRef.current = null
   }, [])
 
+  const attachAudioEnded = useCallback(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    detachAudioEnded()
+    const onEnded = () => {
+      if (mountedRef.current && !leavingRef.current) continueToOnboardingRef.current()
+    }
+    audioEndedRef.current = onEnded
+    audio.addEventListener('ended', onEnded)
+  }, [detachAudioEnded])
+
+  const continueToOnboardingRef = useRef<() => void>(() => {})
+  useEffect(() => {
+    continueToOnboardingRef.current = continueToOnboarding
+  })
+
   const stopFade = useCallback(() => {
     cancelFadeRef.current?.()
     cancelFadeRef.current = null
@@ -214,6 +230,7 @@ export function FirstRunWelcome({ onContinue }: FirstRunWelcomeProps) {
 
     if (options.restart) audio.pause()
     if (options.reloadSource) {
+      if (!audio.getAttribute('src')) audio.src = WELCOME_AUDIO_SRC
       audio.load()
     } else if (options.restart || audio.ended) {
       audio.currentTime = 0
@@ -249,11 +266,15 @@ export function FirstRunWelcome({ onContinue }: FirstRunWelcomeProps) {
     mountedRef.current = true
 
     const mediaDevices = navigator.mediaDevices
+    const audioOutputInterrupted = () => {
+      const audio = audioRef.current
+      return !audio || audio.paused || audio.ended
+    }
     const handleOutputMayHaveChanged = () => {
-      if (startedRef.current) scheduleOutputRetry()
+      if (startedRef.current && audioOutputInterrupted()) scheduleOutputRetry()
     }
     const handleVisibilityChange = () => {
-      if (startedRef.current && document.visibilityState === 'visible') scheduleOutputRetry()
+      if (startedRef.current && document.visibilityState === 'visible' && audioOutputInterrupted()) scheduleOutputRetry()
     }
     mediaDevices?.addEventListener?.('devicechange', handleOutputMayHaveChanged)
     window.addEventListener('focus', handleOutputMayHaveChanged)
@@ -310,15 +331,7 @@ export function FirstRunWelcome({ onContinue }: FirstRunWelcomeProps) {
       return
     }
     scheduleSequence(null)
-    const audio = audioRef.current
-    if (played && audio) {
-      detachAudioEnded()
-      const onEnded = () => {
-        if (mountedRef.current && !leavingRef.current) continueToOnboarding()
-      }
-      audioEndedRef.current = onEnded
-      audio.addEventListener('ended', onEnded)
-    }
+    if (played) attachAudioEnded()
   }
 
   function toggleMute() {
@@ -336,7 +349,9 @@ export function FirstRunWelcome({ onContinue }: FirstRunWelcomeProps) {
     }
 
     audio.muted = false
-    void startWelcomeAudio({ restart: audio.ended })
+    void startWelcomeAudio({ restart: audio.ended }).then((played) => {
+      if (played) attachAudioEnded()
+    })
   }
 
   function continueToOnboarding() {
@@ -383,7 +398,7 @@ export function FirstRunWelcome({ onContinue }: FirstRunWelcomeProps) {
       {started && <WelcomeField animate={started} />}
       <button data-testid="first-run-skip" className="first-run-skip" type="button" onClick={continueToOnboarding} disabled={leaving}>跳过前奏</button>
       {started && (
-        <button className="first-run-mute" type="button" onClick={toggleMute} aria-label={muted ? '打开声音' : '静音'}>
+        <button className="first-run-mute" type="button" onClick={toggleMute} disabled={leaving} aria-label={muted ? '打开声音' : '静音'}>
           {muted ? <VolumeX size={15} /> : <Volume2 size={15} />}
           <span>{muted ? '打开声音' : '静音'}</span>
         </button>

@@ -37,6 +37,7 @@ async function waitForSelector(target: BrowserWindow, selector: string, timeoutM
 async function waitForMissing(target: BrowserWindow, selector: string, timeoutMs = 15_000): Promise<void> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
+    if (target.isDestroyed()) throw new Error(`Window closed while waiting for ${selector} to disappear`)
     const found = await target.webContents.executeJavaScript(
       `Boolean(document.querySelector(${JSON.stringify(selector)}))`,
       true,
@@ -50,7 +51,14 @@ async function waitForMissing(target: BrowserWindow, selector: string, timeoutMs
 async function waitForExpression(target: BrowserWindow, expression: string, timeoutMs = 15_000): Promise<void> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    if (await target.webContents.executeJavaScript(`Boolean(${expression})`, true)) return
+    if (target.isDestroyed()) throw new Error(`Window closed while waiting for expression: ${expression}`)
+    let matched = false
+    try {
+      matched = await target.webContents.executeJavaScript(`Boolean(${expression})`, true)
+    } catch {
+      matched = false
+    }
+    if (matched) return
     await wait(100)
   }
   throw new Error(`Timed out waiting for expression: ${expression}`)
@@ -127,7 +135,6 @@ async function captureFirstRun(target: BrowserWindow): Promise<CaptureMetric[]> 
   await wait(1400)
   metrics.push(await capture(target, 'first-run-sequence.png'))
   await waitForMissing(target, '.first-run-welcome-layer', 20_000)
-  await waitForSelector(target, '[data-testid="onboarding-skip"]')
   await waitForSelector(target, '[data-testid="onboarding-skip"]')
   metrics.push(await capture(target, 'onboarding.png'))
   await click(target, '[data-testid="onboarding-skip"]')
