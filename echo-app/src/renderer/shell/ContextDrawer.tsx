@@ -4,11 +4,13 @@ import { X } from 'lucide-react'
 export function ContextDrawer({
   open,
   title,
+  view,
   children,
   onClose,
 }: {
   open: boolean
   title: string
+  view: string
   children: ReactNode
   onClose: () => void
 }) {
@@ -27,7 +29,7 @@ export function ContextDrawer({
   return (
     <div className={open ? 'd2-drawer-layer open' : 'd2-drawer-layer'} aria-hidden={!open}>
       <button className="d2-drawer-scrim" type="button" onClick={onClose} tabIndex={open ? 0 : -1} aria-label="关闭侧栏" />
-      <aside className="d2-context-drawer" role="dialog" aria-modal="true" aria-labelledby="d2-drawer-title">
+      <aside className={`d2-context-drawer view-${view}`} role="dialog" aria-modal="true" aria-labelledby="d2-drawer-title">
         <header className="d2-drawer-header">
           <div>
             <span>Echo · 此刻延伸</span>

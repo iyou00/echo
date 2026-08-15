@@ -641,6 +641,7 @@ function App() {
     chatStageMode,
   })
   const drawerOpen = page === 'review' || page === 'queue' || page === 'profile' || page === 'settings' || page === 'about'
+  const [settingsDrawerTitle, setSettingsDrawerTitle] = useState('设置')
   const offlineBoundary = boundaries.find((item) => item.code === 'offline')
   const modelInvalidBoundary = boundaries.find((item) => item.code === 'model_invalid')
   const drawerTitle = page === 'review'
@@ -651,7 +652,7 @@ function App() {
       ? 'Echo 对你的理解'
       : page === 'about'
         ? '关于 Echo'
-        : '设置与连接'
+        : settingsDrawerTitle
 
   const commonProps: AppPageProps = { navigate: setPage }
   const closeDrawer = useCallback(() => setPage('chat'), [setPage])
@@ -739,7 +740,7 @@ function App() {
             />
           </div>
         </section>
-        <ContextDrawer open={drawerOpen} title={drawerTitle} onClose={closeDrawer}>
+        <ContextDrawer open={drawerOpen} title={drawerTitle} view={page} onClose={closeDrawer}>
           <div className="d2-drawer-view" style={{ display: page === 'review' ? 'flex' : 'none' }}>
             <ReviewPage echo={echo} isActive={page === 'review'} />
           </div>
@@ -784,6 +785,11 @@ function App() {
               apiFocusToken={settingsApiFocusToken}
               importTask={importTask}
               onOnboardingLlmReady={advanceOnboardingAfterLlmReady}
+              onRestartOnboarding={() => {
+                onboardingDeferredForSessionRef.current = false
+                dispatch({ onboardingOpen: true, page: 'chat' })
+              }}
+              onTitleChange={setSettingsDrawerTitle}
               onDataReset={handleDataReset}
             />
           </div>

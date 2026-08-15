@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
-import { Download, Info, MessageCircle, Upload } from 'lucide-react'
+import { ArrowLeft, ChevronRight, Download, Info, MessageCircle, Upload } from 'lucide-react'
 import type { AgentActionSummary, CareFrequency, EchoApi, ImportProgressPayload, ImportTaskSnapshot, SemanticSummary, Settings, StageContext, Track, UiBoundarySnapshot, WindowSizePreset } from '../../types/ipc'
 import type { AppPageProps } from '../appState'
 import { EmptyState, Section } from '../components'
@@ -29,6 +29,8 @@ interface SettingsPageProps extends AppPageProps {
   apiFocusToken?: number
   importTask: ImportTaskSnapshot | null
   onOnboardingLlmReady?: () => Promise<void>
+  onRestartOnboarding?: () => void
+  onTitleChange?: (title: string) => void
   onDataReset?: (settings: Settings) => void
 }
 
@@ -191,6 +193,8 @@ export function SettingsPage({
   apiFocusToken = 0,
   importTask,
   onOnboardingLlmReady,
+  onRestartOnboarding,
+  onTitleChange,
   onDataReset,
 }: SettingsPageProps) {
   const {
@@ -291,6 +295,14 @@ export function SettingsPage({
   } = useSettingsPageState()
 
   const [activeTab, setActiveTab] = useState<'sync' | 'pref' | 'sys'>(hasLlmConfig ? 'sync' : 'sys')
+  const [settingsView, setSettingsView] = useState<'overview' | 'connections' | 'tasks' | 'details'>('overview')
+  const [detailTarget, setDetailTarget] = useState<'music' | 'yinyi' | 'chat' | 'stage' | 'voice' | 'care' | 'window' | 'llm' | 'data'>('music')
+  const [detailParent, setDetailParent] = useState<'overview' | 'connections'>('overview')
+
+  useEffect(() => {
+    const detailTitles = { music: '音乐来源', yinyi: '风信生成', chat: '絮语与启动', stage: '此刻的理解', voice: '天气与语音', care: '主动关心', window: '窗口与关闭', llm: 'AI 模型', data: '本地数据' }
+    onTitleChange?.(settingsView === 'overview' ? '设置' : settingsView === 'connections' ? '连接与来源' : settingsView === 'tasks' ? '运行任务' : detailTitles[detailTarget])
+  }, [detailTarget, onTitleChange, settingsView])
   const [showNeteaseDrawer, setShowNeteaseDrawer] = useState(false)
   const [renderNeteaseDrawer, setRenderNeteaseDrawer] = useState(false)
   const [ttsEditingCustom, setTtsEditingCustom] = useState(false)
@@ -362,6 +374,25 @@ export function SettingsPage({
     } finally {
       setWindowSizeBusy(false)
     }
+  }
+
+  async function updateOverviewSetting(path: 'playback.autoPlayNext' | 'ui.closeBehavior', value: boolean | NonNullable<Settings['ui']['closeBehavior']>) {
+    if (!settings) return
+    try {
+      const next = path === 'playback.autoPlayNext'
+        ? await echo.settings.update(path, value as boolean)
+        : await echo.settings.update(path, value as NonNullable<Settings['ui']['closeBehavior']>)
+      commitSettings(next)
+    } catch (error) {
+      setWindowSizeStatus(friendlyOperationError(error, '设置没有保存成功，请重试。'))
+    }
+  }
+
+  function openDetails(tab: 'sync' | 'pref' | 'sys', target: typeof detailTarget, parent: typeof detailParent = 'overview') {
+    setActiveTab(tab)
+    setDetailTarget(target)
+    setDetailParent(parent)
+    setSettingsView('details')
   }
 
   const refreshSemanticSummary = useCallback(async (): Promise<SemanticSummary | null> => {
@@ -601,6 +632,9 @@ export function SettingsPage({
 
   useEffect(() => {
     if (!importFocusToken) return
+    setSettingsView('details')
+    setDetailTarget('music')
+    setDetailParent('overview')
     setActiveTab('sync')
     window.setTimeout(() => {
       importSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
@@ -609,6 +643,9 @@ export function SettingsPage({
 
   useEffect(() => {
     if (!apiFocusToken) return
+    setSettingsView('details')
+    setDetailTarget('llm')
+    setDetailParent('connections')
     setActiveTab('sys')
     window.setTimeout(() => {
       apiSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
@@ -1348,30 +1385,103 @@ export function SettingsPage({
     : null
   return (
     <div className="phone-surface settings-page">
-      {/* Tabs Header */}
-      <div className="tabs-bar">
-        <button
-          className={`tab-btn ${activeTab === 'sync' ? 'active' : ''}`}
-          type="button"
-          onClick={() => setActiveTab('sync')}
-        >
-          音乐同步
-        </button>
-        <button
-          className={`tab-btn ${activeTab === 'pref' ? 'active' : ''}`}
-          type="button"
-          onClick={() => setActiveTab('pref')}
-        >
-          偏好设置
-        </button>
-        <button
-          className={`tab-btn ${activeTab === 'sys' ? 'active' : ''}`}
-          type="button"
-          onClick={() => setActiveTab('sys')}
-        >
-          系统与服务
-        </button>
-      </div>
+      {settingsView === 'overview' ? (
+        <div className="d2-settings-overview">
+          <p className="d2-settings-autosave">设置会自动保存</p>
+
+          <section className="d2-settings-size" aria-labelledby="settings-window-size">
+            <strong id="settings-window-size">窗口尺寸</strong>
+            <div className="window-size-options" role="group" aria-label="窗口尺寸">
+              {([['compact', '小号', '1152 × 720'], ['standard', '标准', '1280 × 800'], ['large', '大号', '1440 × 900']] as const).map(([preset, label, dimensions]) => (
+                <button className={(settings?.ui.windowSize ?? 'standard') === preset ? 'window-size-option active' : 'window-size-option'} type="button" key={preset} disabled={windowSizeBusy} onClick={() => { void updateWindowSize(preset) }}>
+                  {label}<small>{dimensions}</small>
+                </button>
+              ))}
+            </div>
+            <p className="window-size-note">窗口始终保持 16:10，切换后会自动居中。</p>
+          </section>
+
+          <div className="d2-settings-rows">
+            <div className="d2-settings-row">
+              <div className="d2-settings-row-main">
+                <span><strong>连续回声</strong></span>
+              </div>
+              <label className="switch"><input type="checkbox" checked={settings?.playback.autoPlayNext ?? true} onChange={(event) => { void updateOverviewSetting('playback.autoPlayNext', event.target.checked) }} /><span /></label>
+            </div>
+            <div className="d2-settings-row"><span><strong>说话密度</strong></span><span className="d2-settings-value">自适应</span></div>
+            <button type="button" data-testid="settings-yinyi" className="d2-settings-row" onClick={() => openDetails('pref', 'yinyi')}><span><strong>风信生成</strong></span><span className="d2-settings-value">{settings?.yinyi.generateAt ?? '22:00'} <ChevronRight size={14} /></span></button>
+            <button type="button" className="d2-settings-row" onClick={() => openDetails('pref', 'care')}><span><strong>主动关心</strong></span><span className="d2-settings-value">{settings?.carePings.enabled ? ({ gentle: '轻轻', normal: '适中', frequent: '常一些' }[settings.carePings.frequency]) : '关闭'} <ChevronRight size={14} /></span></button>
+            <button type="button" className="d2-settings-row" onClick={() => openDetails('sys', 'window')}><span><strong>关闭窗口</strong></span><span className="d2-settings-value">{{ ask: '询问', minimize: '最小化', quit: '退出' }[settings?.ui.closeBehavior ?? 'ask']} <ChevronRight size={14} /></span></button>
+          </div>
+
+          <nav className="d2-settings-links" aria-label="更多设置">
+            <button type="button" data-testid="settings-connections" onClick={() => setSettingsView('connections')}>连接与来源 <ChevronRight size={14} /></button>
+            <button type="button" data-testid="settings-tasks" onClick={() => setSettingsView('tasks')}>运行任务 <ChevronRight size={14} /></button>
+            <button type="button" onClick={() => openDetails('pref', 'chat')}>絮语与启动 <ChevronRight size={14} /></button>
+            <button type="button" onClick={() => openDetails('pref', 'stage')}>此刻的理解 <ChevronRight size={14} /></button>
+            <button type="button" onClick={() => navigate('about')}>关于 Echo <ChevronRight size={14} /></button>
+            <button type="button" onClick={onRestartOnboarding}>重新查看引导 <ChevronRight size={14} /></button>
+          </nav>
+          {windowSizeStatus && <div className="d2-settings-status" role="status">{windowSizeStatus}</div>}
+        </div>
+      ) : settingsView === 'connections' ? (
+        <div className="d2-settings-subview" data-testid="settings-connections-view">
+          <button className="d2-settings-back" data-testid="settings-connections-back" type="button" onClick={() => setSettingsView('overview')}><ArrowLeft size={15} />设置</button>
+          <p className="d2-settings-autosave">连接与来源 · 密钥只保存在本机</p>
+          <div className="d2-connection-list">
+            <section className="d2-connection-field">
+              <header><strong>AI 模型</strong><span className={hasLlmConfig ? 'is-ok' : 'is-warn'}>{hasLlmConfig ? '连接已配置' : '等待连接'}</span></header>
+              <p>{hasLlmConfig ? `${providerPresets[provider]?.label ?? '自定义'} · ${model || '尚未选择模型'}` : '连接后 Echo 才能理解和回应你'}</p>
+              <button type="button" data-testid="settings-ai-edit" onClick={() => openDetails('sys', 'llm', 'connections')}>修改连接</button>
+            </section>
+            <section className="d2-connection-field">
+              <header><strong>网易云音乐</strong><span className={neteaseState.loggedIn ? 'is-ok' : 'is-muted'}>{neteaseState.loggedIn ? '已连接' : '未连接'}</span></header>
+              <p>{neteaseState.loggedIn ? `${neteaseState.nickname ?? '网易云账号'}${neteasePlaylists.length ? ` · ${neteasePlaylists.length} 个歌单` : ''}` : '登录后才能播放和导入网易云歌单'}</p>
+              <button type="button" onClick={() => openDetails('sync', 'music', 'connections')}>{neteaseState.loggedIn ? '管理音乐来源' : '去连接'}</button>
+            </section>
+            <section className="d2-connection-field">
+              <header><strong>天气位置</strong><span className={city.trim() ? 'is-ok' : 'is-muted'}>{city.trim() ? '已设置' : '未设置'}</span></header>
+              <p>{city.trim() || '留空时 Echo 会跳过天气开场'}</p>
+              <button type="button" onClick={() => openDetails('pref', 'voice', 'connections')}>修改位置</button>
+            </section>
+            <section className="d2-connection-field">
+              <header><strong>回声语音</strong><span className="is-ok">可用</span></header>
+              <p>{ttsVoices.find(([value]) => value === ttsVoice)?.[1] ?? ttsVoice} · {ttsSpeed.toFixed(1)}×</p>
+              <button type="button" onClick={() => openDetails('pref', 'voice', 'connections')}>试听与修改</button>
+            </section>
+          </div>
+        </div>
+      ) : settingsView === 'tasks' ? (
+        <div className="d2-settings-subview" data-testid="settings-tasks-view">
+          <button className="d2-settings-back" type="button" onClick={() => setSettingsView('overview')}><ArrowLeft size={15} />设置</button>
+          <p className="d2-settings-autosave">任务在后台继续，不需要守着</p>
+          <section className="d2-settings-linear-section">
+            <h3>运行任务</h3>
+            {visibleRuntimeTasks.length > 0
+              ? <RuntimeTaskList tasks={visibleRuntimeTasks} onCancel={(id) => { void cancelRuntimeTask(id) }} />
+              : <p className="d2-settings-empty-line">现在没有正在运行的任务</p>}
+          </section>
+          <section className="d2-settings-linear-section">
+            <header><h3>服务状态</h3><button type="button" onClick={checkAllHealth} disabled={healthChecking || anyRuntimeTaskRunning}>{healthChecking ? '检查中' : '检查全部'}</button></header>
+            <div className="d2-service-lines">
+              {visibleHealth.map((item) => (
+                <div className="d2-service-line" key={item.service}>
+                  <span><strong>{serviceHealthLabel(item.service)}</strong><small>{item.message}</small></span>
+                  <em className={item.status === 'ok' ? 'is-ok' : /还没检查|尚未检查/.test(item.message) ? 'is-muted' : 'is-warn'}>{item.status === 'ok' ? '正常' : /还没检查|尚未检查/.test(item.message) ? '尚未检查' : '需处理'}</em>
+                </div>
+              ))}
+            </div>
+          </section>
+          <button className="d2-settings-danger-link" type="button" onClick={() => openDetails('sys', 'data')}>管理本地数据</button>
+        </div>
+      ) : (
+        <>
+      <button className="d2-settings-back" data-testid="settings-overview-back" type="button" onClick={() => setSettingsView(detailParent)}><ArrowLeft size={15} />{detailParent === 'connections' ? '连接与来源' : '设置'}</button>
+      <p className="d2-settings-detail-note">{{
+        llm: '密钥只保存在本机，保存后可测试连接',
+        music: '登录信息只保存在本机',
+        data: '清空前需要再次确认',
+      }[detailTarget as 'llm' | 'music' | 'data'] ?? '更改会自动保存'}</p>
 
       <div className="scroll-panel">
         {/* Pinned Progress HUD */}
@@ -1404,11 +1514,11 @@ export function SettingsPage({
           </div>
         )}
 
-        <form onSubmit={(event) => { void save(event) }}>
+        <form className={`d2-settings-form detail-${detailTarget}`} onSubmit={(event) => { void save(event) }}>
           {/* TAB 1: SYNC */}
           {activeTab === 'sync' && (
             <div ref={importSectionRef} className="import-focus-anchor">
-              <Section label="让 Echo 认识你的音乐">
+              <Section label="让 Echo 认识你的音乐" className="settings-detail-section target-music">
                 <p className="import-intro">登录网易云后才能播放歌曲；导入歌单后 Echo 才懂你的口味。</p>
                 <div className={`semantic-summary ${semanticSummaryStatus ? 'warn' : ''}`}>
                   <span className="status-dot" />
@@ -1583,7 +1693,7 @@ export function SettingsPage({
           {/* TAB 2: PREFERENCE */}
           {activeTab === 'pref' && (
             <>
-              <Section label="风 信">
+              <Section label="风 信" className="settings-detail-section target-yinyi">
                 <label className="field">
                   <div>
                     <div className="field-label">每天什么时候写{pageLabels.yinyi}</div>
@@ -1607,7 +1717,7 @@ export function SettingsPage({
                 )}
               </Section>
 
-              <Section label="絮 语 与 品 味">
+              <Section label="絮 语 与 品 味" className="settings-detail-section target-chat">
                 <label className="toggle-row">
                   <div className="toggle-text">
                     <div className="t1">启动时恢复上次{pageLabels.chat}</div>
@@ -1623,7 +1733,7 @@ export function SettingsPage({
                 )}
               </Section>
 
-              <Section label="E C H O 此 刻 的 理 解">
+              <Section label="E C H O 此 刻 的 理 解" className="settings-detail-section target-stage">
                 {stageContext ? (
                   <>
                     <div className="data-line">
@@ -1661,7 +1771,7 @@ export function SettingsPage({
                 )}
               </Section>
 
-              <Section label="回 声 · v 0 . 3">
+              <Section label="回 声 · v 0 . 3" className="settings-detail-section target-voice">
                 <label className="field">
                   <div className="field-label">所在城市</div>
                   <div className="field-hint">用于天气开场。留空时 Echo 会跳过天气。</div>
@@ -1770,7 +1880,7 @@ export function SettingsPage({
                 )}
               </Section>
 
-              <Section label="E C H O 的 关 心" className="care-settings-section">
+              <Section label="E C H O 的 关 心" className="care-settings-section settings-detail-section target-care">
                 <label className="toggle-row">
                   <div className="toggle-text">
                     <div className="t1">主动来找你</div>
@@ -1883,13 +1993,13 @@ export function SettingsPage({
           {activeTab === 'sys' && (
             <>
               {!hasLlmConfig && (
-                <div className="first-run" style={{ marginBottom: '16px', marginTop: '4px' }}>
+                <div className="first-run d2-llm-first-run" style={{ marginBottom: '16px', marginTop: '4px' }}>
                   <div>嗨,我是 Echo。</div>
                   <p>在我们开始之前,你需要给我一个 LLM 端点——这样我才能“说话”。DeepSeek 一个月几块钱,Kimi 也行,任何 OpenAI 兼容的服务都可以。</p>
                 </div>
               )}
 
-              <Section label="窗 口">
+              <Section label="窗 口" className="settings-detail-section target-window">
                 <div className="window-size-options" role="group" aria-label="窗口尺寸">
                   {([
                     ['compact', '小号', '1152 × 720'],
@@ -1909,6 +2019,14 @@ export function SettingsPage({
                   ))}
                 </div>
                 <p className="window-size-note">窗口始终保持 16:10，不支持拖动边框和最大化。切换后会自动居中。</p>
+                <label className="field d2-close-behavior-field">
+                  <div className="field-label">点击关闭按钮时</div>
+                  <select className="input" aria-label="关闭窗口时" value={settings?.ui.closeBehavior ?? 'ask'} onChange={(event) => { void updateOverviewSetting('ui.closeBehavior', event.target.value as NonNullable<Settings['ui']['closeBehavior']>) }}>
+                    <option value="ask">每次询问</option>
+                    <option value="minimize">最小化到任务栏</option>
+                    <option value="quit">退出 Echo</option>
+                  </select>
+                </label>
                 {windowSizeStatus && (
                   <div className={`status-ind ${windowSizeStatus === '窗口尺寸已保存' ? 'ok' : windowSizeStatus.includes('没有') ? 'err' : 'idle'}`} role="status">
                     <span className="status-dot" />
@@ -1918,7 +2036,7 @@ export function SettingsPage({
               </Section>
 
               <div ref={apiSectionRef}>
-                <Section label="A I 模 型">
+                <Section label="A I 模 型" className="settings-detail-section target-llm">
                   {storageDegraded && (
                     <div className="status-ind err" role="alert">
                       <span className="status-dot" />
@@ -2001,12 +2119,12 @@ export function SettingsPage({
               </div>
 
               {visibleRuntimeTasks.length > 0 && (
-                <Section label="运行任务">
+                <Section label="运行任务" className="settings-detail-section target-tasks">
                   <RuntimeTaskList tasks={visibleRuntimeTasks} onCancel={(id) => { void cancelRuntimeTask(id) }} />
                 </Section>
               )}
 
-              <Section label="服务状态" className="health-section">
+              <Section label="服务状态" className="health-section settings-detail-section target-tasks">
                 <div className="service-health-head">
                   <p>这里显示 Echo 依赖的外部服务状态。异常时先按提示恢复，再重试当前任务。</p>
                   <button className="btn sec" type="button" onClick={checkAllHealth} disabled={healthChecking || anyRuntimeTaskRunning}>
@@ -2034,7 +2152,7 @@ export function SettingsPage({
                 </div>
               </Section>
 
-              <Section label="数 据">
+              <Section label="数 据" className="settings-detail-section target-data">
                 <div className="data-line danger-line">
                   <div>
                     清空所有数据
@@ -2068,6 +2186,8 @@ export function SettingsPage({
 
         <footer className="page-foot">E C H O · v 0 . 1 . 5</footer>
       </div>
+        </>
+      )}
 
       {renderNeteaseDrawer && (
         <>
