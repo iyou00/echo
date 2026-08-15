@@ -1,17 +1,17 @@
 # Echo `echo-new` 交接文档
 
 更新时间：2026-08-15
-交接范围：成熟 Agent 基线之后的 D1.3 / D2 桌面 UI 迁移，以及尚未提交的 D1.3 设置完整链路重构。
+交接范围：成熟 Agent 基线之后的 D1.3 / D2 桌面 UI 迁移，以及 D1.3 设置完整链路重构。
 
 ## 1. 先读结论
 
 1. 当前应继续工作的分支是 `echo-new`，不是 `main`。
 2. 当前工作目录是 `C:\Users\Max\.codex\worktrees\35e8\echo`。
-3. `D:\AI文件\echo` 是 `main` 的另一个 worktree，直接复制它会漏掉本轮尚未提交的设置重构。
-4. `echo-new` 当前提交 `383e40a` 已包含 `main` 当前提交 `2e19b20`，并在其上领先 10 个提交。
-5. GitHub 的 `origin/echo-new` 当前也只到 `383e40a`。本轮设置改造仍在工作区，尚未提交、尚未推送。
+3. `D:\AI文件\echo` 是 `main` 的另一个 worktree，直接复制它会漏掉 `echo-new` 的 D2 UI 和本轮设置重构。
+4. `echo-new` 已包含 `main` 当前提交 `2e19b20`，D1.3 设置代码基线为 `5e98a9e`。
+5. GitHub 的 `origin/echo-new` 已包含 `5e98a9e`，当前代码可直接从远端恢复。
 6. `echo-app/release/Echo-Setup-0.1.7.exe` 是本轮设置改造之前生成的安装包，不代表当前工作区。
-7. 开始后续开发前，先提交并推送当前修改，或至少生成一份二进制安全的补丁。
+7. 接手方应从 `origin/echo-new` 开始，不要从 `main` 或旧安装包反推当前代码。
 
 ## 2. 产品与工程主线
 
@@ -52,10 +52,10 @@ Echo 的产品定位是“关系型音乐 Agent”，不是通用任务 Agent。
 Remote: https://github.com/iyou00/echo.git
 Current worktree: C:\Users\Max\.codex\worktrees\35e8\echo
 Current branch: echo-new
-Current committed HEAD: 383e40a Fix D1.3 playback and stage behavior
-Remote branch: origin/echo-new -> 383e40a
+Current D1.3 code baseline: 5e98a9e Complete D1.3 settings flow
+Remote branch: origin/echo-new contains 5e98a9e
 Main: 2e19b20 Design agent relationship repair phase
-Relation: echo-new contains main and is 10 commits ahead
+Relation: echo-new contains main; use git rev-list for the current ahead count
 ```
 
 主要 worktree：
@@ -67,30 +67,25 @@ D:\AI文件\echo
 
 C:\Users\Max\.codex\worktrees\35e8\echo
   branch: echo-new
-  HEAD: 383e40a
+  D1.3 code baseline: 5e98a9e
 
 C:\Users\Max\.codex\worktrees\eaa5\echo
   branch: codex/agent-kernel-v06
   HEAD: 2e19b20
 ```
 
-### 3.2 当前未提交文件
+### 3.2 本轮提交范围
 
 ```text
-M echo-app/electron/e2eCapture.ts
-M echo-app/src/App.tsx
-M echo-app/src/renderer/pages/Settings.tsx
-M echo-app/src/renderer/shell/ContextDrawer.tsx
-M echo-app/src/renderer/theme/core.css
+echo-app/electron/e2eCapture.ts
+echo-app/src/App.tsx
+echo-app/src/renderer/pages/Settings.tsx
+echo-app/src/renderer/shell/ContextDrawer.tsx
+echo-app/src/renderer/theme/core.css
+specs/handoff-2026-08-15-echo-new.md
 ```
 
-加上本交接文档后，还会有：
-
-```text
-?? specs/handoff-2026-08-15-echo-new.md
-```
-
-不要在交接前执行 `git reset --hard`、`git checkout --` 或删除当前 worktree，否则会丢失本轮成果。
+以上内容已提交并推送。交接完成时工作区应为 clean；若接手时不是 clean，先确认新增修改的来源，不要直接丢弃。
 
 ## 4. D1.3 / D2 已完成范围
 
@@ -115,9 +110,10 @@ f01278f Complete D2 startup and exit flows
 39e58f6 Complete D2 release migration
 9d9742d Align desktop experience with D1.3
 383e40a Fix D1.3 playback and stage behavior
+5e98a9e Complete D1.3 settings flow
 ```
 
-## 5. 本轮未提交实现：D1.3 设置完整链路
+## 5. 本轮实现：D1.3 设置完整链路
 
 ### 5.1 为什么重构
 
@@ -279,11 +275,11 @@ echo-app/package.json
 echo-app/release/Echo-Setup-0.1.7.exe
 ```
 
-该安装包生成于本轮设置重构之前，不包含本交接文档第 5 节的未提交修改。不要用它验收当前设置页面。
+该安装包生成于本轮设置重构之前，不包含本交接文档第 5 节的设置修改。不要用它验收当前设置页面。
 
 后续正式交付需：
 
-1. 提交当前修改。
+1. 确认当前工作区与 `origin/echo-new` 一致。
 2. 根据发布策略升级版本号，例如 `0.1.8`。
 3. 运行 `npm run release:verify`。
 4. 验证干净安装、覆盖安装、首次启动和卸载保留数据。
@@ -293,16 +289,10 @@ echo-app/release/Echo-Setup-0.1.7.exe
 ### P0：固化当前成果
 
 1. 阅读本交接文档和第 2 节列出的设计/Agent 文档。
-2. 检查 `git status`，确认上述 5 个修改文件和本交接文档都存在。
+2. 检查 `git status`，确认工作区 clean。
 3. 查看最新设置截图。
 4. 运行 `npm run verify`。
-5. 提交并推送 `echo-new`。
-
-建议提交信息：
-
-```text
-Complete D1.3 settings flow
-```
+5. 后续修改继续在新分支或 `echo-new` 上形成清晰提交，不要直接改 `main`。
 
 ### P1：设置剩余产品决策
 
@@ -323,7 +313,7 @@ Complete D1.3 settings flow
 ## 10. 不要做的事
 
 - 不要从 `D:\AI文件\echo` 开始并假设它包含当前 UI 修改。
-- 不要删除当前 worktree，直到未提交修改已经提交或备份。
+- 不要删除仍包含未提交修改的任何 worktree。
 - 不要恢复旧三页签。
 - 不要把完整旧 Settings 表单重新塞进设置抽屉首屏。
 - 不要为了“说话密度可点击”只增加一个无业务消费的 UI 值。
@@ -335,13 +325,11 @@ Complete D1.3 settings flow
 
 ### 方式 A：GitHub 分支交接（推荐）
 
-在当前 worktree 中：
+当前版本已完成提交和推送：
 
-```powershell
-cd C:\Users\Max\.codex\worktrees\35e8\echo
-git add echo-app/electron/e2eCapture.ts echo-app/src/App.tsx echo-app/src/renderer/pages/Settings.tsx echo-app/src/renderer/shell/ContextDrawer.tsx echo-app/src/renderer/theme/core.css specs/handoff-2026-08-15-echo-new.md
-git commit -m "Complete D1.3 settings flow"
-git push origin echo-new
+```text
+5e98a9e Complete D1.3 settings flow
+origin/echo-new -> 5e98a9e
 ```
 
 接手方：
@@ -357,7 +345,7 @@ npm run verify
 
 ### 方式 B：Git bundle 离线交接
 
-先提交当前修改，再执行：
+需要额外离线备份时执行：
 
 ```powershell
 git bundle create echo-new-2026-08-15.bundle echo-new
@@ -382,7 +370,7 @@ git diff --binary --output=echo-new-uncommitted.patch
 可以作为额外快照，但不应作为唯一交接方式：
 
 - 当前目录是 Git worktree，`.git` 是指向主仓库 metadata 的文本文件，移动到另一台机器或不同路径后可能失效。
-- 复制 `D:\AI文件\echo` 会漏掉当前 `echo-new` 工作区的未提交改动。
+- 复制 `D:\AI文件\echo` 会漏掉 `echo-new` 已提交的 D2 UI 与设置改动。
 - 全目录会包含 `node_modules`、`dist`、`dist-electron`、`release` 和 `artifacts` 等大体积生成物。
 - 仅复制源码又会丢失 Git 历史、分支关系和未提交状态说明。
 
