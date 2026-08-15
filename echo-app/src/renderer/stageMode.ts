@@ -30,6 +30,7 @@ export function deriveWindowFieldMode({
   playbackStatus,
   localPlaybackActive,
   chatStageMode,
+  listeningDismissed = false,
 }: {
   page: PageKey
   voiceContinuous: boolean
@@ -37,10 +38,12 @@ export function deriveWindowFieldMode({
   playbackStatus: string
   localPlaybackActive: boolean
   chatStageMode: ChatStageMode
+  listeningDismissed?: boolean
 }): WindowFieldMode {
   if (page === 'settings' || page === 'about') return 'quiet'
   if (page === 'voice' || voiceContinuous) return 'voice'
-  if (localPlaybackActive || playbackStatus === 'playing' || playbackStatus === 'loading') return 'listening'
+  const listeningNow = localPlaybackActive || playbackStatus === 'playing' || playbackStatus === 'loading'
+  if (listeningNow && !listeningDismissed) return 'listening'
   if (currentScene) return 'scene'
   if (page === 'chat') return chatStageMode
   return 'idle'

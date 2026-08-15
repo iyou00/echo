@@ -16,6 +16,22 @@ describe('stage mode', () => {
     })).toBe('scene')
   })
 
+  it('falls back to the chat stage after the listening stage is dismissed', () => {
+    expect(deriveWindowFieldMode({
+      page: 'chat', voiceContinuous: false, currentScene: false,
+      playbackStatus: 'playing', localPlaybackActive: true, chatStageMode: 'chat',
+      listeningDismissed: true,
+    })).toBe('chat')
+  })
+
+  it('returns to the listening stage when dismissal is cleared', () => {
+    expect(deriveWindowFieldMode({
+      page: 'chat', voiceContinuous: false, currentScene: false,
+      playbackStatus: 'playing', localPlaybackActive: true, chatStageMode: 'chat',
+      listeningDismissed: false,
+    })).toBe('listening')
+  })
+
   it.each([
     ['recommendation', 'searching'],
     ['weather', 'searching'],

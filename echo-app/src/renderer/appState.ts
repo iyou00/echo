@@ -22,6 +22,7 @@ export interface AppState {
   carePingId: number | null
   voiceAutoStartToken: number
   voiceContinuous: boolean
+  listeningDismissed: boolean
   closeDialogOpen: boolean
   closeReadiness: CloseReadiness | null
   rememberCloseChoice: boolean
@@ -70,6 +71,7 @@ function initialAppState(): AppState {
     carePingId: null,
     voiceAutoStartToken: 0,
     voiceContinuous: false,
+    listeningDismissed: false,
     closeDialogOpen: false,
     closeReadiness: null,
     rememberCloseChoice: false,

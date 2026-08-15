@@ -21,6 +21,8 @@ interface PlayerProps {
   onVoiceTrackEnded?: () => void
   onOpenQueue?: () => void
   onLocalPlayingChange?: (playing: boolean) => void
+  stageDismissed?: boolean
+  onExpandStage?: () => void
 }
 
 function formatClock(seconds: number) {
@@ -38,7 +40,7 @@ function trackId(track?: Track | null): string {
 // 避免与正在进行的拖拽、或拖拽完瞬间收到的旧心跳互相打架，造成听感上的来回跳。
 const USER_SEEK_QUIET_MS = 1000
 
-export function Player({ echo, state, setState, refreshQueue, autoPlayNext, currentScene = null, voiceContinuous = false, onSceneTrackEnded, onVoiceTrackEnded, onOpenQueue, onLocalPlayingChange }: PlayerProps) {
+export function Player({ echo, state, setState, refreshQueue, autoPlayNext, currentScene = null, voiceContinuous = false, onSceneTrackEnded, onVoiceTrackEnded, onOpenQueue, onLocalPlayingChange, stageDismissed = false, onExpandStage }: PlayerProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const loadedTrackRef = useRef('')
   const applyingSeekRef = useRef(false)
@@ -577,14 +579,22 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
         className="d2-sound-object"
         role="button"
         tabIndex={current?.playUrl ? 0 : -1}
-        aria-label={current ? `${localPlaying ? '暂停' : '播放'} ${current.title}` : '还没有可播放歌曲'}
+        aria-label={stageDismissed && current ? `回到一起听 ${current.title}` : current ? `${localPlaying ? '暂停' : '播放'} ${current.title}` : '还没有可播放歌曲'}
         onClick={(event) => {
           if ((event.target as HTMLElement).closest('button, input, label')) return
+          if (stageDismissed && current && onExpandStage) {
+            onExpandStage()
+            return
+          }
           void togglePlayback().catch(() => undefined)
         }}
         onKeyDown={(event) => {
           if (event.key !== 'Enter' && event.key !== ' ') return
           event.preventDefault()
+          if (stageDismissed && current && onExpandStage) {
+            onExpandStage()
+            return
+          }
           void togglePlayback().catch(() => undefined)
         }}
       >

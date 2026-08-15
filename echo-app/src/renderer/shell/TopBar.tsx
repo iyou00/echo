@@ -35,11 +35,10 @@ export function TopBar({
     <header className="d2-topbar">
       <button className="d2-brand" type="button" onClick={() => onNavigate('chat')} title="回到此刻">
         <strong>Echo</strong>
-        <span className={connected ? 'connected' : 'offline'}>{connected ? '在这里' : '等待连接'}</span>
       </button>
       <div className="d2-context" aria-live="polite">
         <span>{today} · {now}</span>
-        <strong>{connected ? '在这里' : '等待连接'}</strong>
+        <strong className={connected ? 'connected' : 'offline'}>{connected ? '在这里' : '等待连接'}</strong>
       </div>
       <nav className="d2-nav" aria-label="Echo 页面">
         {mainDestinations.map(({ key, label, icon: Icon }) => (

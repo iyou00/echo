@@ -87,6 +87,7 @@ function App() {
     carePingId,
     voiceAutoStartToken,
     voiceContinuous,
+    listeningDismissed,
     closeDialogOpen,
     closeReadiness,
     rememberCloseChoice,
@@ -639,6 +640,7 @@ function App() {
     playbackStatus: playbackState.status,
     localPlaybackActive,
     chatStageMode,
+    listeningDismissed,
   })
   const drawerOpen = page === 'review' || page === 'queue' || page === 'profile' || page === 'settings' || page === 'about'
   const [settingsDrawerTitle, setSettingsDrawerTitle] = useState('设置')
@@ -797,6 +799,11 @@ function App() {
             <div className="d2-drawer-view"><AboutEchoPage {...commonProps} /></div>
           )}
         </ContextDrawer>
+        {fieldMode === 'listening' && (
+          <button className="d2-now-return" type="button" onClick={() => dispatch({ listeningDismissed: true })}>
+            ‹ 回到此刻
+          </button>
+        )}
         <div className={`d2-player-layer player-${fieldMode} page-${page}${page === 'voice' ? ' voice-mode-active' : ''}`}>
           <Player
             echo={echo}
@@ -805,6 +812,8 @@ function App() {
             refreshQueue={refreshQueue}
             autoPlayNext={settings?.playback.autoPlayNext ?? true}
             currentScene={currentScene}
+            stageDismissed={listeningDismissed}
+            onExpandStage={() => dispatch({ listeningDismissed: false })}
             voiceContinuous={isVoiceContinuousActive(page, voiceContinuous)}
             onSceneTrackEnded={(scene, mode) => {
               continueScene(scene, false, mode === 'refill').catch((error) => {

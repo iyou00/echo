@@ -1245,13 +1245,17 @@
 }
 
 .d2-shell .d2-brand { min-width: 0; padding-right: 18px; }
-.d2-shell .d2-brand strong { font: 25px/1 var(--d2-serif); }
+.d2-shell .d2-brand strong { font: 23px/1 var(--d2-serif); }
 .d2-shell .d2-context { justify-content: flex-start; gap: 14px; color: var(--d2-muted); font-size: 10px; }
-.d2-shell .d2-context strong { color: var(--d2-forest); font-weight: 600; }
+.d2-shell .d2-context strong { display: inline-flex; align-items: center; gap: 6px; color: var(--d2-forest); font-size: 10px; font-weight: 600; }
+.d2-shell .d2-context strong::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--d2-forest); }
+.d2-shell .d2-context strong.offline::before { background: var(--d2-red); }
 .d2-shell .d2-nav { gap: 8px; }
 .d2-shell .d2-nav-button { min-width: auto; height: 34px; padding: 0 8px; border: 0; background: transparent; color: var(--d2-ink); font-size: 11px; }
 .d2-shell .d2-nav-button svg { display: none; }
 .d2-shell .d2-nav-button.active::after { right: 8px; bottom: 2px; left: 8px; height: 1px; background: var(--d2-red); }
+.d2-shell .d2-icon-button { width: auto; padding: 0 8px; font-size: 11px; }
+.d2-shell .d2-icon-button svg { display: none; }
 
 .d2-shell .chat-page { position: relative; overflow: hidden; background: transparent; }
 .d2-now-page .d2-now-presence { position: absolute; z-index: 4; top: 64px; left: 4.8%; width: min(590px, 48%); margin: 0; pointer-events: none; }
@@ -1345,6 +1349,10 @@
 .d2-player-layer.player-listening .player-artist, .d2-player-layer.player-voice .player-artist { color: #aeb6ad; }
 
 .d2-player-layer.player-listening .d2-listening-panel { position: fixed; top: 160px; left: 48.7%; display: block; width: 43.5%; color: #f5f5ec; }
+.d2-player-layer.player-listening .d2-sound-tools,
+.d2-player-layer.player-voice .d2-sound-tools,
+.d2-player-layer.player-listening .d2-object-play,
+.d2-player-layer.player-voice .d2-object-play { display: none; }
 .d2-listening-kicker { display: flex; align-items: center; gap: 10px; color: var(--d2-red); font-size: 9px; font-weight: 700; letter-spacing: 2px; }
 .d2-listening-kicker::before { width: 28px; height: 1px; background: currentColor; content: ""; }
 .d2-listening-panel h2 { max-width: 590px; margin: 17px 0 13px; color: #f5f5ec; font: 34px/1.42 var(--d2-serif); letter-spacing: 0; }
@@ -1384,6 +1392,12 @@
 .d2-shell.field-voice .voice-foot { position: static; margin-top: 24px; }
 .d2-shell.field-voice .voice-actions { justify-content: flex-start; }
 .d2-shell.drawer-open .global-player { opacity: 0.3; }
+.d2-shell.drawer-open.field-listening .global-player,
+.d2-shell.drawer-open.field-voice .global-player,
+.d2-shell.drawer-open .d2-player-layer.page-yinyi .global-player,
+.d2-shell.drawer-open .d2-player-layer.page-settings .global-player,
+.d2-shell.drawer-open .d2-player-layer.page-profile .global-player,
+.d2-shell.drawer-open .d2-player-layer.page-about .global-player { opacity: 0; pointer-events: none; }
 
 @media (max-width: 1190px) {
   .d2-now-page .d2-now-presence, .d2-now-page .d2-ambient-facts, .d2-now-page .d2-quiet-mark, .d2-now-page .scene-composer { left: 4%; }
@@ -1828,4 +1842,35 @@
 .d2-shell .drawer-sheet .playlist-import-btn:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+/* ---- D1.3 回到此刻（listening 大界面的出口） ---- */
+.d2-now-return {
+  position: absolute;
+  z-index: 9;
+  top: 68px;
+  left: 60px;
+  padding: 6px 0;
+  border: 0;
+  background: transparent;
+  color: var(--d2-ink);
+  font: 11px/1.4 var(--d2-sans);
+  letter-spacing: 1px;
+  cursor: pointer;
+  opacity: 0.86;
+  transition: opacity 300ms ease, color 150ms ease;
+}
+
+.d2-now-return:hover {
+  opacity: 1;
+  color: var(--d2-red);
+}
+
+.d2-shell.field-listening .d2-now-return,
+.d2-shell.field-voice .d2-now-return {
+  color: #f5f5ec;
+}
+
+@media (max-width: 1190px) {
+  .d2-now-return { left: 4%; }
 }
