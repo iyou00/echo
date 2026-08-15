@@ -1340,6 +1340,7 @@
 .d2-shell.field-listening, .d2-shell.field-voice { background: var(--d2-night); }
 .d2-shell.field-listening .d2-topbar, .d2-shell.field-voice .d2-topbar { border-color: #343a33; background: rgba(21, 24, 20, 0.98); color: #f5f5ec; }
 .d2-shell.field-listening .d2-brand, .d2-shell.field-listening .d2-context strong, .d2-shell.field-listening .d2-nav-button, .d2-shell.field-listening .d2-icon-button, .d2-shell.field-listening .wc-btn, .d2-shell.field-voice .d2-brand, .d2-shell.field-voice .d2-context strong, .d2-shell.field-voice .d2-nav-button, .d2-shell.field-voice .d2-icon-button, .d2-shell.field-voice .wc-btn { color: #f5f5ec; }
+.d2-shell.field-listening .d2-context .d2-context-weather, .d2-shell.field-voice .d2-context .d2-context-weather { color: #aeb6ad; }
 .d2-shell.field-listening .chat-page, .d2-shell.field-voice .voice-page { background: var(--d2-night); color: #f5f5ec; }
 .d2-shell.field-listening .d2-now-presence, .d2-shell.field-listening .d2-ambient-facts, .d2-shell.field-listening .d2-quiet-mark, .d2-shell.field-listening .stage-dialogue, .d2-shell.field-listening .d2-dialogue-history { opacity: 0; pointer-events: none; }
 .d2-player-layer.player-listening .global-player, .d2-player-layer.player-voice .global-player { top: 50px; right: auto; left: 5.5%; width: 400px; color: #f5f5ec; }
@@ -1873,4 +1874,59 @@
 
 @media (max-width: 1190px) {
   .d2-now-return { left: 4%; }
+}
+
+.d2-feedback-note {
+  grid-column: 1 / -1;
+  margin-top: 6px;
+  color: var(--d2-forest);
+  font: 10px/1.6 var(--d2-serif);
+  letter-spacing: 0.2px;
+  animation: d2-feedback-note-in 300ms ease;
+}
+
+.d2-player-layer.player-listening .d2-feedback-note,
+.d2-player-layer.player-voice .d2-feedback-note {
+  color: var(--d2-mint);
+}
+
+@keyframes d2-feedback-note-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.d2-settings-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  padding: 10px 30px 0;
+  color: var(--d2-muted);
+  font: 9px/1.6 var(--d2-sans);
+  letter-spacing: 1px;
+}
+
+.d2-settings-breadcrumb button {
+  padding: 2px 0;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  color: var(--d2-muted);
+  font: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+
+.d2-settings-breadcrumb button:hover {
+  border-bottom-color: var(--d2-ink);
+  color: var(--d2-ink);
+}
+
+.d2-settings-breadcrumb em {
+  font-style: normal;
+  color: var(--d2-ink);
+}
+
+.d2-settings-breadcrumb i {
+  margin: 0 6px;
+  font-style: normal;
+  color: var(--d2-line);
 }

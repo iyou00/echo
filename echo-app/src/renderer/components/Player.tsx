@@ -8,6 +8,7 @@ import { boundaryPresentation } from '../boundaryPresentation'
 import { installMediaSessionActions } from './mediaSession'
 import { trackIdentity as trackKey } from '../../shared/trackIdentity'
 import { AUDIO_ENERGY_EVENT, energyFromLevels, levelsFromFrequencyData, type AudioEnergyDetail } from '../audioAnalysis'
+import { favoriteNote, feedbackFallbackNote, FEEDBACK_NOTE_MS } from './feedbackNote'
 
 interface PlayerProps {
   echo: EchoApi
@@ -522,16 +523,34 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
     }
   }, [current, currentTime, displayDuration])
 
+  const [feedbackNoteText, setFeedbackNoteText] = useState('')
+  const feedbackNoteTimerRef = useRef<number | null>(null)
+
+  function showFeedbackNote(message: string) {
+    setFeedbackNoteText(message)
+    if (feedbackNoteTimerRef.current !== null) window.clearTimeout(feedbackNoteTimerRef.current)
+    feedbackNoteTimerRef.current = window.setTimeout(() => {
+      feedbackNoteTimerRef.current = null
+      setFeedbackNoteText('')
+    }, FEEDBACK_NOTE_MS)
+  }
+
+  useEffect(() => () => {
+    if (feedbackNoteTimerRef.current !== null) window.clearTimeout(feedbackNoteTimerRef.current)
+  }, [])
+
   async function toggleCurrentFavorite() {
     if (!current) return
     const result = await echo.favorites.toggle(current)
     setFavorited(result.favorited)
+    showFeedbackNote(favoriteNote(result.favorited))
   }
 
   async function recordCurrentFeedback(action: 'more_like_this' | 'not_right') {
     if (!current) return
-    await echo.feedback.record(current, action, 'sound_object')
+    const result = await echo.feedback.record(current, action, 'sound_object')
     setFeedbackState(action)
+    showFeedbackNote(result.ok ? (result.message || feedbackFallbackNote()) : feedbackFallbackNote())
   }
   const companionArtwork = './visuals/context-companion.png'
   const artwork = current?.artworkUrl || companionArtwork
@@ -655,6 +674,7 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
                 <button className={favorited ? 'active' : ''} type="button" onClick={() => { void toggleCurrentFavorite().catch(() => setPlaybackError('收藏没保存，可以稍后再试。')) }} title={favorited ? '取消收藏' : '收藏'} aria-label={favorited ? '取消收藏' : '收藏'}><Heart size={12} fill={favorited ? 'currentColor' : 'none'} /></button>
               </div>
             )}
+            {feedbackNoteText && <div className="d2-feedback-note" role="status">{feedbackNoteText}</div>}
           </div>
           <button className="d2-object-play" type="button" onClick={() => togglePlayback().catch(() => undefined)} disabled={!current?.playUrl} title={localPlaying ? '暂停' : '播放'}>
             {localPlaying ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}

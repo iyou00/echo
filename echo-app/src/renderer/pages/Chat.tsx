@@ -503,7 +503,8 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
     const key = trackKey(track)
     setFeedbackMap((items) => ({ ...items, [key]: action }))
     try {
-      await echo.feedback.record(track, action, 'chat_recommendation_card')
+      const result = await echo.feedback.record(track, action, 'chat_recommendation_card')
+      if (result.ok && result.message) showChatNotice(result.message)
     } catch (error) {
       console.warn('[chat] feedback record failed', error)
       showChatNotice(actionErrorMessage(error, '反馈保存失败，可以稍后再试。'))

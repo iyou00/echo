@@ -122,6 +122,10 @@ body {
   font-size: 10px;
 }
 
+.d2-context .d2-context-weather {
+  color: var(--d2-forest);
+}
+
 .d2-context strong {
   overflow: hidden;
   color: var(--d2-forest);

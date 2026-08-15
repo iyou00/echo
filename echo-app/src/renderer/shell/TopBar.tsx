@@ -3,6 +3,8 @@ import { History, MessageCircle, Settings, UserRound } from 'lucide-react'
 import type { PageKey } from '../appState'
 import { WindowControls } from '../components'
 
+type TopBarWeather = { city: string; condition: string; tempC: number } | null
+
 const mainDestinations: Array<{ key: PageKey; label: string; icon: typeof MessageCircle }> = [
   { key: 'yinyi', label: '风信', icon: MessageCircle },
   { key: 'review', label: '回望', icon: History },
@@ -24,9 +26,19 @@ export function TopBar({
   onClose: () => void
 }) {
   const [clock, setClock] = useState(() => new Date())
+  const [weather, setWeather] = useState<TopBarWeather>(null)
   useEffect(() => {
     const timer = window.setInterval(() => setClock(new Date()), 30_000)
     return () => window.clearInterval(timer)
+  }, [])
+  useEffect(() => {
+    let alive = true
+    window.echo?.weather.get().then((info) => {
+      if (alive) setWeather(info)
+    }).catch(() => undefined)
+    return () => {
+      alive = false
+    }
   }, [])
   const today = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', weekday: 'short' }).format(clock)
   const now = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(clock)
@@ -38,7 +50,10 @@ export function TopBar({
       </button>
       <div className="d2-context" aria-live="polite">
         <span>{today} · {now}</span>
-        <strong className={connected ? 'connected' : 'offline'}>{connected ? '在这里' : '等待连接'}</strong>
+        {weather && weather.city && (
+          <span className="d2-context-weather">{weather.city} {weather.tempC}°{weather.condition ? ` · ${weather.condition}` : ''}</span>
+        )}
+        {!connected && <strong className="offline">等待连接</strong>}
       </div>
       <nav className="d2-nav" aria-label="Echo 页面">
         {mainDestinations.map(({ key, label, icon: Icon }) => (

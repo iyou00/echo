@@ -1383,8 +1383,33 @@ export function SettingsPage({
   const carePausedUntil = settings.carePings.pausedUntil && Date.parse(settings.carePings.pausedUntil) > Date.now()
     ? new Date(settings.carePings.pausedUntil)
     : null
+  const detailTitles = { music: '音乐来源', yinyi: '风信生成', chat: '絮语与启动', stage: '此刻的理解', voice: '天气与语音', care: '主动关心', window: '窗口与关闭', llm: 'AI 模型', data: '本地数据' }
+  const breadcrumbItems: Array<{ label: string; onClick?: () => void }> = settingsView === 'overview'
+    ? [{ label: '设置' }]
+    : settingsView === 'connections'
+      ? [{ label: '设置', onClick: () => setSettingsView('overview') }, { label: '连接与来源' }]
+      : settingsView === 'tasks'
+        ? [{ label: '设置', onClick: () => setSettingsView('overview') }, { label: '运行任务' }]
+        : detailParent === 'connections'
+          ? [{ label: '设置', onClick: () => setSettingsView('overview') }, { label: '连接与来源', onClick: () => setSettingsView('connections') }, { label: detailTitles[detailTarget] }]
+          : [{ label: '设置', onClick: () => setSettingsView('overview') }, { label: detailTitles[detailTarget] }]
+
   return (
     <div className="phone-surface settings-page">
+      {settingsView !== 'overview' && (
+        <nav className="d2-settings-breadcrumb" aria-label="设置路径">
+          {breadcrumbItems.map((item, index) => (
+            <span key={item.label}>
+              {index > 0 && <i aria-hidden="true"> / </i>}
+              {item.onClick ? (
+                <button type="button" onClick={item.onClick}>{item.label}</button>
+              ) : (
+                <em aria-current="page">{item.label}</em>
+              )}
+            </span>
+          ))}
+        </nav>
+      )}
       {settingsView === 'overview' ? (
         <div className="d2-settings-overview">
           <p className="d2-settings-autosave">设置会自动保存</p>
