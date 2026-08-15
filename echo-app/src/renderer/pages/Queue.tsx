@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Check, Heart, Play, Trash2, X } from 'lucide-react'
 import type { EchoApi, PlaybackState, QueueHistoryDay, Track, UiBoundarySnapshot } from '../../types/ipc'
 import type { AppPageProps } from '../appState'
 import { EmptyState } from '../components'
@@ -31,11 +30,6 @@ interface QueuePageProps extends AppPageProps {
   boundary?: UiBoundarySnapshot
 }
 
-
-function SceneTag({ track }: { track: Track }) {
-  if (!track.sceneLabel) return null
-  return <span className="q-scene-tag">{track.sceneLabel}</span>
-}
 
 export function QueuePage({
   queue,
@@ -73,7 +67,6 @@ export function QueuePage({
     restSeen.add(key)
     return true
   })
-  const totalMinutes = Math.round([playing, ...rest].reduce((sum, track) => sum + (track?.durationMs ?? 0), 0) / 60000)
   const playbackHistoryKey = `${trackKey(playbackState.current)}:${playbackState.status}:${playbackState.history.length}`
 
   useEffect(() => {
@@ -330,15 +323,17 @@ export function QueuePage({
   }
 
   return (
-    <div className="phone-surface queue-page">
-      <div className="page-toolbar">
-        <div className="tb-status">
-          今日 {rest.length + (playing ? 1 : 0)} 首 · 总长 {totalMinutes || '-'} 分钟
-        </div>
-        <div className="tb-actions">
+    <div className="d2-queue">
+      <div className="d2-queue-head">
+        <nav className="d2-queue-tabs" role="tablist" aria-label="队列视图">
+          <button type="button" role="tab" aria-selected={tab === 'now'} className={tab === 'now' ? 'active' : ''} onClick={() => setTab('now')}>正在播放<span>{rest.length + (playing ? 1 : 0)}</span></button>
+          <button type="button" role="tab" aria-selected={tab === 'favorites'} className={tab === 'favorites' ? 'active' : ''} onClick={() => setTab('favorites')}>收藏<span>{favoriteTotal}</span></button>
+          <button type="button" role="tab" aria-selected={tab === 'past'} className={tab === 'past' ? 'active' : ''} onClick={() => setTab('past')}>过往<span>{history.length}</span></button>
+        </nav>
+        <div className="d2-queue-tools">
           {tab === 'now' && (
             <button
-              className={autoPlayNext ? 'autoplay-toggle active' : 'autoplay-toggle'}
+              className={autoPlayNext ? 'd2-toggle on' : 'd2-toggle'}
               type="button"
               role="switch"
               aria-checked={autoPlayNext}
@@ -351,240 +346,220 @@ export function QueuePage({
             </button>
           )}
           {tab === 'past' && history.length > 0 && !historySelectMode && (
-            <button className="tb-btn" onClick={() => setHistorySelectMode(true)} title={`按日期清空过往${pageLabels.queue}显示`}>
+            <button className="d2-queue-tool-btn" type="button" onClick={() => setHistorySelectMode(true)} title={`按日期清空过往${pageLabels.queue}显示`}>
               清空过往
             </button>
           )}
           {tab === 'past' && historySelectMode && (
             <>
-              <button className="tb-btn" onClick={() => runQueueAction(clearSelectedHistory, '清空过往失败')} disabled={selectedHistoryDates.size === 0} title="只清空过往页显示，不影响画像和标签">
+              <button className="d2-queue-tool-btn" type="button" onClick={() => runQueueAction(clearSelectedHistory, '清空过往失败')} disabled={selectedHistoryDates.size === 0} title="只清空过往页显示，不影响画像和标签">
                 清空 {selectedHistoryDates.size || ''}
               </button>
-              <button className="tb-btn icon-only" onClick={cancelHistorySelect} title="取消选择">
-                <X size={13} />
+              <button className="d2-queue-tool-btn" type="button" onClick={cancelHistorySelect} title="取消选择">
+                取消
               </button>
             </>
           )}
         </div>
       </div>
 
-      <nav className="queue-tabs">
-        <button className={tab === 'now' ? 'active' : ''} onClick={() => setTab('now')}>正在播放<span>{rest.length + (playing ? 1 : 0)}</span></button>
-        <button className={tab === 'favorites' ? 'active' : ''} onClick={() => setTab('favorites')}>收藏<span>{favoriteTotal}</span></button>
-        <button className={tab === 'past' ? 'active' : ''} onClick={() => setTab('past')}>过往<span>{history.length}</span></button>
-      </nav>
+      {notice && <div className="d2-queue-notice" role="alert">{notice}</div>}
 
-      <div className="queue-scroll">
-        {notice && (
-          <div className="status-ind err queue-notice" role="alert">
-            <span className="status-dot" />
-            {notice}
-          </div>
-        )}
-        {tab === 'now' && (!playing && rest.length === 0 ? (
-          boundary
-            ? <BoundaryState snapshot={boundary} onAction={() => navigate('chat')} />
-            : <EmptyState
-                muted
-                icon="♫"
-                title={`${pageLabels.queue}空着——和我说点想听的?`}
-                body='"放点慢的"、"我想睡了"、"来点热闹"…… 都行。'
-                action={<button className="primary-button empty-cta" type="button" onClick={() => navigate('chat')}>去 {pageLabels.chat}</button>}
-              />
-        ) : (
-          <section className="queue-section">
-            <div className="queue-section-label">N O W &nbsp; P L A Y I N G</div>
-            {playing && (
-              <div className="now-playing">
-                <div className="np-indicator"><span /><span /><span /></div>
-                <div className="np-info">
-                  <div className="np-title">{playing.title}</div>
-                  <div className="np-meta">{playing.artist}{playing.year ? ` · ${playing.year}` : ''}</div>
-                  <SceneTag track={playing} />
-                </div>
-                <div className="np-actions">
-                  <button
-                    className={favoriteKeys.has(trackKey(playing)) ? 'q-act-btn favorite active' : 'q-act-btn favorite'}
-                    title={favoriteKeys.has(trackKey(playing)) ? '取消收藏' : '收藏'}
-                    onClick={() => runQueueAction(() => toggleFavorite(playing), '收藏状态更新失败')}
-                  >
-                    <Heart size={13} fill={favoriteKeys.has(trackKey(playing)) ? 'currentColor' : 'none'} />
-                  </button>
-                  <div className={`queue-status ${nowStatus(playing).className}`} title={nowStatus(playing).label} />
-                </div>
+      {tab === 'now' && (!playing && rest.length === 0 ? (
+        boundary
+          ? <BoundaryState snapshot={boundary} onAction={() => navigate('chat')} />
+          : <EmptyState
+              muted
+              icon="♫"
+              title={`${pageLabels.queue}空着——和我说点想听的?`}
+              body={'"放点慢的"、"我想睡了"、"来点热闹"…… 都行。'}
+              action={<button className="primary-button empty-cta" type="button" onClick={() => navigate('chat')}>去 {pageLabels.chat}</button>}
+            />
+      ) : (
+        <section className="d2-queue-list">
+          {playing && (
+            <div className="d2-queue-item now">
+              <b aria-hidden="true">▶</b>
+              <div>
+                <strong>{playing.title}</strong>
+                <small>{playing.artist}{playing.year ? ` · ${playing.year}` : ''}{playing.sceneLabel ? ` · ${playing.sceneLabel}` : ''}</small>
               </div>
-            )}
-
-            <div className="queue-list">
-              {rest.map((track, index) => {
-                const status = nowStatus(track)
-                const playbackIndex = playbackQueueIndex(track)
-                const canReorderPlaybackQueue = playbackIndex >= 0
-                return (
-                  <div
-                    className={`q-item ${status.className} ${dragIndex === index ? 'dragging' : ''}`}
-                    draggable={canReorderPlaybackQueue}
-                    key={`${track.title}-${index}`}
-                    onClick={() => runQueueAction(() => playNowTrack(track), '播放失败')}
-                    onDragStart={() => {
-                      if (canReorderPlaybackQueue) setDragIndex(index)
-                    }}
-                    onDragOver={(event) => {
-                      if (canReorderPlaybackQueue) event.preventDefault()
-                    }}
-                    onDrop={() => {
-                      if (dragIndex !== null && canReorderPlaybackQueue) {
-                        const fromIndex = dragIndex
-                        void runQueueAction(() => reorder(fromIndex, index), '队列排序失败')
-                      }
-                      setDragIndex(null)
-                    }}
-                    onDragEnd={() => setDragIndex(null)}
-                  >
-                    <span className="q-num">{String(index + 1).padStart(2, '0')}</span>
-                    <span className="q-handle">⋮⋮</span>
-                    <div className="q-body">
-                      <div className="q-title">{track.title}</div>
-                      <div className="q-meta">{track.artist}{track.year ? ` · ${track.year}` : ''}</div>
-                      <SceneTag track={track} />
-                    </div>
-                    <div className="q-tail">
-                      <div className={`queue-status ${status.className}`} title={status.label} />
-                      <div className="q-actions" onClick={(event) => event.stopPropagation()}>
-                        <button className="q-act-btn" title="播放" onClick={(event) => { event.stopPropagation(); void runQueueAction(() => playNowTrack(track), '播放失败') }} disabled={!track.playUrl}>
-                          <Play size={13} fill="currentColor" />
-                        </button>
-                        <button className={favoriteKeys.has(trackKey(track)) ? 'q-act-btn favorite active' : 'q-act-btn favorite'} title={favoriteKeys.has(trackKey(track)) ? '取消收藏' : '收藏'} onClick={(event) => { event.stopPropagation(); void runQueueAction(() => toggleFavorite(track), '收藏状态更新失败') }}>
-                          <Heart size={13} fill={favoriteKeys.has(trackKey(track)) ? 'currentColor' : 'none'} />
-                        </button>
-                        <button className="q-act-btn delete-btn" title="移除" onClick={(event) => { event.stopPropagation(); void runQueueAction(() => removeTrack(track), '移除失败') }}>
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
+              <span className="d2-queue-status" title={nowStatus(playing).label}>{nowStatus(playing).label}</span>
+              <button
+                className={favoriteKeys.has(trackKey(playing)) ? 'd2-queue-act active' : 'd2-queue-act'}
+                type="button"
+                title={favoriteKeys.has(trackKey(playing)) ? '取消收藏' : '收藏'}
+                onClick={() => runQueueAction(() => toggleFavorite(playing), '收藏状态更新失败')}
+              >
+                ♡
+              </button>
             </div>
-          </section>
-        ))}
+          )}
 
-        {tab === 'favorites' && (
-          <section className="queue-section favorite-section">
-            <div className="queue-section-label">F A V O R I T E S</div>
-            {favorites.length === 0 ? (
-              <EmptyState icon="♡" title="还没收藏过歌呢。" body={`在${pageLabels.chat}里听到喜欢的,点歌曲卡片右上的 ♡,我帮你留着。`} />
-            ) : (
-              <>
-              <div className="queue-list">
-                {favorites.map((track, index) => (
-                  <div className="q-item favorite-item" key={`${trackKey(track)}-${index}`}>
-                    <span className="q-num">{String(index + 1).padStart(2, '0')}</span>
-                    <div className="q-body">
-                      <div className="q-title">{track.title}</div>
-                      <div className="q-meta">{track.artist}{track.year ? ` · ${track.year}` : track.album ? ` · ${track.album}` : ''}</div>
-                      <SceneTag track={track} />
-                    </div>
-                    <div className="q-tail q-tail-favorite">
-                      <div className="q-actions always">
-                        <button className="q-act-btn" title="播放" onClick={() => runQueueAction(() => playFavorite(track), '播放失败')}>
-                          <Play size={13} fill="currentColor" />
-                        </button>
-                        <button className="q-act-btn favorite active" title="取消收藏" onClick={() => runQueueAction(() => toggleFavorite(track), '收藏状态更新失败')}>
-                          <Heart size={13} fill="currentColor" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+          {rest.map((track, index) => {
+            const status = nowStatus(track)
+            const playbackIndex = playbackQueueIndex(track)
+            const canReorderPlaybackQueue = playbackIndex >= 0
+            const favorited = favoriteKeys.has(trackKey(track))
+            return (
+              <div
+                className={`d2-queue-item${dragIndex === index ? ' dragging' : ''}`}
+                draggable={canReorderPlaybackQueue}
+                key={`${track.title}-${index}`}
+                onClick={() => runQueueAction(() => playNowTrack(track), '播放失败')}
+                onDragStart={() => {
+                  if (canReorderPlaybackQueue) setDragIndex(index)
+                }}
+                onDragOver={(event) => {
+                  if (canReorderPlaybackQueue) event.preventDefault()
+                }}
+                onDrop={() => {
+                  if (dragIndex !== null && canReorderPlaybackQueue) {
+                    const fromIndex = dragIndex
+                    void runQueueAction(() => reorder(fromIndex, index), '队列排序失败')
+                  }
+                  setDragIndex(null)
+                }}
+                onDragEnd={() => setDragIndex(null)}
+              >
+                <b aria-hidden="true">{String(index + 1).padStart(2, '0')}</b>
+                <div>
+                  <strong>{track.title}</strong>
+                  <small>{track.artist}{track.year ? ` · ${track.year}` : ''}{track.sceneLabel ? ` · ${track.sceneLabel}` : ''}</small>
+                </div>
+                <span className="d2-queue-status" title={status.label}>{track.playUrl ? status.label : '播不出来'}</span>
+                <div className="d2-queue-actions" onClick={(event) => event.stopPropagation()}>
+                  <button
+                    className={favorited ? 'd2-queue-act active' : 'd2-queue-act'}
+                    type="button"
+                    title={favorited ? '取消收藏' : '收藏'}
+                    onClick={() => runQueueAction(() => toggleFavorite(track), '收藏状态更新失败')}
+                  >
+                    ♡
+                  </button>
+                  <button
+                    className="d2-queue-act remove"
+                    type="button"
+                    title="移除"
+                    onClick={() => runQueueAction(() => removeTrack(track), '移除失败')}
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
-              {favorites.length < favoriteTotal && (
-                <button className="queue-more-btn" type="button" onClick={() => runQueueAction(() => refreshFavorites(), '收藏加载失败')} disabled={favoritesLoading}>
-                  {favoritesLoading ? '加载中...' : `再看 ${Math.min(FAVORITE_PAGE_SIZE, favoriteTotal - favorites.length)} 首`}
-                </button>
-              )}
-              </>
-            )}
-          </section>
-        )}
+            )
+          })}
+        </section>
+      ))}
 
-        {tab === 'past' && (
-          <section className="queue-section past-section">
-            <div className="queue-section-label">P A S T &nbsp; 7 &nbsp; D A Y S</div>
-            {history.length === 0 ? (
-              <EmptyState muted icon="…" title="过往还空着。" body="Echo 推荐过的歌曲会按日期收在这里，等你多听几次就会有了。" />
-            ) : (
-              history.map((day) => {
-                const open = openDays.has(day.date)
-                return (
-                  <div className="history-day" key={day.date}>
-                    <div className={selectedHistoryDates.has(day.date) ? 'history-head selected' : 'history-head'}>
-                      {historySelectMode && (
-                        <button
-                          className="history-check"
-                          type="button"
-                          onClick={() => toggleHistoryDate(day.date)}
-                          title={selectedHistoryDates.has(day.date) ? '取消选择' : '选择这个日期'}
-                        >
-                          {selectedHistoryDates.has(day.date) && <Check size={12} />}
-                        </button>
-                      )}
-                      <button
-                        className="history-toggle"
-                        type="button"
-                        onClick={() => {
-                          if (historySelectMode) {
-                            toggleHistoryDate(day.date)
-                            return
-                          }
-                          const next = new Set(openDays)
-                          if (next.has(day.date)) next.delete(day.date)
-                          else next.add(day.date)
-                          setOpenDays(next)
-                        }}
-                      >
-                        <span>{day.date} · {day.tracks.length} 首</span>
-                        <span>{historySelectMode ? (selectedHistoryDates.has(day.date) ? '已选择' : '选择') : open ? '收起' : '展开'}</span>
-                      </button>
-                    </div>
-                    {open && (
-                      <div className="history-list">
-                        {day.tracks.map((track, index) => (
-                          (() => {
-                            const status = historyStatus(track)
-                            return (
-                              <div className="q-item history-item" key={`${day.date}-${track.title}-${index}`}>
-                                <span className="q-num">{String(index + 1).padStart(2, '0')}</span>
-                                <div className="q-body">
-                                  <div className="q-title">{track.title}</div>
-                                  <div className="q-meta">{track.artist}{track.year ? ` · ${track.year}` : ''}</div>
-                                </div>
-                                <div className="q-tail q-tail-history">
-                                  <div className={`queue-status ${status.className}`} />
-                                  <SceneTag track={track} />
-                                  <div className="q-actions always">
-                                    <button className="q-act-btn" title="播放" onClick={() => runQueueAction(() => playHistoryTrack(track, day.tracks), '播放失败')}>
-                                      <Play size={13} fill="currentColor" />
-                                    </button>
-                                    <button className={favoriteKeys.has(trackKey(track)) ? 'q-act-btn favorite active' : 'q-act-btn favorite'} title={favoriteKeys.has(trackKey(track)) ? '取消收藏' : '收藏'} onClick={() => runQueueAction(() => toggleFavorite(track), '收藏状态更新失败')}>
-                                      <Heart size={13} fill={favoriteKeys.has(trackKey(track)) ? 'currentColor' : 'none'} />
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                            )
-                          })()
-                        ))}
-                      </div>
-                    )}
+      {tab === 'favorites' && (
+        favorites.length === 0 ? (
+          <EmptyState icon="♡" title="还没收藏过歌呢。" body={`在${pageLabels.chat}里听到喜欢的,点歌曲卡片右上的 ♡,我帮你留着。`} />
+        ) : (
+          <>
+            <section className="d2-queue-list">
+              {favorites.map((track, index) => (
+                <div className="d2-queue-item" key={`${trackKey(track)}-${index}`}>
+                  <b aria-hidden="true">{String(index + 1).padStart(2, '0')}</b>
+                  <div>
+                    <strong>{track.title}</strong>
+                    <small>{track.artist}{track.year ? ` · ${track.year}` : track.album ? ` · ${track.album}` : ''}{track.sceneLabel ? ` · ${track.sceneLabel}` : ''}</small>
                   </div>
-                )
-              })
+                  <div className="d2-queue-actions">
+                    <button className="d2-queue-act" type="button" title="播放" onClick={() => runQueueAction(() => playFavorite(track), '播放失败')}>
+                      播放
+                    </button>
+                    <button className="d2-queue-act active" type="button" title="取消收藏" onClick={() => runQueueAction(() => toggleFavorite(track), '收藏状态更新失败')}>
+                      ♡
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </section>
+            {favorites.length < favoriteTotal && (
+              <button className="d2-queue-more" type="button" onClick={() => runQueueAction(() => refreshFavorites(), '收藏加载失败')} disabled={favoritesLoading}>
+                {favoritesLoading ? '加载中…' : `再看 ${Math.min(FAVORITE_PAGE_SIZE, favoriteTotal - favorites.length)} 首`}
+              </button>
             )}
-          </section>
-        )}
-        <footer className="queue-foot">共 {tab === 'past' ? history.reduce((sum, day) => sum + day.tracks.length, 0) : tab === 'favorites' ? favoriteTotal : rest.length + (playing ? 1 : 0)} 首 · 由 Echo 编排</footer>
-      </div>
+          </>
+        )
+      )}
+
+      {tab === 'past' && (
+        history.length === 0 ? (
+          <EmptyState muted icon="…" title="过往还空着。" body="Echo 推荐过的歌曲会按日期收在这里，等你多听几次就会有了。" />
+        ) : (
+          history.map((day) => {
+            const open = openDays.has(day.date)
+            const selected = selectedHistoryDates.has(day.date)
+            return (
+              <div className="d2-queue-day" key={day.date}>
+                <div className={selected ? 'd2-queue-day-head selected' : 'd2-queue-day-head'}>
+                  {historySelectMode && (
+                    <button
+                      className={selected ? 'd2-queue-check selected' : 'd2-queue-check'}
+                      type="button"
+                      onClick={() => toggleHistoryDate(day.date)}
+                      title={selected ? '取消选择' : '选择这个日期'}
+                      aria-pressed={selected}
+                    >
+                      {selected ? '✓' : ''}
+                    </button>
+                  )}
+                  <button
+                    className="d2-queue-day-toggle"
+                    type="button"
+                    onClick={() => {
+                      if (historySelectMode) {
+                        toggleHistoryDate(day.date)
+                        return
+                      }
+                      const next = new Set(openDays)
+                      if (next.has(day.date)) next.delete(day.date)
+                      else next.add(day.date)
+                      setOpenDays(next)
+                    }}
+                  >
+                    <span>{day.date} · {day.tracks.length} 首</span>
+                    <small>{historySelectMode ? (selected ? '已选择' : '选择') : open ? '收起' : '展开'}</small>
+                  </button>
+                </div>
+                {open && (
+                  <section className="d2-queue-list">
+                    {day.tracks.map((track, index) => {
+                      const status = historyStatus(track)
+                      const favorited = favoriteKeys.has(trackKey(track))
+                      return (
+                        <div className={`d2-queue-item ${status.className}`} key={`${day.date}-${track.title}-${index}`}>
+                          <b aria-hidden="true">{String(index + 1).padStart(2, '0')}</b>
+                          <div>
+                            <strong>{track.title}</strong>
+                            <small>{track.artist}{track.year ? ` · ${track.year}` : ''}{track.sceneLabel ? ` · ${track.sceneLabel}` : ''}</small>
+                          </div>
+                          <div className="d2-queue-actions">
+                            <button className="d2-queue-act" type="button" title="播放" onClick={() => runQueueAction(() => playHistoryTrack(track, day.tracks), '播放失败')}>
+                              播放
+                            </button>
+                            <button
+                              className={favorited ? 'd2-queue-act active' : 'd2-queue-act'}
+                              type="button"
+                              title={favorited ? '取消收藏' : '收藏'}
+                              onClick={() => runQueueAction(() => toggleFavorite(track), '收藏状态更新失败')}
+                            >
+                              ♡
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </section>
+                )}
+              </div>
+            )
+          })
+        )
+      )}
+      <footer className="d2-queue-foot">共 {tab === 'past' ? history.reduce((sum, day) => sum + day.tracks.length, 0) : tab === 'favorites' ? favoriteTotal : rest.length + (playing ? 1 : 0)} 首 · 由 Echo 编排</footer>
     </div>
   )
 }

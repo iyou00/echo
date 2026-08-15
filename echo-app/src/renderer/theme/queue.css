@@ -1,0 +1,300 @@
+/* ---- D1.3 音乐与队列抽屉（正在播放 / 收藏 / 过往） ---- */
+
+.d2-queue {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
+}
+
+.d2-queue-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  margin: 12px 0 4px;
+}
+
+.d2-queue-tabs {
+  display: flex;
+  gap: 18px;
+  margin-right: auto;
+  border-bottom: 1px solid var(--d2-line);
+}
+
+.d2-queue-tabs button {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 9px 0;
+  border: 0;
+  background: transparent;
+  color: var(--d2-muted);
+  font: 10px/1 var(--d2-sans);
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+
+.d2-queue-tabs button span {
+  font-size: 9px;
+  letter-spacing: 0;
+}
+
+.d2-queue-tabs button.active {
+  margin-bottom: -1px;
+  border-bottom: 2px solid var(--d2-red);
+  color: var(--d2-ink);
+}
+
+.d2-queue-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 9px;
+}
+
+.d2-queue-tool-btn {
+  padding: 0 0 2px;
+  border: 0;
+  border-bottom: 1px solid var(--d2-line);
+  background: transparent;
+  color: var(--d2-muted);
+  font: 9px/1.4 var(--d2-sans);
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.d2-queue-tool-btn:hover:not(:disabled) {
+  border-bottom-color: var(--d2-red);
+  color: var(--d2-red);
+}
+
+.d2-queue-tool-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.d2-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--d2-muted);
+  font: 10px/1 var(--d2-sans);
+  letter-spacing: 1px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.d2-toggle i {
+  position: relative;
+  display: inline-block;
+  width: 24px;
+  height: 13px;
+  border: 1px solid var(--d2-muted);
+  border-radius: 7px;
+  transition: border-color 0.2s ease;
+}
+
+.d2-toggle i::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--d2-muted);
+  transition: left 0.2s ease, background 0.2s ease;
+}
+
+.d2-toggle.on i {
+  border-color: var(--d2-forest);
+}
+
+.d2-toggle.on i::after {
+  left: 12px;
+  background: var(--d2-forest);
+}
+
+.d2-queue-notice {
+  margin-top: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--d2-line);
+  border-bottom: 1px solid var(--d2-line);
+  color: var(--d2-red);
+  font: 10px/1.6 var(--d2-sans);
+}
+
+.d2-queue-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.d2-queue-item {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  padding: 14px 0;
+  border-top: 1px solid var(--d2-line);
+  cursor: pointer;
+}
+
+.d2-queue-item:first-child { border-top: 0; }
+
+.d2-queue-item.now {
+  border-top: 0;
+}
+
+.d2-queue-item.now b {
+  color: var(--d2-red);
+}
+
+.d2-queue-item.playing strong { color: var(--d2-red); }
+
+.d2-queue-item b {
+  color: var(--d2-muted);
+  font: 500 15px/1.3 var(--d2-serif);
+}
+
+.d2-queue-item strong {
+  display: block;
+  color: var(--d2-ink);
+  font: 500 15px/1.45 var(--d2-serif);
+}
+
+.d2-queue-item small {
+  display: block;
+  margin-top: 4px;
+  color: var(--d2-muted);
+  font: 9px/1.6 var(--d2-sans);
+}
+
+.d2-queue-status {
+  align-self: center;
+  color: var(--d2-muted);
+  font: 9px/1.5 var(--d2-sans);
+  white-space: nowrap;
+}
+
+.d2-queue-item.playing .d2-queue-status { color: var(--d2-red); }
+
+.d2-queue-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  align-self: center;
+}
+
+.d2-queue-act {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--d2-muted);
+  font: 10px/1 var(--d2-sans);
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.d2-queue-act:hover { color: var(--d2-ink); }
+.d2-queue-act.active { color: var(--d2-red); }
+
+.d2-queue-act.remove {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.d2-queue-act.remove:hover { color: var(--d2-red); }
+
+.d2-queue-item.dragging {
+  opacity: 0.45;
+}
+
+.d2-queue-more {
+  margin: 6px 0 0;
+  padding: 10px 0 2px;
+  border: 0;
+  border-bottom: 1px solid var(--d2-line);
+  background: transparent;
+  color: var(--d2-muted);
+  font: 9px/1.4 var(--d2-sans);
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.d2-queue-more:hover:not(:disabled) {
+  border-bottom-color: var(--d2-ink);
+  color: var(--d2-ink);
+}
+
+.d2-queue-more:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.d2-queue-day {
+  margin-top: 4px;
+}
+
+.d2-queue-day-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid var(--d2-line);
+}
+
+.d2-queue-check {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--d2-muted);
+  border-radius: 0;
+  background: transparent;
+  color: var(--d2-ink);
+  font: 10px/1 var(--d2-sans);
+  cursor: pointer;
+}
+
+.d2-queue-check.selected {
+  border-color: var(--d2-forest);
+  background: var(--d2-forest);
+  color: #f5f5ec;
+}
+
+.d2-queue-day-toggle {
+  flex: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 13px 0;
+  border: 0;
+  background: transparent;
+  color: var(--d2-ink);
+  font: 500 11px/1.4 var(--d2-serif);
+  cursor: pointer;
+  text-align: left;
+}
+
+.d2-queue-day-toggle small {
+  color: var(--d2-muted);
+  font: 9px/1.4 var(--d2-sans);
+}
+
+.d2-queue-day-head.selected .d2-queue-day-toggle span {
+  color: var(--d2-forest);
+}
+
+.d2-queue-foot {
+  margin-top: 24px;
+  padding-top: 14px;
+  border-top: 1px solid var(--d2-line);
+  color: var(--d2-muted);
+  font: 9px/1.6 var(--d2-sans);
+  letter-spacing: 1px;
+}

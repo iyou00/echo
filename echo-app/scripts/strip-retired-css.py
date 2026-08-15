@@ -4,39 +4,17 @@ import sys
 CSS_PATH = r"D:/AI文件/echozcode/echo-app/src/index.css"
 
 RETIRED = {
-    "portrait-section", "portrait-eyebrow", "portrait-evidence", "portrait-content",
-    "portrait-text", "portrait-loading", "portrait-skeleton", "portrait-skeleton-line",
-    "portrait-status", "portrait-meta-row", "portrait-sign", "portrait-correction",
-    "portrait-correction-link", "portrait-correction-box", "portrait-correction-actions",
-    "avatar-big", "avatar-breathing",
-    "sig-track", "sig-num", "sig-track-body", "sig-title", "sig-meta", "sig-reason", "sig-play",
-    "genre-row", "genre-head", "genre-name", "genre-trend", "trend-up", "trend-down",
-    "trend-steady", "genre-bar-bg", "genre-bar-fill", "genre-chips", "genre-chip", "genre-note",
-    "artist-list", "artist-item", "artist-rank", "artist-name", "artist-badge",
-    "badge-imported", "badge-semantic", "badge-fallback",
-    "affinity-bar", "affinity-fill",
-    "mood-cloud", "mood-cloud-tag", "moods", "mood",
-    "evidence-weak", "evidence-medium", "evidence-strong",
-    "clue-term", "profile-empty", "profile-page",
-    "profile-icon-action", "profile-portrait-actions",
-    "profile-stats-grid", "profile-stat-card", "profile-analysis-title", "profile-analysis-group",
-    "profile-change-list", "profile-scene-list", "profile-change-item", "profile-muted-copy",
-    "profile-insight", "profile-insight-actions", "profile-curiosity", "profile-curiosity-answer",
-    "profile-archive", "profile-memory", "profile-memory-error", "profile-memory-list",
-    "profile-memory-item", "profile-version-list", "profile-version-item",
-    "profile-scene-row", "profile-scene-head",
-    "tuner-dial", "tuner-needle", "tuner-scale", "tuner-tick", "tuner-tick-label",
-    "long-tick", "tuner-meta", "tuner-meta-highlight", "tuner-quote",
-    "energy-row", "battery-container", "battery-fill", "energy-unknown-mark",
-    "energy-desc", "energy-dropdown", "energy-drop-item", "energy-drop-val",
-    "profile-disclosure", "profile-disclosure-body", "profile-disclosure-chevron",
-    "profile-mood-filter", "signature-list", "profile-core-section", "profile-core-signals",
-    "profile-core-signal", "profile-core-index", "profile-question-section",
-    "profile-recent-section", "profile-deep-section", "profile-change-empty",
-    "questions",
+    "queue-page", "queue-tabs", "queue-scroll", "queue-notice", "queue-section",
+    "queue-section-label", "queue-more-btn", "queue-foot", "queue-status",
+    "now-playing", "np-indicator", "np-info", "np-title", "np-meta", "np-actions",
+    "q-item", "q-num", "q-handle", "q-body", "q-title", "q-meta", "q-scene-tag",
+    "q-tail", "q-tail-favorite", "q-tail-history", "q-act-btn",
+    "favorite-item", "favorite-section", "past-section", "delete-btn",
+    "history-day", "history-head", "history-check", "history-toggle",
+    "history-list", "history-item", "autoplay-toggle",
 }
 
-RETIRED_KEYFRAMES = {"breathe", "portrait-mist", "portrait-soft-scan", "status-in"}
+RETIRED_KEYFRAMES: set[str] = set()
 
 token_re = re.compile(r"[.#]?-?[A-Za-z0-9_-]+")
 
