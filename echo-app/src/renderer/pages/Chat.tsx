@@ -580,7 +580,6 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
     taskPhase: chatTask?.phase,
     hasError: Boolean(chatNotice) || latestHasBoundary,
   })
-  const recentUserMessages = messages.filter((message) => message.role === 'user').slice(-3)
   useEffect(() => {
     onStageModeChange?.(chatStageMode)
   }, [chatStageMode, onStageModeChange])
@@ -633,22 +632,6 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
         <div className="status-ind err chat-notice" role="alert">
           <span className="status-dot" />
           {chatNotice}
-        </div>
-      )}
-
-      {hasDialogue && (
-        <div className="d2-dialogue-history" aria-label="最近对话节点">
-          {recentUserMessages.map((message, index) => (
-            <button
-              type="button"
-              key={message.id}
-              className={index === recentUserMessages.length - 1 ? 'active' : ''}
-              onClick={() => navigate('review')}
-              title={`回看：${message.content.slice(0, 24)}`}
-              aria-label={`回看 ${timeLabel(message.createdAt)} 的对话`}
-            />
-          ))}
-          <small>{latestUser ? timeLabel(latestUser.createdAt) : '此刻'}</small>
         </div>
       )}
 

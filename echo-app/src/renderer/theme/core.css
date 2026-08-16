@@ -385,104 +385,6 @@
   background: var(--d2-surface);
 }
 
-.review-scroll {
-  min-height: 0;
-  flex: 1;
-  overflow: auto;
-  padding: 18px 26px 34px;
-}
-
-.review-context {
-  display: grid;
-  gap: 7px;
-  margin-bottom: 26px;
-  padding: 16px 0 16px 18px;
-  border-left: 3px solid var(--d2-forest);
-}
-
-.review-context span,
-.review-context small {
-  color: var(--d2-muted);
-  font-size: 9px;
-}
-
-.review-context strong {
-  font-family: var(--d2-serif);
-  font-size: 17px;
-  font-weight: 500;
-}
-
-.review-timeline {
-  position: relative;
-}
-
-.review-timeline::before {
-  content: "";
-  position: absolute;
-  top: 8px;
-  bottom: 8px;
-  left: 55px;
-  width: 1px;
-  background: var(--d2-line);
-}
-
-.review-item {
-  position: relative;
-  display: grid;
-  grid-template-columns: 44px 1fr;
-  gap: 24px;
-  padding: 0 0 24px;
-}
-
-.review-item::before {
-  content: "";
-  position: absolute;
-  top: 5px;
-  left: 52px;
-  width: 7px;
-  height: 7px;
-  border: 1px solid var(--d2-muted);
-  border-radius: 50%;
-  background: var(--d2-surface);
-}
-
-.review-item.tone-user::before { border-color: var(--d2-blue); background: var(--d2-blue); }
-.review-item.tone-echo::before { border-color: var(--d2-red); background: var(--d2-red); }
-.review-item.tone-music::before { border-color: var(--d2-forest); background: var(--d2-forest); }
-
-.review-item time {
-  color: var(--d2-muted);
-  font-size: 9px;
-  line-height: 1.7;
-  text-align: right;
-}
-
-.review-item div {
-  min-width: 0;
-}
-
-.review-item span {
-  display: block;
-  margin-bottom: 5px;
-  color: var(--d2-muted);
-  font-size: 9px;
-}
-
-.review-item strong {
-  display: block;
-  font-family: var(--d2-serif);
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 1.55;
-}
-
-.review-item p {
-  margin: 5px 0 0;
-  color: var(--d2-muted);
-  font-size: 10px;
-  line-height: 1.55;
-}
-
 .d2-context-drawer .global-player,
 .d2-context-drawer .page-foot {
   display: none;
@@ -1303,12 +1205,6 @@
 .d2-now-page .stage-dialogue .msg.ai .bubble { font-size: 21px; }
 .d2-now-page .stage-dialogue .timestamp { margin-top: 9px; color: var(--d2-muted); font-size: 9px; }
 .d2-now-page .stage-dialogue .track-card { display: none; }
-.d2-dialogue-history { position: absolute; z-index: 4; top: 178px; left: 2.4%; display: grid; width: 40px; height: 120px; place-items: center; color: var(--d2-muted); }
-.d2-dialogue-history::before { position: absolute; top: 9px; bottom: 18px; left: 19px; width: 1px; background: #aab2aa; content: ""; }
-.d2-dialogue-history button { z-index: 1; width: 12px; height: 12px; padding: 2px; border: 1px solid #94a096; border-radius: 50%; background: var(--d2-paper); background-clip: content-box; }
-.d2-dialogue-history button:hover, .d2-dialogue-history button:focus-visible { border-color: var(--d2-blue); outline: 1px solid var(--d2-blue); outline-offset: 2px; }
-.d2-dialogue-history button.active { border-color: var(--d2-blue); background-color: var(--d2-blue); }
-.d2-dialogue-history small { position: absolute; bottom: 0; left: 30px; width: 44px; font-size: 8px; }
 
 .d2-now-page .scene-composer { position: absolute; z-index: 8; bottom: 36px; left: 4.8%; width: 40.8%; margin: 0; padding: 0; pointer-events: auto; }
 .d2-now-page .scene-rail { margin: 0 0 15px; border-top: 1px solid var(--d2-line); }
@@ -1353,7 +1249,7 @@
 .d2-shell.field-listening .d2-brand, .d2-shell.field-listening .d2-context strong, .d2-shell.field-listening .d2-nav-button, .d2-shell.field-listening .d2-icon-button, .d2-shell.field-listening .wc-btn, .d2-shell.field-voice .d2-brand, .d2-shell.field-voice .d2-context strong, .d2-shell.field-voice .d2-nav-button, .d2-shell.field-voice .d2-icon-button, .d2-shell.field-voice .wc-btn { color: #f5f5ec; }
 .d2-shell.field-listening .d2-context .d2-context-weather, .d2-shell.field-voice .d2-context .d2-context-weather { color: #aeb6ad; }
 .d2-shell.field-listening .chat-page, .d2-shell.field-voice .voice-page { background: var(--d2-night); color: #f5f5ec; }
-.d2-shell.field-listening .d2-now-presence, .d2-shell.field-listening .d2-ambient-facts, .d2-shell.field-listening .d2-quiet-mark, .d2-shell.field-listening .stage-dialogue, .d2-shell.field-listening .d2-dialogue-history { opacity: 0; pointer-events: none; }
+.d2-shell.field-listening .d2-now-presence, .d2-shell.field-listening .d2-ambient-facts, .d2-shell.field-listening .d2-quiet-mark, .d2-shell.field-listening .stage-dialogue { opacity: 0; pointer-events: none; }
 .d2-player-layer.player-listening .global-player, .d2-player-layer.player-voice .global-player { top: 50px; right: auto; left: 5.5%; width: 400px; color: #f5f5ec; }
 .d2-player-layer.player-listening .d2-sound-art, .d2-player-layer.player-voice .d2-sound-art { height: 400px; }
 .d2-player-layer.player-listening .d2-sound-art::after, .d2-player-layer.player-voice .d2-sound-art::after { background: var(--d2-red); }

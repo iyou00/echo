@@ -5,7 +5,6 @@ import { AboutEchoPage } from './renderer/pages/AboutEcho'
 import { ChatPage } from './renderer/pages/Chat'
 import { EchoProfilePage } from './renderer/pages/EchoProfile'
 import { QueuePage } from './renderer/pages/Queue'
-import { ReviewPage } from './renderer/pages/Review'
 import { SettingsPage } from './renderer/pages/Settings'
 import { VoicePage } from './renderer/pages/Voice'
 import { YinyiPage } from './renderer/pages/Yinyi'
@@ -692,14 +691,12 @@ function App() {
       dispatch({ listeningViewOpen: false })
     }
   }, [listeningViewOpen, playbackTrack, playbackStatus, dispatch])
-  const drawerOpen = page === 'review' || page === 'queue' || page === 'profile' || page === 'settings' || page === 'about'
+  const drawerOpen = page === 'queue' || page === 'profile' || page === 'settings' || page === 'about'
   const [settingsDrawerTitle, setSettingsDrawerTitle] = useState('设置')
   const [dailyReconnectDone, setDailyReconnectDone] = useState(false)
   const offlineBoundary = boundaries.find((item) => item.code === 'offline')
   const modelInvalidBoundary = boundaries.find((item) => item.code === 'model_invalid')
-  const drawerTitle = page === 'review'
-    ? '回望今天'
-    : page === 'queue'
+  const drawerTitle = page === 'queue'
     ? '音乐与队列'
     : page === 'profile'
       ? 'Echo 对你的理解'
@@ -810,9 +807,6 @@ function App() {
           </div>
         </section>
         <ContextDrawer open={drawerOpen} title={drawerTitle} view={page} onClose={closeDrawer}>
-          <div className="d2-drawer-view" style={{ display: page === 'review' ? 'flex' : 'none' }}>
-            <ReviewPage echo={echo} isActive={page === 'review'} />
-          </div>
           <div className="d2-drawer-view" style={{ display: page === 'queue' ? 'flex' : 'none' }}>
             <QueuePage
               {...commonProps}

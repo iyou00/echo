@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react'
-import { History, MessageCircle, Settings, UserRound } from 'lucide-react'
+import { MessageCircle, Mic2, Settings, UserRound } from 'lucide-react'
 import type { PageKey } from '../appState'
 import { WindowControls } from '../components'
 import { getEchoApi } from '../api'
 
 type TopBarWeather = { city: string; condition: string; tempC: number } | null
 
+// 「回声」（听 Echo 说几句）是用户高频入口，2026-08-16 从输入框旁的隐形麦克风图标升回一级导航；
+// 「回望」同日移除——只读时间线与对话历史/设置「此刻的理解」完全重叠，无独立价值。
 const mainDestinations: Array<{ key: PageKey; label: string; icon: typeof MessageCircle }> = [
   { key: 'yinyi', label: '风信', icon: MessageCircle },
-  { key: 'review', label: '回望', icon: History },
+  { key: 'voice', label: '回声', icon: Mic2 },
 ]
 
 export function TopBar({

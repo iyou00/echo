@@ -129,7 +129,7 @@ export type SceneKey = 'focus' | 'sleepy' | 'relax' | 'irritated' | 'random'
 export type PingType = 'recommend_track' | 'casual_check' | 'voice_invite'
 export type CareFrequency = 'gentle' | 'normal' | 'frequent'
 export type OnboardingStep = 'api' | 'playlist' | 'done'
-export type AppPageKey = 'chat' | 'review' | 'profile' | 'yinyi' | 'voice' | 'queue' | 'settings' | 'about'
+export type AppPageKey = 'chat' | 'profile' | 'yinyi' | 'voice' | 'queue' | 'settings' | 'about'
 export type ServiceHealthKind =
   | 'llm'
   | 'netease'
