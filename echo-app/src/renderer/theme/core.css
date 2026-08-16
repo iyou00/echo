@@ -273,12 +273,25 @@
 .d2-settings-form.detail-yinyi .target-yinyi,
 .d2-settings-form.detail-chat .target-chat,
 .d2-settings-form.detail-stage .target-stage,
+.d2-settings-form.detail-learned .target-learned,
 .d2-settings-form.detail-voice .target-voice,
 .d2-settings-form.detail-care .target-care,
 .d2-settings-form.detail-window .target-window,
 .d2-settings-form.detail-llm .target-llm,
 .d2-settings-form.detail-data .target-data { display: block; }
 .d2-settings-form .d2-llm-first-run { display: none; }
+
+/* 「Echo 学到了什么」审计页 */
+.d2-learned-list { display: grid; margin-top: 6px; }
+.d2-learned-item { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 13px 0; border-bottom: 1px solid var(--d2-line); }
+.d2-learned-item.retired { opacity: 0.55; }
+.d2-learned-main { display: flex; min-width: 0; gap: 12px; align-items: flex-start; }
+.d2-learned-kind { flex: none; margin-top: 2px; padding: 2px 7px; border: 1px solid var(--d2-line); color: var(--d2-muted); font-size: 9px; letter-spacing: 1px; }
+.d2-learned-trigger { color: var(--d2-ink); font: 500 12px/1.5 var(--d2-serif); }
+.d2-learned-summary { margin-top: 3px; color: var(--d2-forest); font-size: 11px; }
+.d2-learned-item small { display: block; margin-top: 4px; color: var(--d2-muted); font-size: 10.5px; }
+.d2-learned-delete { flex: none; padding: 5px 12px; font-size: 10px; }
+.input.d2-learned-time { width: 78px; padding: 4px 8px; text-align: center; }
 .d2-settings-form.detail-llm .d2-llm-first-run { display: block; }
 
 .d2-settings-form .section { padding: 12px 0 24px; border: 0; }

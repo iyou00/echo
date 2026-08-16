@@ -150,6 +150,10 @@ const echoApi: EchoApi = {
       return () => ipcRenderer.off('scene:changed', wrapped)
     },
   },
+  learnedCases: {
+    list: () => invoke('learnedCases:list'),
+    delete: (id: string) => invoke('learnedCases:delete', id),
+  },
   stageContext: {
     getActive: () => invoke('stageContext:getActive'),
     end: () => invoke('stageContext:end'),

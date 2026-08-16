@@ -18,6 +18,7 @@ export const ECHO_API_CONTRACT: ContractShape = {
   feedback: ['record'],
   scene: ['definitions', 'getCurrent', 'start', 'play', 'end', 'today', 'onChanged'],
   stageContext: ['getActive', 'end', 'correct', 'delete', 'recentActions'],
+  learnedCases: ['list', 'delete'],
   semantics: ['buildForImportedTracks', 'getSummary'],
   import: ['getSnapshot', 'onChanged', 'onProgress'],
   recommendation: ['recommendFromNetease'],

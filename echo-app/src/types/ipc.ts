@@ -50,6 +50,19 @@ export interface StageState {
   safety: 'normal' | 'caution'
 }
 
+export interface LearnedCaseView {
+  id: string
+  kind: 'entity_correction' | 'phrasing_precedent' | 'artist_alias'
+  triggerText: string
+  learned: Record<string, unknown>
+  evidence: { conversationIds: number[]; quotes: string[]; sourceDate: string }
+  confidence: number
+  status: 'pending' | 'active' | 'retired'
+  corroborations: number
+  sourceDate: string
+  updatedAt: string
+}
+
 export interface StageContext {
   id: string
   kind: StageContextKind
@@ -803,6 +816,10 @@ export interface EchoApi {
     end(): Promise<ActiveScene | null>
     today(): Promise<SceneSessionSummary[]>
     onChanged(listener: (scene: ActiveScene | null) => void): () => void
+  }
+  learnedCases: {
+    list(): Promise<LearnedCaseView[]>
+    delete(id: string): Promise<{ ok: boolean }>
   }
   stageContext: {
     getActive(): Promise<StageContext | null>

@@ -51,6 +51,8 @@ const mockScenes: SceneDefinition[] = [
   { key: 'random', label: '随便吧', shortLabel: '随便吧', line: '交给 Echo 发散,从你的口味里随手捞。', prompt: '随便听点什么,从我的口味里捞几首就好。', targetCount: 5, moods: ['陪伴'], scenes: ['下午工作'], energy: 'medium', tempo: 'medium', familiarity: 'explore' },
 ]
 
+let mockLearnedCases: import('../types/ipc').LearnedCaseView[] = []
+
 const mockSettings: Settings = {
   llm: {
     baseUrl: '',
@@ -982,6 +984,15 @@ const mockEcho: EchoApi = {
     onChanged(listener) {
       sceneListeners.add(listener)
       return () => sceneListeners.delete(listener)
+    },
+  },
+  learnedCases: {
+    async list() {
+      return structuredClone(mockLearnedCases)
+    },
+    async delete(id: string) {
+      mockLearnedCases = mockLearnedCases.filter((item) => item.id !== id)
+      return { ok: true }
     },
   },
   stageContext: {

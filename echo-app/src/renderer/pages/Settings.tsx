@@ -1,6 +1,6 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronRight, Download, Info, MessageCircle, Upload } from 'lucide-react'
-import type { AgentActionSummary, CareFrequency, EchoApi, ImportProgressPayload, ImportTaskSnapshot, SemanticSummary, Settings, StageContext, Track, UiBoundarySnapshot, WindowSizePreset } from '../../types/ipc'
+import type { AgentActionSummary, CareFrequency, EchoApi, ImportProgressPayload, ImportTaskSnapshot, LearnedCaseView, SemanticSummary, Settings, StageContext, Track, UiBoundarySnapshot, WindowSizePreset } from '../../types/ipc'
 import type { AppPageProps } from '../appState'
 import { EmptyState, Section } from '../components'
 import { RuntimeTaskList } from '../components/RuntimeTaskNotice'
@@ -296,11 +296,11 @@ export function SettingsPage({
 
   const [activeTab, setActiveTab] = useState<'sync' | 'pref' | 'sys'>(hasLlmConfig ? 'sync' : 'sys')
   const [settingsView, setSettingsView] = useState<'overview' | 'connections' | 'tasks' | 'details'>('overview')
-  const [detailTarget, setDetailTarget] = useState<'music' | 'yinyi' | 'chat' | 'stage' | 'voice' | 'care' | 'window' | 'llm' | 'data'>('music')
+  const [detailTarget, setDetailTarget] = useState<'music' | 'yinyi' | 'chat' | 'stage' | 'learned' | 'voice' | 'care' | 'window' | 'llm' | 'data'>('music')
   const [detailParent, setDetailParent] = useState<'overview' | 'connections'>('overview')
 
   useEffect(() => {
-    const detailTitles = { music: '音乐来源', yinyi: '风信生成', chat: '絮语与启动', stage: '此刻的理解', voice: '天气与语音', care: '主动关心', window: '窗口与关闭', llm: 'AI 模型', data: '本地数据' }
+    const detailTitles = { music: '音乐来源', yinyi: '风信生成', chat: '絮语与启动', stage: '此刻的理解', learned: 'Echo 学到了什么', voice: '天气与语音', care: '主动关心', window: '窗口与关闭', llm: 'AI 模型', data: '本地数据' }
     onTitleChange?.(settingsView === 'overview' ? '设置' : settingsView === 'connections' ? '连接与来源' : settingsView === 'tasks' ? '运行任务' : detailTitles[detailTarget])
   }, [detailTarget, onTitleChange, settingsView])
   const [showNeteaseDrawer, setShowNeteaseDrawer] = useState(false)
@@ -317,6 +317,9 @@ export function SettingsPage({
   const [recentAgentActions, setRecentAgentActions] = useState<AgentActionSummary[]>([])
   const [recentCareActions, setRecentCareActions] = useState<AgentActionSummary[]>([])
   const [stageContextStatus, setStageContextStatus] = useState('')
+  const [learnedCases, setLearnedCases] = useState<LearnedCaseView[]>([])
+  const [learnedStatus, setLearnedStatus] = useState('')
+  const [dreamTimeDraft, setDreamTimeDraft] = useState('')
   const [windowSizeStatus, setWindowSizeStatus] = useState('')
   const [windowSizeBusy, setWindowSizeBusy] = useState(false)
   const [importBoundary, setImportBoundary] = useState<UiBoundarySnapshot | null>(null)
@@ -546,6 +549,54 @@ export function SettingsPage({
   useEffect(() => {
     void refreshAgentContext()
   }, [refreshAgentContext])
+
+  const refreshLearnedCases = useCallback(async () => {
+    try {
+      setLearnedCases(await echo.learnedCases.list())
+    } catch (error) {
+      console.warn('[settings] learned cases failed', error)
+    }
+  }, [echo])
+
+  useEffect(() => {
+    void refreshLearnedCases()
+  }, [refreshLearnedCases])
+
+  async function deleteLearnedCase(id: string) {
+    try {
+      await echo.learnedCases.delete(id)
+      setLearnedStatus('已删除。')
+      await refreshLearnedCases()
+    } catch {
+      setLearnedStatus('删除没成功，稍后再试。')
+    }
+  }
+
+  const learnedKindLabels: Record<LearnedCaseView['kind'], string> = { entity_correction: '实体纠正', phrasing_precedent: '措辞先例', artist_alias: '歌手称呼' }
+  const learnedStatusLabels: Record<LearnedCaseView['status'], string> = { active: '生效中', pending: '待印证', retired: '已淡忘' }
+
+  function summarizeLearnedCase(item: LearnedCaseView): string {
+    const artist = typeof item.learned.expectArtistQuery === 'string' ? item.learned.expectArtistQuery : ''
+    const title = typeof item.learned.expectSeedTitle === 'string' ? item.learned.expectSeedTitle : ''
+    const alias = typeof item.learned.alias === 'string' ? item.learned.alias : ''
+    const expectedKind = typeof item.learned.expectedKind === 'string' ? item.learned.expectedKind : ''
+    if (item.kind === 'artist_alias' && alias && artist) return `「${alias}」指的是 ${artist}`
+    if (artist && title) return `指 ${artist} 的《${title}》`
+    if (artist) return `指歌手 ${artist} 的歌`
+    if (title) return `指歌曲《${title}》`
+    if (expectedKind) return `应按 ${expectedKind} 理解`
+    return '记住了这条说法'
+  }
+
+  async function updateDreamSetting(path: 'dream.enabled' | 'dream.reviewAt', value: boolean | string) {
+    try {
+      const next = await echo.settings.update(path, value)
+      setSettings(next)
+      setDreamTimeDraft('')
+    } catch {
+      setLearnedStatus('保存没成功，稍后再试。')
+    }
+  }
 
   async function endCurrentStageContext() {
     await echo.stageContext.end()
@@ -1383,7 +1434,7 @@ export function SettingsPage({
   const carePausedUntil = settings.carePings.pausedUntil && Date.parse(settings.carePings.pausedUntil) > Date.now()
     ? new Date(settings.carePings.pausedUntil)
     : null
-  const detailTitles = { music: '音乐来源', yinyi: '风信生成', chat: '絮语与启动', stage: '此刻的理解', voice: '天气与语音', care: '主动关心', window: '窗口与关闭', llm: 'AI 模型', data: '本地数据' }
+  const detailTitles = { music: '音乐来源', yinyi: '风信生成', chat: '絮语与启动', stage: '此刻的理解', learned: 'Echo 学到了什么', voice: '天气与语音', care: '主动关心', window: '窗口与关闭', llm: 'AI 模型', data: '本地数据' }
   const breadcrumbItems: Array<{ label: string; testId?: string; onClick?: () => void }> = settingsView === 'overview'
     ? [{ label: '设置' }]
     : settingsView === 'connections'
@@ -1435,6 +1486,7 @@ export function SettingsPage({
             </div>
             <div className="d2-settings-row"><span><strong>说话密度</strong></span><span className="d2-settings-value">自适应</span></div>
             <button type="button" data-testid="settings-yinyi" className="d2-settings-row" onClick={() => openDetails('pref', 'yinyi')}><span><strong>风信生成</strong></span><span className="d2-settings-value">{settings?.yinyi.generateAt ?? '22:00'} <ChevronRight size={14} /></span></button>
+            <button type="button" data-testid="settings-learned-entry" className="d2-settings-row" onClick={() => openDetails('pref', 'learned')}><span><strong>Echo 学到了什么</strong></span><span className="d2-settings-value">{learnedCases.filter((item) => item.status === 'active').length} 条在用 <ChevronRight size={14} /></span></button>
             <button type="button" className="d2-settings-row" onClick={() => openDetails('pref', 'care')}><span><strong>主动关心</strong></span><span className="d2-settings-value">{settings?.carePings.enabled ? ({ gentle: '轻轻', normal: '适中', frequent: '常一些' }[settings.carePings.frequency]) : '关闭'} <ChevronRight size={14} /></span></button>
             <button type="button" className="d2-settings-row" onClick={() => openDetails('sys', 'window')}><span><strong>关闭窗口</strong></span><span className="d2-settings-value">{{ ask: '询问', minimize: '最小化', quit: '退出' }[settings?.ui.closeBehavior ?? 'ask']} <ChevronRight size={14} /></span></button>
           </div>
@@ -1790,6 +1842,48 @@ export function SettingsPage({
                       </div>
                     ))}
                   </div>
+                )}
+              </Section>
+
+              <Section label="E C H O 学 到 了 什 么" className="settings-detail-section target-learned" data-testid="settings-learned">
+                <p className="d2-settings-detail-note">每天夜里 Echo 会复盘当天的对话，把被你纠正过的地方记下来。这里能看到它学到的每一条，随时可以删除。</p>
+                <div className="d2-settings-rows">
+                  <div className="d2-settings-row">
+                    <div className="d2-settings-row-main">
+                      <span><strong>夜间复盘</strong></span>
+                    </div>
+                    <label className="switch"><input type="checkbox" checked={settings?.dream.enabled ?? true} onChange={(event) => { void updateDreamSetting('dream.enabled', event.target.checked) }} /><span /></label>
+                  </div>
+                  <div className="d2-settings-row">
+                    <span><strong>复盘时间</strong></span>
+                    <input
+                      className="input d2-learned-time"
+                      value={dreamTimeDraft || settings?.dream.reviewAt || '23:30'}
+                      onChange={(event) => setDreamTimeDraft(event.target.value)}
+                      onBlur={(event) => { const value = event.target.value.trim(); if (/^\d{1,2}:\d{2}$/.test(value)) void updateDreamSetting('dream.reviewAt', value) }}
+                      placeholder="23:30"
+                    />
+                  </div>
+                </div>
+                {learnedStatus && <div className="status-ind ok"><span className="status-dot" />{learnedStatus}</div>}
+                {learnedCases.length > 0 ? (
+                  <div className="d2-learned-list">
+                    {learnedCases.map((item) => (
+                      <div className={`d2-learned-item ${item.status}`} key={item.id}>
+                        <div className="d2-learned-main">
+                          <span className="d2-learned-kind">{learnedKindLabels[item.kind]}</span>
+                          <div>
+                            <div className="d2-learned-trigger">「{item.triggerText}」</div>
+                            <div className="d2-learned-summary">{summarizeLearnedCase(item)}</div>
+                            <small>{learnedStatusLabels[item.status]}{item.corroborations > 0 ? ` · 被印证 ${item.corroborations} 次` : ''} · {item.sourceDate}</small>
+                          </div>
+                        </div>
+                        <button className="btn danger d2-learned-delete" type="button" onClick={() => { void deleteLearnedCase(item.id) }}>删除</button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyState title="今天还没学到新东西" body="你纠正我的时候，我会记住。夜里我会自己复盘一遍。" />
                 )}
               </Section>
 

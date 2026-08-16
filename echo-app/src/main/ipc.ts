@@ -14,6 +14,7 @@ import { registerTasteIpc } from './ipc/taste'
 import { registerVoiceIpc } from './ipc/voice'
 import { registerYinyiIpc } from './ipc/yinyi'
 import { registerStageContextIpc } from './ipc/stageContext'
+import { registerLearnedCasesIpc } from './ipc/learnedCases'
 
 export { broadcast, maskSettings } from './ipc/shared'
 
@@ -28,6 +29,7 @@ export function registerIpc(): void {
   registerQueueIpc()
   registerSceneIpc()
   registerStageContextIpc()
+  registerLearnedCasesIpc()
   registerRecommendationIpc()
   registerPlaybackIpc()
   registerAppWindowIpc()
