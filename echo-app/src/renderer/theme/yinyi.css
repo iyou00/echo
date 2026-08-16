@@ -1,0 +1,205 @@
+/* ---- D1.3 风信（双栏信纸） ---- */
+
+.d2-yinyi {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 72px clamp(48px, 9vw, 130px) 40px;
+  background: var(--d2-paper);
+}
+
+.d2-yinyi-date {
+  color: var(--d2-red);
+  font: 10px/1.6 var(--d2-sans);
+  letter-spacing: 1.5px;
+}
+
+.d2-yinyi-layout {
+  display: grid;
+  grid-template-columns: minmax(170px, 220px) minmax(0, 1fr);
+  gap: clamp(36px, 6vw, 88px);
+  margin-top: 34px;
+}
+
+.d2-yinyi-index {
+  border-top: 1px solid var(--d2-ink);
+  padding-top: 16px;
+  color: var(--d2-muted);
+  font-size: 10px;
+  line-height: 1.8;
+}
+
+.d2-yinyi-index strong {
+  display: block;
+  margin: 8px 0 14px;
+  color: var(--d2-ink);
+  font: 500 22px/1.4 var(--d2-serif);
+}
+
+.d2-yinyi-index em {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-style: normal;
+}
+
+.d2-yinyi-letter {
+  min-width: 0;
+}
+
+.d2-yinyi-letter h2 {
+  margin: 0 0 24px;
+  color: var(--d2-ink);
+  font: 500 clamp(26px, 2.6vw, 35px)/1.3 var(--d2-serif);
+}
+
+.d2-yinyi-letter p {
+  max-width: 620px;
+  margin: 0 0 15px;
+  color: var(--d2-ink);
+  font: 17px/2 var(--d2-serif);
+}
+
+.d2-yinyi-sign {
+  margin-top: 26px;
+  color: var(--d2-muted);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}
+
+.d2-yinyi .quiet-line {
+  margin: 8px 0 0;
+  color: var(--d2-muted);
+  font: 13px/1.8 var(--d2-serif);
+}
+
+.d2-yinyi-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 18px;
+  margin-top: auto;
+  padding-top: 13px;
+  border-top: 1px solid var(--d2-line);
+}
+
+.d2-yinyi-actions > button {
+  padding: 2px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--d2-forest);
+  font: 10px/1.6 var(--d2-sans);
+  letter-spacing: 0.5px;
+  cursor: pointer;
+}
+
+.d2-yinyi-actions > button:hover:not(:disabled) {
+  border-bottom: 1px solid currentColor;
+}
+
+.d2-yinyi-actions > button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.d2-yinyi-actions > input[type='date'] {
+  width: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.d2-yinyi-actions > span {
+  margin-left: auto;
+  color: var(--d2-muted);
+  font-size: 9px;
+  letter-spacing: 0.5px;
+}
+
+/* ---- 正在写（D1.3 细线稿） ---- */
+.d2-yinyi-writing {
+  padding-top: 6px;
+}
+
+.d2-yinyi-writing-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--d2-red);
+  font: 700 9px/1 var(--d2-sans);
+  letter-spacing: 2px;
+}
+
+.d2-yinyi-writing-kicker::before {
+  content: '';
+  width: 28px;
+  height: 1px;
+  background: currentColor;
+}
+
+.d2-yinyi-writing-lines {
+  display: grid;
+  gap: 18px;
+  margin-top: 26px;
+  max-width: 620px;
+}
+
+.d2-yinyi-writing-lines i {
+  display: block;
+  height: 12px;
+  background: #e3e6df;
+  animation: d2-yinyi-line 1.5s ease-in-out infinite alternate;
+}
+
+.d2-yinyi-writing-lines i.short {
+  width: 42%;
+}
+
+@keyframes d2-yinyi-line {
+  to { opacity: 0.42; }
+}
+
+.d2-yinyi-writing > p {
+  margin: 22px 0 0;
+  color: var(--d2-muted);
+  font: 13px/1.8 var(--d2-serif);
+}
+
+.d2-yinyi-writing-cancel {
+  margin-top: 18px;
+  padding: 2px 0;
+  border: 0;
+  border-bottom: 1px solid var(--d2-line);
+  background: transparent;
+  color: var(--d2-muted);
+  font: 10px/1.6 var(--d2-sans);
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+
+.d2-yinyi-writing-cancel:hover {
+  border-bottom-color: var(--d2-ink);
+  color: var(--d2-ink);
+}
+
+@media (max-width: 1190px) {
+  .d2-yinyi-layout {
+    grid-template-columns: minmax(150px, 190px) minmax(0, 1fr);
+    gap: 32px;
+  }
+
+  .d2-yinyi-letter p {
+    font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .d2-yinyi-writing-lines i {
+    animation: none;
+  }
+}

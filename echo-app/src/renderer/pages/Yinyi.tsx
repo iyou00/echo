@@ -73,24 +73,17 @@ function YinyiWritingState({
   onCancel: (id: string) => void
 }) {
   return (
-    <div className="yinyi-writing" aria-live="polite">
-      <div className="writing-ink" aria-hidden="true">
-        <span />
-        <span />
-        <span />
+    <div className="d2-yinyi-writing" aria-live="polite">
+      <span className="d2-yinyi-writing-kicker">ECHO · 正在写</span>
+      <div className="d2-yinyi-writing-lines" aria-hidden="true">
+        <i />
+        <i style={{ animationDelay: '160ms' }} />
+        <i style={{ animationDelay: '320ms' }} />
+        <i className="short" style={{ animationDelay: '480ms' }} />
       </div>
-      <div className="writing-copy">
-        <div className="writing-title">正在写</div>
-        <div className="writing-subtitle">稍等一下。</div>
-      </div>
-      <div className="writing-paper" aria-hidden="true">
-        <span className="writing-line wide" />
-        <span className="writing-line mid" />
-        <span className="writing-line long" />
-        <span className="writing-line short" />
-      </div>
+      <p>稍等一下。</p>
       {task?.cancellable && (
-        <button className="writing-cancel" type="button" onClick={() => onCancel(task.id)}>
+        <button className="d2-yinyi-writing-cancel" type="button" onClick={() => onCancel(task.id)}>
           停 下
         </button>
       )}
@@ -212,12 +205,17 @@ export function YinyiPage({ echo, isActive, openWithRandom, boundary, arrivalDat
     }
 
     if (entry) {
+      const paragraphs = entry.content.split(/\n+/).map((item) => item.trim()).filter(Boolean)
+      const headline = paragraphs.length > 1 && paragraphs[0].length <= 30 ? paragraphs[0] : null
+      const body = headline ? paragraphs.slice(1) : paragraphs
       return (
-        <div className="entry-body">
-          {entry.content.split(/\n+/).map((paragraph, index) => (
+        <>
+          {headline && <h2>{headline}</h2>}
+          {body.map((paragraph, index) => (
             <p key={index}>{paragraph}</p>
           ))}
-        </div>
+          <div className="d2-yinyi-sign">Echo · 写于 {entry.date}</div>
+        </>
       )
     }
 
@@ -243,71 +241,59 @@ export function YinyiPage({ echo, isActive, openWithRandom, boundary, arrivalDat
     )
   }
 
+  const letterIndex = range.findIndex((item) => item.date === date) + 1
+  const playedTracks = entry?.meta?.tracks ?? []
+  const dismissedCount = entry?.meta?.dismissed_tracks?.length ?? 0
+
   return (
-    <div className="phone-surface yinyi-page">
+    <div className="d2-yinyi">
       {arrivalDate && (
         <YinyiArrival date={arrivalDate} onDone={() => onArrivalSeen?.()} />
       )}
-      <div className="page-toolbar">
-        <div className="tb-status">第 {range.findIndex((item) => item.date === date) + 1 || '-'} 篇 · 已陪伴 {range.length} 天</div>
-        <div className="tb-actions">
-          <span className="date-picker">
-            <button
-              className="tb-btn icon-only"
-              type="button"
-              title="跳转日期"
-              onClick={() => {
-                const input = dateInputRef.current
-                if (!input) return
-                if (typeof input.showPicker === 'function') input.showPicker()
-                else input.focus()
-              }}
-            >
-              ◷
-            </button>
-            <input ref={dateInputRef} type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-          </span>
-          <button className="tb-btn icon-only" onClick={randomEntry} title="随手翻一页">⤴</button>
-          <button className={`tb-btn yinyi-generate-btn${yinyiGenerating ? ' writing' : ''}`} onClick={generate} disabled={loading || yinyiGenerating || date > isoDate()}>
-            {yinyiGenerating ? (
-              <>
-                <span className="tb-pulse-dot" aria-hidden="true" />
-                正在写
-              </>
-            ) : '生 成'}
-          </button>
-          <button className="tb-btn" onClick={() => setDate(isoDate())}>今 日</button>
-        </div>
+
+      <div className="d2-yinyi-date">
+        {spacedDate(date)} · {letterIndex ? `第 ${letterIndex} 封` : '还没写'}
       </div>
 
-      <button className="page-hot left" onClick={() => shift(-1)} title="前一天"><span className="page-arrow">‹</span></button>
-      <button className="page-hot right" onClick={() => shift(1)} title="后一天"><span className="page-arrow">›</span></button>
+      <div className="d2-yinyi-layout">
+        <aside className="d2-yinyi-index">
+          <span>今天留下的声音</span>
+          <strong>{playedTracks.length > 0 ? `${playedTracks.length} 首歌` : '一天的话不多'}</strong>
+          {playedTracks.slice(0, 4).map((track) => (
+            <em key={`${track.artist}-${track.title}`}>{track.artist} · {track.title}</em>
+          ))}
+          {dismissedCount > 0 && <em>{dismissedCount} 首被你跳过</em>}
+          {!entry && !loading && !yinyiGenerating && <em>这天的记录还空着。</em>}
+        </aside>
 
-      <div className="yinyi-scroll">
-        <div className="book">
-          <article className="paper-page">
-            <div className="page-head">
-              <span className="date-stamp">{spacedDate(date)}</span>
-              <span className="date-weather">{new Date(`${date}T12:00:00`).toLocaleDateString('zh-CN', { weekday: 'short' })}</span>
-            </div>
+        <article className="d2-yinyi-letter" aria-label={`${pageLabels.yinyi}正文`}>
+          {renderEntry()}
+        </article>
+      </div>
 
-            <div className="entry">
-              {renderEntry()}
-            </div>
-
-            {entry && entry.meta?.status === 'ok' && (
-                <div className="entry-foot">
-                <div className="sign">— E C H O</div>
-                <div className="today-played">
-                  <span className="today-played-label">T O D A Y &nbsp; P L A Y E D</span>
-                  {(entry.meta?.tracks ?? []).slice(0, 3).map((track) => (
-                    <div key={`${track.artist}-${track.title}`}><span className="t">{track.artist} · {track.title}</span></div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </article>
-        </div>
+      <div className="d2-yinyi-actions">
+        <button type="button" onClick={() => shift(-1)} disabled={loading || yinyiGenerating}>‹ 前一天</button>
+        <button type="button" onClick={() => shift(1)} disabled={loading || yinyiGenerating || date >= isoDate()}>后一天 ›</button>
+        <button type="button" onClick={() => { void randomEntry() }} disabled={loading || yinyiGenerating}>随手翻一页</button>
+        <button
+          type="button"
+          onClick={() => {
+            const input = dateInputRef.current
+            if (!input) return
+            if (typeof input.showPicker === 'function') input.showPicker()
+            else input.focus()
+          }}
+        >
+          选日期
+        </button>
+        <button type="button" onClick={generate} disabled={loading || yinyiGenerating || date > isoDate()}>
+          {yinyiGenerating ? '正在写…' : '重新生成'}
+        </button>
+        {date !== isoDate() && (
+          <button type="button" onClick={() => setDate(isoDate())}>回到今天</button>
+        )}
+        <input ref={dateInputRef} type="date" value={date} onChange={(event) => setDate(event.target.value)} aria-label="选择日期" />
+        <span>{letterIndex ? `第 ${letterIndex} 篇 · 已陪伴 ${range.length} 天 · ` : ''}自动保存在本地</span>
       </div>
     </div>
   )

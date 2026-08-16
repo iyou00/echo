@@ -2041,3 +2041,9 @@
   .d2-listening-panel h2 .d2-narration-line,
   .d2-listening-panel h2 .d2-narration-after { animation: none; opacity: 1; transform: none; }
 }
+
+.d2-listen-volume {
+  margin-left: auto;
+}
+
+.d2-listening-status strong { margin-left: 18px; }

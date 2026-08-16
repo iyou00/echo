@@ -4,20 +4,12 @@ import sys
 CSS_PATH = r"D:/AI文件/echozcode/echo-app/src/index.css"
 
 RETIRED = {
-    "avatar-button", "clear-button", "connection-result", "danger-button",
-    "divider", "empty-state", "empty-dot", "empty-sign",
-    "hdr-dot", "hdr-meta", "hdr-name", "hdr-name-block", "hdr-row", "hdr-status",
-    "header-copy", "mini-btn", "mini-ctrl",
-    "netease-actions", "netease-playlists",
-    "np-list-meta", "np-list-name", "np-time", "pb-title", "prototype-pill",
-    "q-actions", "q-btn", "q-mark", "q-text", "q-time",
-    "question-item", "setup-banner",
-    "shell-avatar-button", "shell-hdr", "shell-hdr-detail", "shell-return",
-    "shell-tab", "shell-tabs", "shell-title", "small-button", "spinning",
-    "stash-card", "stash-desc", "stash-foot", "stash-grid", "stash-intro",
-    "stash-name", "stash-play", "stash-section", "stash-tag",
-    "tab-btn", "tab-unread", "tabs-bar", "top-tabs",
-    "voice-label", "wc-icon", "wc-max", "wc-min", "wc-x", "window-toast",
+    "yinyi-page", "yinyi-scroll", "book", "paper-page", "page-head",
+    "date-stamp", "date-weather", "entry", "entry-body", "entry-foot",
+    "sign", "today-played", "t", "page-hot", "page-arrow",
+    "writing-ink", "writing-copy", "writing-paper", "writing-line",
+    "writing-title", "writing-subtitle", "writing-cancel", "yinyi-writing",
+    "tb-pulse-dot", "yinyi-generate-btn", "date-picker",
 }
 
 RETIRED_KEYFRAMES: set[str] = set()
