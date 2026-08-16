@@ -10,6 +10,7 @@ import { SettingsPage } from './renderer/pages/Settings'
 import { VoicePage } from './renderer/pages/Voice'
 import { YinyiPage } from './renderer/pages/Yinyi'
 import { FirstRunWelcome } from './renderer/components/FirstRunWelcome'
+import { DailyReconnect } from './renderer/components/DailyReconnect'
 import { Player } from './renderer/components/Player'
 import { EchoShell } from './renderer/shell/EchoShell'
 import { ContextDrawer } from './renderer/shell/ContextDrawer'
@@ -226,6 +227,10 @@ function App() {
       ])
     }
 
+    echo.settings.get().then((earlySettings) => {
+      if (alive) dispatch({ settings: earlySettings })
+    }).catch(() => undefined)
+
     async function boot() {
       try {
         const [nextSettings, nextTaste, nextQueue, nextPlayback, nextYinyi, nextScenes, nextScene, nextImportTask, nextBoundaries] = await Promise.all([
@@ -405,16 +410,26 @@ function App() {
     })
   }, [dispatch, echo])
 
+  const yinyiRitualShownRef = useRef('')
+  const [yinyiArrivalDate, setYinyiArrivalDate] = useState<string | null>(null)
+  const yinyiUnread = Boolean(latestYinyiDate) && latestYinyiDate !== (settings?.meta?.lastViewedYinyiAt ?? '')
+
+  useEffect(() => {
+    if (page !== 'yinyi' || !yinyiUnread || !latestYinyiDate) return
+    if (yinyiRitualShownRef.current === latestYinyiDate) return
+    yinyiRitualShownRef.current = latestYinyiDate
+    setYinyiArrivalDate(latestYinyiDate)
+  }, [page, yinyiUnread, latestYinyiDate])
+
   useEffect(() => {
     if (page !== 'yinyi') return
+    if (yinyiArrivalDate) return
     if (!latestYinyiDate) return
     if (settings?.meta?.lastViewedYinyiAt === latestYinyiDate) return
     echo.settings.update('meta.lastViewedYinyiAt', latestYinyiDate)
       .then(setSettings)
       .catch((error) => logAppAsyncError('mark yinyi viewed', error))
-  }, [page, latestYinyiDate, settings?.meta?.lastViewedYinyiAt, echo, setSettings])
-
-  const yinyiUnread = Boolean(latestYinyiDate) && latestYinyiDate !== (settings?.meta?.lastViewedYinyiAt ?? '')
+  }, [page, yinyiArrivalDate, latestYinyiDate, settings?.meta?.lastViewedYinyiAt, echo, setSettings])
 
   useEffect(() => {
     if (!bootReady || !settings) return
@@ -644,6 +659,7 @@ function App() {
   })
   const drawerOpen = page === 'review' || page === 'queue' || page === 'profile' || page === 'settings' || page === 'about'
   const [settingsDrawerTitle, setSettingsDrawerTitle] = useState('设置')
+  const [dailyReconnectDone, setDailyReconnectDone] = useState(false)
   const offlineBoundary = boundaries.find((item) => item.code === 'offline')
   const modelInvalidBoundary = boundaries.find((item) => item.code === 'model_invalid')
   const drawerTitle = page === 'review'
@@ -660,6 +676,14 @@ function App() {
   const closeDrawer = useCallback(() => setPage('chat'), [setPage])
 
   if (!bootReady) {
+    const returningUser = Boolean(settings?.meta?.firstRunWelcomeCompletedAt)
+    if (returningUser && !dailyReconnectDone) {
+      return (
+        <div className="echo-shell boot-shell">
+          <DailyReconnect onComplete={() => setDailyReconnectDone(true)} />
+        </div>
+      )
+    }
     return (
       <div className="echo-shell boot-shell">
         <WindowField mode="quiet" />
@@ -721,6 +745,8 @@ function App() {
           </div>
           <div className="shell-page" style={{ display: page === 'yinyi' ? 'flex' : 'none' }}>
             <YinyiPage
+              arrivalDate={yinyiArrivalDate}
+              onArrivalSeen={() => setYinyiArrivalDate(null)}
               {...commonProps}
               echo={echo}
               isActive={page === 'yinyi'}

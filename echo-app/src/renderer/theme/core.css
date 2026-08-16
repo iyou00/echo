@@ -1930,3 +1930,88 @@
   font-style: normal;
   color: var(--d2-line);
 }
+
+/* ---- D1.3 每日重新接上 ---- */
+.daily-reconnect-layer {
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  background: var(--d2-paper);
+  transition: opacity 360ms ease;
+}
+
+.daily-reconnect-layer.leaving {
+  opacity: 0;
+}
+
+.daily-reconnect-field {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.daily-reconnect-mark {
+  position: relative;
+  z-index: 2;
+  color: var(--d2-ink);
+  font-family: var(--d2-serif);
+  font-size: 18px;
+  letter-spacing: 6px;
+}
+
+.daily-reconnect-tip {
+  position: absolute;
+  z-index: 2;
+  bottom: 18%;
+  color: var(--d2-muted);
+  font: 9px/1.4 var(--d2-sans);
+  letter-spacing: 2px;
+}
+
+/* ---- D1.3 风信到达仪式 ---- */
+.yinyi-arrival {
+  position: absolute;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--d2-night);
+  transition: opacity 320ms ease;
+}
+
+.yinyi-arrival.leaving {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.yinyi-arrival-field {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.yinyi-arrival-copy {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  gap: 14px;
+  justify-items: center;
+}
+
+.yinyi-arrival-copy span {
+  color: var(--d2-red);
+  font: 700 9px/1 var(--d2-sans);
+  letter-spacing: 2px;
+}
+
+.yinyi-arrival-copy strong {
+  color: #f5f5ec;
+  font: 500 26px/1.4 var(--d2-serif);
+  letter-spacing: 4px;
+}

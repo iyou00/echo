@@ -6,12 +6,16 @@ import { latestRunningRuntimeTask, useRuntimeTasks } from '../hooks/useRuntimeTa
 import { pageLabels } from '../labels'
 import { friendlyOperationError } from '../../shared/runtimeRecovery'
 import { BoundaryState } from '../components/BoundaryState'
+import { MeetingCanvas } from '../components/MeetingCanvas'
+import { yinyiArrivalDuration } from './yinyiArrival'
 
 interface YinyiPageProps extends AppPageProps {
   echo: EchoApi
   isActive: boolean
   openWithRandom: boolean
   boundary?: UiBoundarySnapshot
+  arrivalDate?: string | null
+  onArrivalSeen?: () => void
 }
 
 function isoDate(offset = 0, base = new Date()) {
@@ -25,6 +29,34 @@ function isoDate(offset = 0, base = new Date()) {
 
 function spacedDate(date: string) {
   return date.replace(/-/g, ' . ').split('').join(' ')
+}
+
+function YinyiArrival({ date, onDone }: { date: string; onDone: () => void }) {
+  const [leaving, setLeaving] = useState(false)
+  const [reducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  const durationMs = yinyiArrivalDuration(reducedMotion)
+  const doneRef = useRef(false)
+
+  const finish = useCallback(() => {
+    if (doneRef.current) return
+    doneRef.current = true
+    setLeaving(true)
+    window.setTimeout(onDone, 320)
+  }, [onDone])
+
+  useEffect(() => {
+    if (durationMs === 0) finish()
+  }, [durationMs, finish])
+
+  return (
+    <div className={leaving ? 'yinyi-arrival leaving' : 'yinyi-arrival'} role="status" aria-label={`新的${pageLabels.yinyi}到了`}>
+      <MeetingCanvas durationMs={Math.max(1, durationMs)} onComplete={durationMs === 0 ? undefined : finish} className="yinyi-arrival-field" />
+      <div className="yinyi-arrival-copy">
+        <span>ECHO · 新的{pageLabels.yinyi}</span>
+        <strong>{spacedDate(date)}</strong>
+      </div>
+    </div>
+  )
 }
 
 function YinyiWritingState({
@@ -60,7 +92,7 @@ function YinyiWritingState({
   )
 }
 
-export function YinyiPage({ echo, isActive, openWithRandom, boundary }: YinyiPageProps) {
+export function YinyiPage({ echo, isActive, openWithRandom, boundary, arrivalDate, onArrivalSeen }: YinyiPageProps) {
   const [date, setDate] = useState(isoDate())
   const [entry, setEntry] = useState<YinyiEntry | null>(null)
   const [range, setRange] = useState<YinyiEntry[]>([])
@@ -125,9 +157,14 @@ export function YinyiPage({ echo, isActive, openWithRandom, boundary }: YinyiPag
   useEffect(() => {
     const becameActive = isActive && !wasActiveRef.current
     wasActiveRef.current = isActive
-    if (!becameActive || !openWithRandom) return
+    if (!becameActive) return
+    if (arrivalDate) {
+      setDate(arrivalDate)
+      return
+    }
+    if (!openWithRandom) return
     randomEntry().catch(() => undefined)
-  }, [isActive, openWithRandom, randomEntry])
+  }, [isActive, openWithRandom, randomEntry, arrivalDate])
 
   function shift(days: number) {
     setDate(isoDate(days, new Date(date)))
@@ -203,6 +240,9 @@ export function YinyiPage({ echo, isActive, openWithRandom, boundary }: YinyiPag
 
   return (
     <div className="phone-surface yinyi-page">
+      {arrivalDate && (
+        <YinyiArrival date={arrivalDate} onDone={() => onArrivalSeen?.()} />
+      )}
       <div className="page-toolbar">
         <div className="tb-status">第 {range.findIndex((item) => item.date === date) + 1 || '-'} 篇 · 已陪伴 {range.length} 天</div>
         <div className="tb-actions">

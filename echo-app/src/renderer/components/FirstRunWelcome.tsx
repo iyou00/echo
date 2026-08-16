@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Volume2, VolumeX } from 'lucide-react'
 import { welcomeExitDelay } from './firstRunWelcomePolicy'
+import { MeetingCanvas } from './MeetingCanvas'
 
 interface FirstRunWelcomeProps {
   onContinue: () => Promise<void> | void
@@ -27,108 +28,6 @@ const PHRASES_REDUCED = [
   { at: 650, text: '有些时刻，不必急着说清楚。' },
   { at: 1250, text: '你留下心情。' },
 ]
-
-const WELCOME_GREEN = '#5f9b72'
-const WELCOME_RED = '#e45036'
-
-type Cubic = [[number, number], [number, number], [number, number], [number, number]]
-
-const GREEN_CUBIC: Cubic = [[-0.02, 0.68], [0.18, 0.63], [0.39, 0.72], [0.55, 0.51]]
-const RED_CUBIC: Cubic = [[1.02, 0.33], [0.82, 0.36], [0.68, 0.42], [0.55, 0.51]]
-
-function cubicPoint(cubic: Cubic, t: number): [number, number] {
-  const [p0, p1, p2, p3] = cubic
-  const u = 1 - t
-  const a = u * u * u
-  const b = 3 * u * u * t
-  const c = 3 * u * t * t
-  const d = t * t * t
-  return [
-    a * p0[0] + b * p1[0] + c * p2[0] + d * p3[0],
-    a * p0[1] + b * p1[1] + c * p2[1] + d * p3[1],
-  ]
-}
-
-function drawMeetingCurve(
-  ctx: CanvasRenderingContext2D,
-  w: number,
-  h: number,
-  cubic: Cubic,
-  progress: number,
-  color: string,
-) {
-  const steps = 72
-  const last = Math.max(1, Math.round(steps * progress))
-  ctx.strokeStyle = color
-  ctx.lineWidth = 2
-  ctx.shadowColor = color
-  ctx.shadowBlur = 8
-  ctx.beginPath()
-  for (let index = 0; index <= last; index += 1) {
-    const [nx, ny] = cubicPoint(cubic, (index / steps) * progress)
-    const x = Math.min(w + 2, Math.max(-2, nx * w))
-    const y = ny * h
-    if (index === 0) ctx.moveTo(x, y)
-    else ctx.lineTo(x, y)
-  }
-  ctx.stroke()
-  ctx.shadowBlur = 0
-  const [hx, hy] = cubicPoint(cubic, progress)
-  ctx.fillStyle = color
-  ctx.fillRect(Math.min(w + 2, Math.max(-2, hx * w)) - 2, hy * h - 2, 4, 4)
-}
-
-function WelcomeField({ animate }: { animate: boolean }) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null)
-
-  useEffect(() => {
-    if (!animate) return
-    if (!canvasRef.current) return
-    const canvasElement = canvasRef.current as HTMLCanvasElement
-    const candidate = canvasElement.getContext('2d')
-    if (!candidate) return
-    const ctx = candidate as CanvasRenderingContext2D
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    let width = 0
-    let height = 0
-    let frame = 0
-    const startedAt = performance.now()
-
-    function resize() {
-      const bounds = canvasElement.getBoundingClientRect()
-      const scale = Math.min(window.devicePixelRatio || 1, 2)
-      width = Math.max(1, bounds.width)
-      height = Math.max(1, bounds.height)
-      canvasElement.width = Math.round(width * scale)
-      canvasElement.height = Math.round(height * scale)
-      ctx.setTransform(scale, 0, 0, scale, 0, 0)
-    }
-
-    function draw(now: number) {
-      if (width === 0 || height === 0) resize()
-      const raw = reducedMotion ? 1 : Math.min(1, (now - startedAt) / MEET_DURATION_MS)
-      const eased = 1 - (1 - raw) ** 3
-      ctx.clearRect(0, 0, width, height)
-      drawMeetingCurve(ctx, width, height, GREEN_CUBIC, eased, WELCOME_GREEN)
-      drawMeetingCurve(ctx, width, height, RED_CUBIC, eased, WELCOME_RED)
-      if (!reducedMotion && raw < 1) frame = window.requestAnimationFrame(draw)
-    }
-
-    const observer = new ResizeObserver(() => {
-      resize()
-      draw(performance.now())
-    })
-    observer.observe(canvasElement)
-    resize()
-    draw(startedAt)
-    return () => {
-      observer.disconnect()
-      window.cancelAnimationFrame(frame)
-    }
-  }, [animate])
-
-  return <canvas className="first-run-welcome-field" ref={canvasRef} aria-hidden="true" />
-}
 
 function fadeAudio(audio: HTMLAudioElement, from: number, to: number, duration: number, after?: () => void) {
   const startedAt = performance.now()
@@ -395,7 +294,7 @@ export function FirstRunWelcome({ onContinue }: FirstRunWelcomeProps) {
       }}
     >
       <audio ref={audioRef} src={WELCOME_AUDIO_SRC} preload="auto" />
-      {started && <WelcomeField animate={started} />}
+      {started && <MeetingCanvas durationMs={MEET_DURATION_MS} className="first-run-welcome-field" />}
       <button data-testid="first-run-skip" className="first-run-skip" type="button" onClick={continueToOnboarding} disabled={leaving}>跳过前奏</button>
       {started && (
         <button className="first-run-mute" type="button" onClick={toggleMute} disabled={leaving} aria-label={muted ? '打开声音' : '静音'}>
