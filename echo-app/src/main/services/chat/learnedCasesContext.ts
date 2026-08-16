@@ -46,7 +46,8 @@ export function refreshLearnedCasesSnapshot(): void {
   try {
     snapshot = { at: Date.now(), briefs: buildBriefs(listLearnedCases(['active'])) }
   } catch {
-    snapshot = { at: Date.now(), briefs: [] }
+    // DB 瞬时不可用不应清空既有经验——保住旧快照，靠 TTL 过期后自然重试。
+    snapshot = { at: Date.now(), briefs: snapshot?.briefs ?? [] }
   }
 }
 
@@ -67,8 +68,10 @@ export function getLearnedCorrectionsBriefs(): LearnedCorrectionBrief[] {
 export function learnedCorrectionsPromptValue(): string | null {
   const briefs = getLearnedCorrectionsBriefs()
   if (briefs.length === 0) return null
+  // trigger 来自用户原话，可能带换行/制表符——压平防止破坏行结构或伪造 prompt 格式。
+  const flatten = (value: string) => value.replace(/[\r\n\t]+/g, ' ').trim()
   return briefs
-    .map((brief) => `- 说法「${brief.trigger}」→ ${brief.summary}`)
+    .map((brief) => `- 说法「${flatten(brief.trigger)}」→ ${flatten(brief.summary)}`)
     .join('\n')
 }
 

@@ -41,7 +41,8 @@ export function evidenceIsGrounded(quotes: string[], messages: Array<Pick<ChatMe
   const normalizedContents = messages.map((message) => normalizeText(message.content))
   return quotes.every((quote) => {
     const normalizedQuote = normalizeText(quote)
-    if (!normalizedQuote) return false
+    // 短引用（如单字"不"）几乎能在任何对话里"找到"，等于没有证据；4 字起才有区分度。
+    if (normalizedQuote.length < 4) return false
     return normalizedContents.some((content) => content.includes(normalizedQuote))
   })
 }
@@ -206,6 +207,10 @@ export async function runDreamReview(date: string, options: { signal?: AbortSign
   }
 
   const raw = parseFirstJsonObject(content)
+  if (!raw) {
+    // 输出不可解析（截断/纯文本）≠ "今天没有可学的"：记 failed 让次日补发重试，而不是静默漏学。
+    return { status: 'failed', inserted: 0, corroborated: 0, contradicted: 0, message: '复盘输出无法解析。' }
+  }
   const drafts = parseDreamEvents(raw).filter((draft) => evidenceIsGrounded(draft.evidenceQuotes, messages))
   const existing = listLearnedCases(['pending', 'active'])
   let inserted = 0

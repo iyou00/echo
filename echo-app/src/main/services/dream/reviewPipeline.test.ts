@@ -78,7 +78,8 @@ describe('dream review pipeline', () => {
     expect(mocks.insertLearnedCase).not.toHaveBeenCalled()
 
     mocks.completeChat.mockResolvedValue('完全不是 JSON')
-    expect((await runDreamReview('2026-08-16')).status).toBe('completed')
+    // 不可解析输出必须记 failed（可被次日补发重试），而不是误判为"今天没有可学的"。
+    expect((await runDreamReview('2026-08-16')).status).toBe('failed')
     expect(mocks.insertLearnedCase).not.toHaveBeenCalled()
   })
 

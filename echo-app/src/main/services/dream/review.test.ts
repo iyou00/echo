@@ -88,6 +88,12 @@ describe('dream evidence grounding', () => {
     expect(evidenceIsGrounded(['用户纠正了歌手'], messages)).toBe(false)
   })
 
+  it('rejects quotes too short to be distinguishing evidence', () => {
+    // 单字/双字引用几乎能在任何对话里找到，等于没有证据。
+    expect(evidenceIsGrounded(['不是'], messages)).toBe(false)
+    expect(evidenceIsGrounded(['晴天'], messages)).toBe(false)
+  })
+
   it('rejects empty quote lists', () => {
     expect(evidenceIsGrounded([], messages)).toBe(false)
   })
