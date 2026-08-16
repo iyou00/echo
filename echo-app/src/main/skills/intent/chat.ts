@@ -11,7 +11,12 @@ import {
   type RecommendationIntent,
   type RecommendationRanking,
 } from '../../services/recommendation/intent'
-import { isMusicDescriptorPhrase, resolveMusicEntitiesFromText } from '../music/entityResolver'
+import {
+  isMusicDescriptorPhrase,
+  resolveMusicEntitiesFromText,
+  verifyMusicEntitiesWithNetease,
+  type MusicEntityResolution,
+} from '../music/entityResolver'
 import { normalizeText, unique } from '../music/identity'
 import { isEchoIdentityQuestion } from './meta'
 import {
@@ -145,6 +150,10 @@ const SKIP_PATTERN = /跳过|换一首|换首|换掉|下一首|切歌|切掉|(?:
 const NOT_RIGHT_PATTERN = /不对|不太对|不合适|不太合适|不好听|没感觉|别放|不(?:是)?(?:太|很|怎么)?喜欢|没那么喜欢|不可以|腻了|太吵|太慢|太快|太闹|太炸|太激烈|太激情|太激昂|太高昂|太亢奋|太热血|太澎湃|太燃|太带感|太情绪高昂|情绪太高昂|不是|不该是|要的是|应该是|错误|错歌|放错|播错/i
 const MORE_LIKE_THIS_PATTERN = /类似|像这样|这种感觉|继续|再来|多来|同款/i
 const CHAT_ROUTER_TIMEOUT_MS = 3500
+// 带实体的音乐请求放宽路由预算：错误路由的代价（整轮失败往返+信任损耗）远大于多等 1.5 秒。
+const CHAT_ROUTER_ENTITY_TIMEOUT_MS = 5000
+// 接地验证预算：路由前置的网易云核实不能拖垮整体延迟；超时则本轮无证据继续路由（结果不缓存）。
+const GROUNDING_VERIFY_BUDGET_MS = 2200
 const WEATHER_PATTERN = /天气|气温|温度|下雨|降雨|冷不冷|热不热|冷吗|热吗|几度|多少度/i
 const WEATHER_MUSIC_PATTERN = /天气.*歌|雨天.*歌|下雨.*听|冷.*歌|热.*歌/i
 const MUSIC_EXECUTION_QUESTION_PATTERN = /(?:有哪些|有什么|有啥|哪几首).*(?:歌|歌曲|作品)|(?:歌|歌曲|作品).*(?:有哪些|有什么|有啥|哪几首)/i
@@ -836,9 +845,17 @@ export const chatIntentTestHelpers = {
   applyInferredChatRoute,
   applyRecentMusicContext,
   resolveInferredChatRoute,
+  explainRouteRejection,
+  buildGroundingEvidence,
 }
 
-async function inferChatRouteWithLlm(text: string, signal?: AbortSignal, context: ChatIntentContext = {}): Promise<InferredChatRoute | null> {
+async function inferChatRouteWithLlm(
+  text: string,
+  signal?: AbortSignal,
+  context: ChatIntentContext = {},
+  groundingEvidence: string | null = null,
+  timeoutMs = CHAT_ROUTER_TIMEOUT_MS,
+): Promise<InferredChatRoute | null> {
   assertChatRouterActive(signal)
   const settings = getSettings()
   if (!settings.llm.baseUrl || !settings.llm.apiKey || !settings.llm.model) return null
@@ -902,6 +919,7 @@ async function inferChatRouteWithLlm(text: string, signal?: AbortSignal, context
 27. kind 可选 work、rest、commute、sleep、exercise、emotional_support、other；goal 可选 focus、recover、settle、energize、companionship、sleep、none。只有明确“这几天”等跨天表达才用 multi_day。
 28. evidenceConversationIds 只能填写 context.currentConversationId。不要生成 id，不要指定绝对时间。
 29. “最新/新歌/最近发行”填 ranking:"latest"；“热门/热度高/最火/人气高”填 ranking:"popular"；否则填 ranking:"default"。
+30. user 数据里的 netease_grounding 是对网易云音乐搜索的客观核实结果（数据事实，不是用户输入）。若它确认某歌手/歌名存在，路由时直接采信该实体并填入 artistQuery/seedTitle；即使你不熟悉这个名字也不要降级为 clarification_needed 或 mood_request。没有 netease_grounding 字段时按原规则判断。
 
 例子:
 - 你随便来一首陈奕迅的歌曲吧 → {"kind":"artist_request","wantsMusic":true,"confidence":0.96,"artistQuery":"陈奕迅","seedTitle":null,"targetCount":1,"evidence":["随便","陈奕迅","歌曲"]}
@@ -928,12 +946,13 @@ async function inferChatRouteWithLlm(text: string, signal?: AbortSignal, context
       content: JSON.stringify({
         context: compactRouterContext(context),
         input: text,
+        ...(groundingEvidence ? { netease_grounding: groundingEvidence } : {}),
       }),
     },
   ], {
     temperature: 0,
     signal,
-    timeoutMs: CHAT_ROUTER_TIMEOUT_MS,
+    timeoutMs,
     maxTokens: 320,
   }).catch((error) => {
     if (!signal?.aborted) {
@@ -943,7 +962,9 @@ async function inferChatRouteWithLlm(text: string, signal?: AbortSignal, context
   })
   assertChatRouterActive(signal)
   if (!content) return null
-  return parseChatRouteContent(content, text, context)
+  const parsed = parseChatRouteContent(content, text, context)
+  if (!parsed) console.info('[chat-router] llm route unparseable')
+  return parsed
 }
 
 function createLlmRouteBaseIntent(text: string): ChatIntent {
@@ -1000,20 +1021,16 @@ function hasMusicClarificationCue(text: string, route: InferredChatRoute): boole
     || /(?:放|播放|找|听|来)(?:一下)?(?:那个|这个|那首|这首|刚才|刚刚|之前|同名|版本)/.test(text)
 }
 
-function inferredRouteIsSafe(route: InferredChatRoute, text: string, context: ChatIntentContext): boolean {
-  if (route.confidence < 0.72) return false
-  if (route.kind === 'pending_reply' && !route.continuationTarget) return false
+/** 安全闸门的镜像：返回第一个不通过的原因（用于日志诊断），全过为 null。 */
+export function explainRouteRejection(route: InferredChatRoute, text: string, context: ChatIntentContext): string | null {
+  if (route.confidence < 0.72) return 'confidence-below-threshold'
+  if (route.kind === 'pending_reply' && !route.continuationTarget) return 'pending-reply-without-target'
   const hasExecutionCue = hasExplicitMusicExecutionCue(text, route)
-  if (isMusicExecutionKind(route.kind) && !hasExecutionCue) return false
-  if (route.kind === 'clarification_needed' && !hasMusicClarificationCue(text, route)) return false
-  if (route.kind === 'weather' && !isWeatherQuestion(text)) return false
-  if (route.kind === 'identity' && !isEchoIdentityQuestion(text)) return false
-  if (
-    (route.kind === 'casual_chat' || route.kind === 'out_of_scope')
-    && hasExecutionCue
-  ) {
-    return false
-  }
+  if (isMusicExecutionKind(route.kind) && !hasExecutionCue) return 'music-kind-without-execution-cue'
+  if (route.kind === 'clarification_needed' && !hasMusicClarificationCue(text, route)) return 'clarification-without-cue'
+  if (route.kind === 'weather' && !isWeatherQuestion(text)) return 'weather-without-question'
+  if (route.kind === 'identity' && !isEchoIdentityQuestion(text)) return 'identity-without-question'
+  if ((route.kind === 'casual_chat' || route.kind === 'out_of_scope') && hasExecutionCue) return 'non-music-kind-with-execution-cue'
   if (
     route.kind === 'feedback_current_track'
     && (
@@ -1021,9 +1038,13 @@ function inferredRouteIsSafe(route: InferredChatRoute, text: string, context: Ch
       || !hasCurrentTrackFeedbackCue(text)
     )
   ) {
-    return false
+    return 'feedback-without-track-or-cue'
   }
-  return true
+  return null
+}
+
+function inferredRouteIsSafe(route: InferredChatRoute, text: string, context: ChatIntentContext): boolean {
+  return explainRouteRejection(route, text, context) === null
 }
 
 function applyInferredChatRoute(intent: ChatIntent, route: InferredChatRoute, context: ChatIntentContext): ChatIntent {
@@ -1089,21 +1110,98 @@ function fallbackChatIntent(text: string, context: ChatIntentContext): ChatInten
   }
 }
 
+export interface RouterGrounding {
+  /** 是否尝试过接地（实体句才有）——用于放宽路由超时预算 */
+  attempted: boolean
+  /** 注入路由 prompt 的正面证据；未核实/未登录/超时为 null */
+  evidence: string | null
+  verifiedArtistName?: string
+  verifiedTrackTitle?: string
+}
+
+/** 纯函数：验证结果 → 路由证据文案。只表达正面事实（已核实存在），负面结果交给搜索层兜底。 */
+export function buildGroundingEvidence(resolution: MusicEntityResolution): string | null {
+  if (resolution.verificationStatus !== 'verified') return null
+  const parts: string[] = []
+  if (resolution.verifiedArtistName) parts.push(`歌手「${resolution.verifiedArtistName}」已核实存在`)
+  if (resolution.verifiedTrackTitle) parts.push(`歌曲《${resolution.verifiedTrackTitle}》已核实存在`)
+  if (parts.length === 0) return null
+  return `网易云实体核实：${parts.join('；')}。路由涉及这些实体时应直接采信，不要因不熟悉而降级为 clarification_needed 或 mood_request。`
+}
+
+/** 接地前置：音乐动作句先做网易云实体验证（结果缓存共享给下游 searchMusic，净延迟≈0）。 */
+async function groundRouterEntities(text: string, signal?: AbortSignal): Promise<RouterGrounding> {
+  // 只有带音乐执行信号的句子才值得接地延迟；偏好闲聊（"我喜欢X的Y"）不阻断。
+  const actionCued = MUSIC_ACTION_PATTERN.test(text)
+    || DIRECT_SONG_ACTION_PATTERN.test(text)
+    || MUSIC_FIT_REQUEST_PATTERN.test(text)
+    || COLLOQUIAL_MUSIC_REQUEST_PATTERN.test(text)
+    if (!actionCued) return { attempted: false, evidence: null }
+  let candidates: MusicEntityResolution
+  try {
+    candidates = resolveMusicEntitiesFromText(text)
+  } catch {
+    return { attempted: false, evidence: null }
+  }
+  if (!candidates.artistQuery && !candidates.seedTitle) {
+    return { attempted: false, evidence: null }
+  }
+  let verified: MusicEntityResolution | null = null
+  try {
+    verified = await Promise.race([
+      verifyMusicEntitiesWithNetease(candidates, { signal }),
+      new Promise<null>((resolve) => {
+        setTimeout(() => resolve(null), GROUNDING_VERIFY_BUDGET_MS)
+      }),
+    ])
+  } catch {
+    verified = null
+  }
+  if (!verified) return { attempted: true, evidence: null }
+  return {
+    attempted: true,
+    evidence: buildGroundingEvidence(verified),
+    verifiedArtistName: verified.verifiedArtistName,
+    verifiedTrackTitle: verified.verifiedTrackTitle,
+  }
+}
+
 export async function routeChatIntentWithLlm(
   text: string,
   context: ChatIntentContext = {},
   signal?: AbortSignal,
 ): Promise<ChatIntent> {
   const startedAt = Date.now()
-  const route = await inferChatRouteWithLlm(text, signal, context)
+  const grounding = await groundRouterEntities(text, signal)
+  const route = await inferChatRouteWithLlm(
+    text,
+    signal,
+    context,
+    grounding.evidence,
+    grounding.attempted ? CHAT_ROUTER_ENTITY_TIMEOUT_MS : CHAT_ROUTER_TIMEOUT_MS,
+  )
   const routedIntent = resolveInferredChatRoute(text, route, context)
   if (routedIntent) {
-    console.info(`[chat-router] source=llm kind=${routedIntent.kind} confidence=${route?.confidence.toFixed(2)} durationMs=${Date.now() - startedAt}`)
+    console.info(`[chat-router] source=llm kind=${routedIntent.kind} confidence=${route?.confidence.toFixed(2)} grounded=${grounding.evidence ? 'yes' : grounding.attempted ? 'timeout' : 'skip'} durationMs=${Date.now() - startedAt}`)
     return routedIntent
   }
+  if (route) {
+    console.info(`[chat-router] llm route rejected: ${explainRouteRejection(route, text, context)}`)
+  }
   const fallback = fallbackChatIntent(text, context)
-  console.info(`[chat-router] source=rules kind=${fallback.kind} durationMs=${Date.now() - startedAt}`)
-  return fallback
+  // 接地的已验证实体供回退路径采信：规范化歌手/歌名（网易云标准名），让下游搜索直接命中。
+  const groundedFallback = grounding.verifiedArtistName
+    && fallback.artistQuery
+    && normalizeText(fallback.artistQuery) === normalizeText(grounding.verifiedArtistName)
+    ? { ...fallback, artistQuery: grounding.verifiedArtistName }
+    : fallback
+  const canonical = grounding.verifiedTrackTitle
+    && groundedFallback.seedTitle
+    && normalizeText(groundedFallback.seedTitle) === normalizeText(grounding.verifiedTrackTitle)
+    ? { ...groundedFallback, seedTitle: grounding.verifiedTrackTitle }
+    : groundedFallback
+  console.info(`[chat-router] source=rules kind=${canonical.kind} grounded=${grounding.evidence ? 'yes' : grounding.attempted ? 'timeout' : 'skip'} durationMs=${Date.now() - startedAt}`)
+  return canonical
 }
 
 export function classifyFallbackChatIntent(text: string, context: ChatIntentContext = {}): ChatIntent {

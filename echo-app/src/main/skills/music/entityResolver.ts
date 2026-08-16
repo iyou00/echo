@@ -461,6 +461,15 @@ export interface MusicEntityVerificationOptions {
   timeoutMs?: number
 }
 
+// 实体验证缓存：路由前的接地验证与 searchMusic 的下游验证共享结果，
+// 同一句话在同一会话内只打一次网易云（auth_required 不缓存——登录态会变）。
+const VERIFICATION_CACHE_TTL_MS = 90_000
+const verificationCache = new Map<string, { at: number; resolution: MusicEntityResolution }>()
+
+export function clearEntityVerificationCache(): void {
+  verificationCache.clear()
+}
+
 export async function verifyMusicEntitiesWithNetease(
   resolution: MusicEntityResolution,
   options: MusicEntityVerificationOptions = {},
@@ -468,6 +477,12 @@ export async function verifyMusicEntitiesWithNetease(
   assertEntityResolverActive(options.signal)
   if (!resolution.artistQuery && !resolution.seedTitle) {
     return { ...resolution, verificationStatus: 'not_needed' }
+  }
+
+  const cacheKey = `${normalizeText(resolution.artistQuery ?? '')}|${normalizeText(resolution.seedTitle ?? '')}`
+  const cached = verificationCache.get(cacheKey)
+  if (cached && Date.now() - cached.at < VERIFICATION_CACHE_TTL_MS) {
+    return cached.resolution
   }
 
   const cookie = readNeteaseCookie()
@@ -478,14 +493,22 @@ export async function verifyMusicEntitiesWithNetease(
   let verifiedArtistName: string | undefined
   let verifiedTrackId: string | undefined
   let verifiedTrackTitle: string | undefined
+  // 结论性判定：被请求的搜索确实返回过（哪怕零匹配）。全 null = 超时/网络异常，不进缓存。
+  let conclusive = true
 
   if (resolution.artistQuery) {
-    const artistSearch = await timed(
-      netease.cloudsearch({ keywords: resolution.artistQuery, type: 100, limit: 3, offset: 0, cookie }),
-      timeoutMs,
-      null as ApiResponse | null,
-    )
+    let artistSearch: ApiResponse | null
+    try {
+      artistSearch = await timed(
+        netease.cloudsearch({ keywords: resolution.artistQuery, type: 100, limit: 3, offset: 0, cookie }),
+        timeoutMs,
+        null as ApiResponse | null,
+      )
+    } catch {
+      artistSearch = null
+    }
     assertEntityResolverActive(options.signal)
+    if (!artistSearch) conclusive = false
     const artistMatch = artistSearch ? extractArtistMatches(artistSearch, resolution.artistQuery)[0] : undefined
     if (artistMatch) {
       verifiedArtistId = artistMatch.id
@@ -495,12 +518,18 @@ export async function verifyMusicEntitiesWithNetease(
 
   if (resolution.seedTitle) {
     const keywords = [resolution.seedTitle, verifiedArtistName ?? resolution.artistQuery ?? ''].filter(Boolean).join(' ')
-    const songSearch = await timed(
-      netease.cloudsearch({ keywords, type: 1, limit: 8, offset: 0, cookie }),
-      timeoutMs,
-      null as ApiResponse | null,
-    )
+    let songSearch: ApiResponse | null
+    try {
+      songSearch = await timed(
+        netease.cloudsearch({ keywords, type: 1, limit: 8, offset: 0, cookie }),
+        timeoutMs,
+        null as ApiResponse | null,
+      )
+    } catch {
+      songSearch = null
+    }
     assertEntityResolverActive(options.signal)
+    if (!songSearch) conclusive = false
     const trackMatch = songSearch ? extractTrackMatches(songSearch, resolution.seedTitle, verifiedArtistName ?? resolution.artistQuery)[0] : undefined
     if (trackMatch) {
       verifiedTrackId = trackMatch.id
@@ -513,7 +542,7 @@ export async function verifyMusicEntitiesWithNetease(
     (resolution.artistQuery && verifiedArtistName)
     || (resolution.seedTitle && verifiedTrackTitle),
   )
-  return {
+  const resolved = {
     ...resolution,
     artistQuery: verifiedArtistName ?? resolution.artistQuery,
     seedTitle: verifiedTrackTitle ?? resolution.seedTitle,
@@ -525,5 +554,9 @@ export async function verifyMusicEntitiesWithNetease(
     ambiguity: verifiedTrackTitle ? 'none' : resolution.ambiguity,
     confidence: verified ? Math.max(resolution.confidence, 0.94) : Math.min(resolution.confidence, 0.72),
     source: verified ? 'netease' : resolution.source,
+  } satisfies MusicEntityResolution
+  if (conclusive) {
+    verificationCache.set(cacheKey, { at: Date.now(), resolution: resolved })
   }
+  return resolved
 }
