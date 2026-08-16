@@ -74,7 +74,6 @@ function App() {
   const onboardingDeferredForSessionRef = useRef(false)
   const voiceContinuousRef = useRef(false)
   const [chatStageMode, setChatStageMode] = useState<ChatStageMode>('idle')
-  const [localPlaybackActive, setLocalPlaybackActive] = useState(false)
   const {
     page,
     settings,
@@ -90,6 +89,7 @@ function App() {
     carePingId,
     voiceAutoStartToken,
     voiceContinuous,
+    listeningViewOpen,
     listeningDismissed,
     closeDialogOpen,
     closeReadiness,
@@ -672,11 +672,26 @@ function App() {
     page,
     voiceContinuous,
     currentScene: Boolean(currentScene),
-    playbackStatus: playbackState.status,
-    localPlaybackActive,
+    hasCurrentTrack: Boolean(playbackState.current),
+    listeningViewOpen,
     chatStageMode,
-    listeningDismissed,
   })
+  // 一起听视图的开关只跟随用户意图：首次有歌接上时自动进入一次（仪式感），
+  // 之后「回到此刻」会阻断本会话的自动进入；暂停永远不收起，队列播完才收起。
+  const playbackTrack = playbackState.current
+  const playbackStatus = playbackState.status
+  const listeningAutoOpenedRef = useRef(false)
+  useEffect(() => {
+    const starting = playbackStatus === 'playing' || playbackStatus === 'loading'
+    if (!playbackTrack || !starting || listeningAutoOpenedRef.current) return
+    listeningAutoOpenedRef.current = true
+    if (!listeningDismissed) dispatch({ listeningViewOpen: true })
+  }, [playbackTrack, playbackStatus, listeningDismissed, dispatch])
+  useEffect(() => {
+    if (listeningViewOpen && !playbackTrack && playbackStatus === 'idle') {
+      dispatch({ listeningViewOpen: false })
+    }
+  }, [listeningViewOpen, playbackTrack, playbackStatus, dispatch])
   const drawerOpen = page === 'review' || page === 'queue' || page === 'profile' || page === 'settings' || page === 'about'
   const [settingsDrawerTitle, setSettingsDrawerTitle] = useState('设置')
   const [dailyReconnectDone, setDailyReconnectDone] = useState(false)
@@ -852,7 +867,7 @@ function App() {
           )}
         </ContextDrawer>
         {fieldMode === 'listening' && (
-          <button className="d2-now-return" type="button" onClick={() => dispatch({ listeningDismissed: true })}>
+          <button className="d2-now-return" type="button" onClick={() => dispatch({ listeningViewOpen: false, listeningDismissed: true })}>
             ‹ 回到此刻
           </button>
         )}
@@ -872,8 +887,8 @@ function App() {
             refreshQueue={refreshQueue}
             autoPlayNext={settings?.playback.autoPlayNext ?? true}
             currentScene={currentScene}
-            stageDismissed={listeningDismissed}
-            onExpandStage={() => dispatch({ listeningDismissed: false })}
+            stageDismissed={fieldMode !== 'listening' && fieldMode !== 'voice'}
+            onExpandStage={() => dispatch({ listeningViewOpen: true })}
             voiceContinuous={isVoiceContinuousActive(page, voiceContinuous)}
             onSceneTrackEnded={(scene, mode) => {
               continueScene(scene, false, mode === 'refill').catch((error) => {
@@ -885,7 +900,6 @@ function App() {
               dispatch((current) => ({ voiceAutoStartToken: current.voiceAutoStartToken + 1 }))
             }}
             onOpenQueue={() => setPage('queue')}
-            onLocalPlayingChange={setLocalPlaybackActive}
           />
         </div>
         {firstRunWelcomeOpen && <FirstRunWelcome onContinue={completeFirstRunWelcome} />}

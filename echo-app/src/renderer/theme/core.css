@@ -1320,9 +1320,8 @@
 .d2-sound-object figcaption { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: start; padding-top: 12px; background: var(--d2-paper); }
 .d2-shell .player-title { overflow: hidden; color: inherit; font: 18px/1.3 var(--d2-serif); text-overflow: ellipsis; white-space: nowrap; }
 .d2-shell .player-artist { overflow: hidden; margin-top: 5px; color: var(--d2-muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
-.d2-object-play { display: grid; width: 38px; height: 38px; padding: 0; place-items: center; border: 1px solid currentColor; border-radius: 50%; background: transparent; color: inherit; }
 .d2-shell .empty-track .d2-sound-art img { filter: saturate(0.62) opacity(0.78); }
-.d2-shell .empty-track .d2-object-play, .d2-shell .empty-track .d2-sound-tools { display: none; }
+.d2-shell .empty-track .d2-sound-tools { display: none; }
 .d2-listening-panel { display: none; }
 .d2-player-layer.player-chat .global-player, .d2-player-layer.player-streaming .global-player, .d2-player-layer.player-searching .global-player, .d2-player-layer.player-error .global-player { top: 360px; right: 8.2%; width: 230px; }
 .d2-player-layer.player-chat .d2-sound-art, .d2-player-layer.player-streaming .d2-sound-art, .d2-player-layer.player-searching .d2-sound-art, .d2-player-layer.player-error .d2-sound-art { height: 132px; }
@@ -1350,9 +1349,9 @@
 
 .d2-player-layer.player-listening .d2-listening-panel { position: fixed; top: 150px; bottom: 118px; left: 48.7%; display: flex; flex-direction: column; width: 43.5%; color: #f5f5ec; }
 .d2-player-layer.player-listening .d2-sound-tools,
-.d2-player-layer.player-voice .d2-sound-tools,
-.d2-player-layer.player-listening .d2-object-play,
-.d2-player-layer.player-voice .d2-object-play { display: none; }
+.d2-player-layer.player-voice .d2-sound-tools { display: none; }
+.d2-player-layer.player-listening .global-player.is-paused .d2-sound-art img,
+.d2-player-layer.player-voice .global-player.is-paused .d2-sound-art img { opacity: 0.72; }
 .d2-listening-kicker { display: flex; align-items: center; gap: 10px; color: var(--d2-red); font-size: 9px; font-weight: 700; letter-spacing: 2px; }
 .d2-listening-kicker::before { width: 28px; height: 1px; background: currentColor; content: ""; }
 .d2-listening-panel h2 { max-width: 590px; margin: 17px 0 13px; color: #f5f5ec; font: 34px/1.42 var(--d2-serif); letter-spacing: 0; }
@@ -2055,15 +2054,21 @@
 .d2-next-up {
   grid-column: 1 / -1;
   margin-top: 11px;
-  padding-top: 10px;
+  padding: 10px 0 0;
+  border: 0;
   border-top: 1px solid var(--d2-line);
+  background: none;
   color: var(--d2-muted);
   font: 10px/1.6 var(--d2-sans);
   letter-spacing: 0.5px;
+  text-align: left;
+  cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.d2-next-up:hover { color: var(--d2-ink); }
 
 .d2-next-up b {
   color: var(--d2-forest);

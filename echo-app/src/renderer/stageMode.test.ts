@@ -2,34 +2,39 @@ import { describe, expect, it } from 'vitest'
 import { deriveChatStageMode, deriveWindowFieldMode } from './stageMode'
 
 describe('stage mode', () => {
-  it('shows the listening stage while a scene track is actually playing', () => {
+  it('shows the listening stage while the view is open with a track', () => {
     expect(deriveWindowFieldMode({
       page: 'chat', voiceContinuous: false, currentScene: true,
-      playbackStatus: 'paused', localPlaybackActive: true, chatStageMode: 'chat',
+      hasCurrentTrack: true, listeningViewOpen: true, chatStageMode: 'chat',
     })).toBe('listening')
   })
 
-  it('keeps a paused scene in its scene stage', () => {
+  it('keeps the listening stage open while paused (decoupled from transport)', () => {
+    expect(deriveWindowFieldMode({
+      page: 'chat', voiceContinuous: false, currentScene: false,
+      hasCurrentTrack: true, listeningViewOpen: true, chatStageMode: 'chat',
+    })).toBe('listening')
+  })
+
+  it('returns to the scene stage after the listening view closes', () => {
     expect(deriveWindowFieldMode({
       page: 'chat', voiceContinuous: false, currentScene: true,
-      playbackStatus: 'paused', localPlaybackActive: false, chatStageMode: 'chat',
+      hasCurrentTrack: true, listeningViewOpen: false, chatStageMode: 'chat',
     })).toBe('scene')
   })
 
-  it('falls back to the chat stage after the listening stage is dismissed', () => {
+  it('falls back to the chat stage after the listening view closes', () => {
     expect(deriveWindowFieldMode({
       page: 'chat', voiceContinuous: false, currentScene: false,
-      playbackStatus: 'playing', localPlaybackActive: true, chatStageMode: 'chat',
-      listeningDismissed: true,
+      hasCurrentTrack: true, listeningViewOpen: false, chatStageMode: 'chat',
     })).toBe('chat')
   })
 
-  it('returns to the listening stage when dismissal is cleared', () => {
+  it('ignores the view flag when no track is present', () => {
     expect(deriveWindowFieldMode({
       page: 'chat', voiceContinuous: false, currentScene: false,
-      playbackStatus: 'playing', localPlaybackActive: true, chatStageMode: 'chat',
-      listeningDismissed: false,
-    })).toBe('listening')
+      hasCurrentTrack: false, listeningViewOpen: true, chatStageMode: 'idle',
+    })).toBe('idle')
   })
 
   it.each([

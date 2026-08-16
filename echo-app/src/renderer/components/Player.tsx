@@ -1,5 +1,5 @@
 import { KeyboardEvent, MouseEvent, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Heart, ListMusic, Pause, Play, RefreshCw, SkipBack, SkipForward, ThumbsDown, ThumbsUp, Volume2 } from 'lucide-react'
+import { Heart, Pause, Play, RefreshCw, SkipBack, SkipForward, ThumbsDown, ThumbsUp, Volume2 } from 'lucide-react'
 import type { ActiveScene, EchoApi, PlaybackState, PlaybackStatus, Track, UiBoundarySnapshot } from '../../types/ipc'
 import { WaveBars } from '../components'
 import { pageLabels } from '../labels'
@@ -620,7 +620,7 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
   const artwork = current?.artworkUrl || companionArtwork
 
   return (
-    <footer className={`mini-player global-player ${current ? 'has-track' : 'empty-track'}`}>
+    <footer className={`mini-player global-player ${current ? 'has-track' : 'empty-track'}${localPlaying ? '' : ' is-paused'}`}>
       <audio
         ref={audioRef}
         onPlay={() => {
@@ -662,7 +662,7 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
         className="d2-sound-object"
         role="button"
         tabIndex={current?.playUrl ? 0 : -1}
-        aria-label={stageDismissed && current ? `回到一起听 ${current.title}` : current ? `${localPlaying ? '暂停' : '播放'} ${current.title}` : '还没有可播放歌曲'}
+        aria-label={stageDismissed && current ? `展开一起听 ${current.title}` : current ? `${localPlaying ? '暂停' : '播放'} ${current.title}` : '还没有可播放歌曲'}
         onClick={(event) => {
           if ((event.target as HTMLElement).closest('button, input, label')) return
           if (stageDismissed && current && onExpandStage) {
@@ -691,25 +691,10 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
             }}
           />
           <div className="d2-sound-tools">
-            <button type="button" onClick={() => playPrevious().catch(() => undefined)} disabled={!canPlayPrevious} title="上一曲" aria-label="上一曲"><SkipBack size={14} /></button>
             <button type="button" onClick={() => togglePlayback().catch(() => undefined)} disabled={!current?.playUrl} title={localPlaying ? '暂停' : '播放'} aria-label={localPlaying ? '暂停' : '播放'}>
               {localPlaying ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
             </button>
             <button type="button" onClick={() => playNext().catch(() => undefined)} disabled={!canPlayNext} title="下一曲" aria-label="下一曲"><SkipForward size={14} /></button>
-            {onOpenQueue && <button type="button" onClick={onOpenQueue} title="打开队列" aria-label="打开队列"><ListMusic size={14} /></button>}
-            <label className="d2-volume-control" title={`音量 ${state.volume}%`}>
-              <Volume2 size={14} aria-hidden="true" />
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={state.volume}
-                aria-label="播放音量"
-                onChange={(event) => {
-                  void echo.playback.setVolume(Number(event.target.value)).then(setState).catch(() => undefined)
-                }}
-              />
-            </label>
           </div>
         </div>
         <figcaption>
@@ -732,12 +717,14 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
                 current ? `${current.artist}${current.album ? ` · ${current.album}` : ''}` : '你开口以后，声音会在这里出现'
               )}
             </div>
-            {current && (
-              <div className="d2-next-up">
-                {canPlayNext && state.queue[0] ? (
-                  <>接下来 · <b>{state.queue[0].title}</b></>
-                ) : '听完这首再决定'}
-              </div>
+            {onOpenQueue && (
+              <button type="button" className="d2-next-up" onClick={onOpenQueue} title="打开队列" aria-label="打开队列">
+                {current
+                  ? canPlayNext && state.queue[0]
+                    ? <>接下来 · <b>{state.queue[0].title}</b></>
+                    : '听完这首再决定'
+                  : '队列与收藏'}
+              </button>
             )}
             {current && (
               <div className="d2-object-feedback" aria-label="歌曲反馈">
@@ -748,9 +735,6 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
             )}
             {feedbackNoteText && <div className="d2-feedback-note" role="status">{feedbackNoteText}</div>}
           </div>
-          <button className="d2-object-play" type="button" onClick={() => togglePlayback().catch(() => undefined)} disabled={!current?.playUrl} title={localPlaying ? '暂停' : '播放'}>
-            {localPlaying ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}
-          </button>
         </figcaption>
       </figure>
 

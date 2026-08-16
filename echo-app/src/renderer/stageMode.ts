@@ -27,23 +27,22 @@ export function deriveWindowFieldMode({
   page,
   voiceContinuous,
   currentScene,
-  playbackStatus,
-  localPlaybackActive,
+  hasCurrentTrack,
+  listeningViewOpen,
   chatStageMode,
-  listeningDismissed = false,
 }: {
   page: PageKey
   voiceContinuous: boolean
   currentScene: boolean
-  playbackStatus: string
-  localPlaybackActive: boolean
+  hasCurrentTrack: boolean
+  listeningViewOpen: boolean
   chatStageMode: ChatStageMode
-  listeningDismissed?: boolean
 }): WindowFieldMode {
   if (page === 'settings' || page === 'about') return 'quiet'
   if (page === 'voice' || voiceContinuous) return 'voice'
-  const listeningNow = localPlaybackActive || playbackStatus === 'playing' || playbackStatus === 'loading'
-  if (listeningNow && !listeningDismissed) return 'listening'
+  // 一起听视图由用户意图（listeningViewOpen）驱动，与播放/暂停状态解耦：
+  // 暂停不收起，只有「回到此刻」或队列结束才收起。
+  if (listeningViewOpen && hasCurrentTrack) return 'listening'
   if (currentScene) return 'scene'
   if (page === 'chat') return chatStageMode
   return 'idle'
