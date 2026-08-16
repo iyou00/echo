@@ -9,6 +9,7 @@ import { installMediaSessionActions } from './mediaSession'
 import { trackIdentity as trackKey } from '../../shared/trackIdentity'
 import { AUDIO_ENERGY_EVENT, energyFromLevels, levelsFromFrequencyData, type AudioEnergyDetail } from '../audioAnalysis'
 import { favoriteNote, feedbackFallbackNote, FEEDBACK_NOTE_MS } from './feedbackNote'
+import { afterListeningLine, splitNarration } from './listeningNarration'
 
 interface PlayerProps {
   echo: EchoApi
@@ -209,6 +210,20 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
         ? await echo.playback.next(current?.playbackInstanceId)
         : await echo.playback.finishCurrent(current?.playbackInstanceId)
       setState(next)
+      if (next.current && trackId(next.current) !== currentId) {
+        const variantIndex = completedCountRef.current
+        completedCountRef.current += 1
+        setAfterLineText(afterListeningLine({
+          finishedTitle: current?.title,
+          nextReason: next.current.reason ?? next.current.echoNote,
+          variantIndex,
+        }))
+        if (afterLineTimerRef.current !== null) window.clearTimeout(afterLineTimerRef.current)
+        afterLineTimerRef.current = window.setTimeout(() => {
+          afterLineTimerRef.current = null
+          setAfterLineText('')
+        }, 4200)
+      }
       await refreshQueue()
       if (shouldContinueVoice) onVoiceTrackEnded?.()
       if (completionAction === 'scene_continue' && currentScene) await onSceneTrackEnded?.(currentScene, 'continue')
@@ -525,6 +540,9 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
 
   const [feedbackNoteText, setFeedbackNoteText] = useState('')
   const feedbackNoteTimerRef = useRef<number | null>(null)
+  const [afterLineText, setAfterLineText] = useState('')
+  const afterLineTimerRef = useRef<number | null>(null)
+  const completedCountRef = useRef(0)
 
   function showFeedbackNote(message: string) {
     setFeedbackNoteText(message)
@@ -537,6 +555,7 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
 
   useEffect(() => () => {
     if (feedbackNoteTimerRef.current !== null) window.clearTimeout(feedbackNoteTimerRef.current)
+    if (afterLineTimerRef.current !== null) window.clearTimeout(afterLineTimerRef.current)
   }, [])
 
   async function toggleCurrentFavorite() {
@@ -684,7 +703,14 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
 
       <section className="d2-listening-panel" aria-live="polite">
         <span className="d2-listening-kicker">ECHO · 一起听</span>
-        <h2>{current?.reason ?? current?.echoNote ?? '这首不用听懂，先让它把眼前撑开一点。'}</h2>
+        <h2 key={currentKey || 'none'}>
+          {afterLineText && <span className="d2-narration-after">{afterLineText}</span>}
+          {splitNarration(current?.reason ?? current?.echoNote ?? '这首不用听懂，先让它把眼前撑开一点。').map((sentence) => (
+            <span className="d2-narration-line" key={sentence.text} style={{ animationDelay: `${sentence.delayMs}ms` }}>
+              {sentence.text}
+            </span>
+          ))}
+        </h2>
         <p>{current ? '音乐继续走，你不用一直回应。' : '你想听点什么时，叫我一声。'}</p>
         <div className="player-controls d2-listen-controls">
           <button type="button" onClick={() => playPrevious().catch(() => undefined)} disabled={!canPlayPrevious} title="上一曲"><SkipBack size={15} /></button>
