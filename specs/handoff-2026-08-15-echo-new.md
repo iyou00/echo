@@ -30,7 +30,7 @@
 
 用户真机反馈驱动的修正，全部只动渲染层：
 
-1. **模型缺失空状态左对齐**：「还差一条模型连接」提示块从舞台居中移到左栏（left 7.2%，max 470px），与 presence 同侧同对齐方式。CSS：`.d2-now-page .conversation.stage-dialogue > .empty-state`。
+1. **模型缺失空状态并入左栏**：「还差一条模型连接」提示从舞台中央并入左侧 presence 列——presence 标题是**唯一**大标题，boundary 块以 bare 模式渲染（无 ECHO 眉线、无重复标题，只留正文+按钮），位于标题下方续接；presence 的泛用描述行在该态隐藏。注意：不要把空状态整块（含标题）左移——presence 标题本来就写着同一句话，会叠成两句（0.1.11 首版犯过此错，0.1.12 修正）。
 2. **导入歌单视图 D1.3 化**：网易云登录/二维码/短信/进度条/从文件导入全部改为细线平面语言（衬线标题、方角二维码框、2px 红线进度条、底线输入框）。E2E 新增 `settings-import.png`（共 22 张）。
 3. **设置字号可读性**：small 类文字从 9-10px 提到 10.5-11px（settings/service/profile/queue 全套），不再有小于 10.5px 的正文。
 4. **面包屑唯一导航**：删除三个子视图返回按钮，面包屑加 testid（`settings-crumb-overview/connections`）接管回跳；E2E 改用面包屑导航。

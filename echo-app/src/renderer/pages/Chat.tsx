@@ -533,7 +533,8 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
   function renderEmptyChat() {
     if (!hasLlmConfig) {
       const boundary = boundaries.find((item) => item.code === 'model_missing' || item.code === 'model_invalid')
-      if (boundary) return <BoundaryState snapshot={boundary} onAction={() => navigate('settings')} />
+      // model_missing 的标题与 presence 标题逐字相同，bare 只留正文+按钮作续接；其余标题互补，保留完整卡片。
+      if (boundary) return <BoundaryState snapshot={boundary} bare={boundary.code === 'model_missing'} onAction={() => navigate('settings')} />
       return (
         <EmptyState
           muted
@@ -551,7 +552,7 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
       return (
         <EmptyState
           icon="♪"
-          title={"嗨,我醒了——但我还没听过你的歌。\n给我看看?"}
+          title={"嗨,我醒了——但我还没听过你的歌.\n给我看看?"}
           body="从网易云导出的歌单 JSON · 或者直接和我聊几句也行"
           sign="— Echo"
           action={(
@@ -614,7 +615,9 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
       <div className="d2-now-presence">
         <span>{currentScene ? 'ECHO · 场景正在继续' : isListening ? 'ECHO · 一起听' : chatStageMode === 'searching' ? 'ECHO · 正在找声音' : chatStageMode === 'streaming' ? 'ECHO · 正在回应' : chatStageMode === 'error' ? 'ECHO · 这里没接上' : hasDialogue ? 'ECHO · 正在交流' : 'ECHO · 此刻'}</span>
         <h1>{presenceTitle}</h1>
-        <p>{currentScene ? `${currentScene.label} · 音乐会沿着这个方向继续` : isListening ? '音乐在走，你不用一直回应。' : '想说话时就说，安静也算一种回答。'}</p>
+        {(messages.length > 0 || !hasBoundary) && (
+          <p>{currentScene ? `${currentScene.label} · 音乐会沿着这个方向继续` : isListening ? '音乐在走，你不用一直回应。' : '想说话时就说，安静也算一种回答。'}</p>
+        )}
       </div>
       <div className="d2-ambient-facts" aria-hidden="true">
         <div><small>此刻节奏</small><strong>{currentScene?.label ?? (isListening ? '正在一起听' : '保持安静')}</strong></div>

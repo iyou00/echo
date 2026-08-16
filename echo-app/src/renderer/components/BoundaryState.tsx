@@ -7,10 +7,12 @@ export function BoundaryState({
   snapshot,
   onAction,
   compact = false,
+  bare = false,
 }: {
   snapshot: UiBoundarySnapshot
   onAction?: () => void
   compact?: boolean
+  bare?: boolean
 }) {
   const copy = boundaryPresentation(snapshot)
   const action = copy.actionLabel && onAction
@@ -23,7 +25,7 @@ export function BoundaryState({
     : undefined
 
   if (!compact) {
-    return <EmptyState muted icon={<AlertCircle size={24} />} title={copy.title} body={copy.body} action={action} />
+    return <EmptyState muted bare={bare} icon={<AlertCircle size={24} />} title={copy.title} body={copy.body} action={action} />
   }
 
   return (

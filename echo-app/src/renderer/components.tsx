@@ -256,6 +256,7 @@ export function EmptyState({
   icon = 'E',
   sign,
   muted = false,
+  bare = false,
   className = '',
 }: {
   title: string
@@ -264,22 +265,25 @@ export function EmptyState({
   icon?: ReactNode
   sign?: string
   muted?: boolean
+  bare?: boolean
   className?: string
 }) {
   const glyph = typeof icon === 'string' && icon !== 'E' ? icon : null
   const mark = icon !== 'E' && !glyph ? icon : null
   return (
-    <div className={`d2-empty ${muted ? 'muted' : ''} ${className}`}>
-      <div className="d2-empty-kicker" aria-hidden="true">
-        <span className="d2-empty-kicker-line" />
-        ECHO
-      </div>
-      {glyph && <div className="d2-empty-glyph" aria-hidden="true">{glyph}</div>}
-      {mark && <div className="d2-empty-mark" aria-hidden="true">{mark}</div>}
-      <h3>{title.split(/\n/).map((line, i, arr) => <Fragment key={i}>{line}{i < arr.length - 1 && <br />}</Fragment>)}</h3>
+    <div className={`d2-empty ${muted ? 'muted' : ''} ${bare ? 'bare' : ''} ${className}`}>
+      {!bare && (
+        <div className="d2-empty-kicker" aria-hidden="true">
+          <span className="d2-empty-kicker-line" />
+          ECHO
+        </div>
+      )}
+      {!bare && glyph && <div className="d2-empty-glyph" aria-hidden="true">{glyph}</div>}
+      {!bare && mark && <div className="d2-empty-mark" aria-hidden="true">{mark}</div>}
+      {!bare && <h3>{title.split(/\n/).map((line, i, arr) => <Fragment key={i}>{line}{i < arr.length - 1 && <br />}</Fragment>)}</h3>}
       {body && <p>{body}</p>}
       {action && <div className="d2-empty-actions">{action}</div>}
-      {sign && <div className="d2-empty-sign">{sign}</div>}
+      {!bare && sign && <div className="d2-empty-sign">{sign}</div>}
     </div>
   )
 }

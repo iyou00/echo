@@ -1276,10 +1276,11 @@
 .d2-quiet-mark small { display: block; margin-top: 10px; color: var(--d2-muted); font: 9px/1.4 var(--d2-sans); }
 
 .d2-now-page .conversation.stage-dialogue { position: absolute; z-index: 4; inset: 0; overflow: hidden; padding: 0; background: transparent; pointer-events: none; }
-.d2-now-page .conversation.stage-dialogue > .empty-state, .d2-now-page .conversation.stage-dialogue > .boundary-state { position: absolute; top: 246px; left: 7.2%; width: min(470px, 46%); pointer-events: auto; }
-.d2-now-page .stage-dialogue .d2-empty { min-height: 0; place-items: start; align-content: start; text-align: left; }
-.d2-now-page .stage-dialogue .d2-empty .d2-empty-actions { justify-self: start; }
+.d2-now-page .conversation.stage-dialogue > .empty-state, .d2-now-page .conversation.stage-dialogue > .boundary-state { position: absolute; top: 196px; left: 4.8%; width: min(470px, 46%); margin: 0; pointer-events: auto; }
+.d2-now-page .stage-dialogue .d2-empty { min-height: 0; place-items: start; align-content: start; gap: 14px; padding: 0; text-align: left; }
+.d2-now-page .stage-dialogue .d2-empty .d2-empty-actions { justify-self: start; margin-top: 2px; }
 .d2-now-page .stage-dialogue .d2-empty h3, .d2-now-page .stage-dialogue .d2-empty p { text-align: left; }
+.d2-now-page .stage-dialogue .d2-empty.bare p { max-width: 380px; }
 .d2-now-page .stage-chat .d2-ambient-facts, .d2-now-page .stage-chat .d2-quiet-mark { opacity: 0; pointer-events: none; }
 .d2-now-page .stage-chat .d2-now-presence { top: 62px; left: 7.2%; width: 440px; }
 .d2-now-page .stage-chat .d2-now-presence h1 { margin-top: 12px; font-size: 31px; }
