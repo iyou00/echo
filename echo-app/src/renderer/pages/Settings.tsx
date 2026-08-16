@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowLeft, ChevronRight, Download, Info, MessageCircle, Upload } from 'lucide-react'
+import { ChevronRight, Download, Info, MessageCircle, Upload } from 'lucide-react'
 import type { AgentActionSummary, CareFrequency, EchoApi, ImportProgressPayload, ImportTaskSnapshot, SemanticSummary, Settings, StageContext, Track, UiBoundarySnapshot, WindowSizePreset } from '../../types/ipc'
 import type { AppPageProps } from '../appState'
 import { EmptyState, Section } from '../components'
@@ -1384,15 +1384,15 @@ export function SettingsPage({
     ? new Date(settings.carePings.pausedUntil)
     : null
   const detailTitles = { music: '音乐来源', yinyi: '风信生成', chat: '絮语与启动', stage: '此刻的理解', voice: '天气与语音', care: '主动关心', window: '窗口与关闭', llm: 'AI 模型', data: '本地数据' }
-  const breadcrumbItems: Array<{ label: string; onClick?: () => void }> = settingsView === 'overview'
+  const breadcrumbItems: Array<{ label: string; testId?: string; onClick?: () => void }> = settingsView === 'overview'
     ? [{ label: '设置' }]
     : settingsView === 'connections'
-      ? [{ label: '设置', onClick: () => setSettingsView('overview') }, { label: '连接与来源' }]
+      ? [{ label: '设置', testId: 'settings-crumb-overview', onClick: () => setSettingsView('overview') }, { label: '连接与来源' }]
       : settingsView === 'tasks'
-        ? [{ label: '设置', onClick: () => setSettingsView('overview') }, { label: '运行任务' }]
+        ? [{ label: '设置', testId: 'settings-crumb-overview', onClick: () => setSettingsView('overview') }, { label: '运行任务' }]
         : detailParent === 'connections'
-          ? [{ label: '设置', onClick: () => setSettingsView('overview') }, { label: '连接与来源', onClick: () => setSettingsView('connections') }, { label: detailTitles[detailTarget] }]
-          : [{ label: '设置', onClick: () => setSettingsView('overview') }, { label: detailTitles[detailTarget] }]
+          ? [{ label: '设置', testId: 'settings-crumb-overview', onClick: () => setSettingsView('overview') }, { label: '连接与来源', testId: 'settings-crumb-connections', onClick: () => setSettingsView('connections') }, { label: detailTitles[detailTarget] }]
+          : [{ label: '设置', testId: 'settings-crumb-overview', onClick: () => setSettingsView('overview') }, { label: detailTitles[detailTarget] }]
 
   return (
     <div className="phone-surface settings-page">
@@ -1402,7 +1402,7 @@ export function SettingsPage({
             <span key={item.label}>
               {index > 0 && <i aria-hidden="true"> / </i>}
               {item.onClick ? (
-                <button type="button" onClick={item.onClick}>{item.label}</button>
+                <button type="button" data-testid={item.testId} onClick={item.onClick}>{item.label}</button>
               ) : (
                 <em aria-current="page">{item.label}</em>
               )}
@@ -1451,7 +1451,6 @@ export function SettingsPage({
         </div>
       ) : settingsView === 'connections' ? (
         <div className="d2-settings-subview" data-testid="settings-connections-view">
-          <button className="d2-settings-back" data-testid="settings-connections-back" type="button" onClick={() => setSettingsView('overview')}><ArrowLeft size={15} />设置</button>
           <p className="d2-settings-autosave">连接与来源 · 密钥只保存在本机</p>
           <div className="d2-connection-list">
             <section className="d2-connection-field">
@@ -1462,7 +1461,7 @@ export function SettingsPage({
             <section className="d2-connection-field">
               <header><strong>网易云音乐</strong><span className={neteaseState.loggedIn ? 'is-ok' : 'is-muted'}>{neteaseState.loggedIn ? '已连接' : '未连接'}</span></header>
               <p>{neteaseState.loggedIn ? `${neteaseState.nickname ?? '网易云账号'}${neteasePlaylists.length ? ` · ${neteasePlaylists.length} 个歌单` : ''}` : '登录后才能播放和导入网易云歌单'}</p>
-              <button type="button" onClick={() => openDetails('sync', 'music', 'connections')}>{neteaseState.loggedIn ? '管理音乐来源' : '去连接'}</button>
+              <button type="button" data-testid="settings-music-edit" onClick={() => openDetails('sync', 'music', 'connections')}>{neteaseState.loggedIn ? '管理音乐来源' : '去连接'}</button>
             </section>
             <section className="d2-connection-field">
               <header><strong>天气位置</strong><span className={city.trim() ? 'is-ok' : 'is-muted'}>{city.trim() ? '已设置' : '未设置'}</span></header>
@@ -1478,7 +1477,6 @@ export function SettingsPage({
         </div>
       ) : settingsView === 'tasks' ? (
         <div className="d2-settings-subview" data-testid="settings-tasks-view">
-          <button className="d2-settings-back" type="button" onClick={() => setSettingsView('overview')}><ArrowLeft size={15} />设置</button>
           <p className="d2-settings-autosave">任务在后台继续，不需要守着</p>
           <section className="d2-settings-linear-section">
             <h3>运行任务</h3>
@@ -1501,7 +1499,6 @@ export function SettingsPage({
         </div>
       ) : (
         <>
-      <button className="d2-settings-back" data-testid="settings-overview-back" type="button" onClick={() => setSettingsView(detailParent)}><ArrowLeft size={15} />{detailParent === 'connections' ? '连接与来源' : '设置'}</button>
       <p className="d2-settings-detail-note">{{
         llm: '密钥只保存在本机，保存后可测试连接',
         music: '登录信息只保存在本机',
