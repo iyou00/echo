@@ -11,6 +11,7 @@ import { VoicePage } from './renderer/pages/Voice'
 import { YinyiPage } from './renderer/pages/Yinyi'
 import { FirstRunWelcome } from './renderer/components/FirstRunWelcome'
 import { DailyReconnect } from './renderer/components/DailyReconnect'
+import { QuickAskBar } from './renderer/shell/QuickAskBar'
 import { Player } from './renderer/components/Player'
 import { EchoShell } from './renderer/shell/EchoShell'
 import { ContextDrawer } from './renderer/shell/ContextDrawer'
@@ -830,6 +831,14 @@ function App() {
             ‹ 回到此刻
           </button>
         )}
+        <QuickAskBar
+          page={page}
+          navigate={setPage}
+          hasLlmConfig={hasLlmConfig}
+          firstRunOpen={firstRunWelcomeOpen}
+          onboardingOpen={onboardingOpen}
+          closeDialogOpen={closeDialogOpen}
+        />
         <div className={`d2-player-layer player-${fieldMode} page-${page}${page === 'voice' ? ' voice-mode-active' : ''}`}>
           <Player
             echo={echo}

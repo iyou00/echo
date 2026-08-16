@@ -187,6 +187,20 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
     })
   }, [echo])
 
+  // Ctrl+K 快捷条产生的一问一答，直接落到对话历史（不经过打字机）。
+  useEffect(() => {
+    function handleQuickAskExchange(event: Event) {
+      const detail = (event as CustomEvent<{ user: ChatMessage; assistant: ChatMessage }>).detail
+      if (!detail?.user || !detail?.assistant) return
+      setMessages((items) => {
+        if (items.some((item) => item.id === detail.user.id || item.id === detail.assistant.id)) return items
+        return [...items, detail.user, detail.assistant]
+      })
+    }
+    window.addEventListener('echo:quick-ask-exchange', handleQuickAskExchange)
+    return () => window.removeEventListener('echo:quick-ask-exchange', handleQuickAskExchange)
+  }, [])
+
   useEffect(() => {
     return echo.settings.onChanged((payload) => {
       if (payload.path === '*' && payload.value === null) setMessages([])

@@ -197,6 +197,10 @@ async function captureFirstRun(target: BrowserWindow): Promise<CaptureMetric[]> 
   await click(target, '.voice-entry-button')
   await waitForSelector(target, '.field-voice')
   metrics.push(await capture(target, 'voice-idle-stage.png'))
+  await target.webContents.executeJavaScript('window.dispatchEvent(new KeyboardEvent(\'keydown\', { key: \'k\', ctrlKey: true }))', true)
+  await wait(250)
+  const quickAskBlocked = await target.webContents.executeJavaScript('!document.querySelector(\'.d2-quick-ask-bar\')', true)
+  if (!quickAskBlocked) throw new Error('quick ask bar must stay closed without a configured model')
   await click(target, '.d2-brand')
   await waitForSelector(target, '.chat-page')
   await target.webContents.executeJavaScript(`window.echo.playback.play({
