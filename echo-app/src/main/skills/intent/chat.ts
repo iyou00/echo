@@ -132,7 +132,9 @@ const DIRECT_SONG_ACTION_PATTERN = /想听|想要听|要听|我要听|我想听|
 const MUSIC_ACTION_PATTERN = /推荐(?:.{0,18}(?:歌|歌曲|音乐|作品|歌单)|一首|几首|\d+首)|推(?:一首|几首|\d+首|首|点)(?:.{0,18}(?:歌|歌曲|音乐|作品))?|挑(?:一|几|\d+)?首|选(?:一|几|\d+)?首|来几首|来一首|来\s*\d+\s*首|来[一二两三四五六七八九十]\s*首|(?:整|安排|搞|弄)(?:一|几|\d+)?首|(?:整点|安排点|搞点|弄点)[^，。！？]{0,16}(?:歌|歌曲|音乐|曲子|单曲|好听|耐听|顺耳|入耳|对味|带感)|听什么|听啥|听听看|听一下|值得听|适合听|想听|想要听|要听|我要听|我想听|播放|能听|放点|放首|放一首|来点|找(?:一首|几首|点)?[^，。！？]{0,16}(?:歌|歌曲|音乐)|给我.*歌|帮我.*歌|接\s*\d*\s*首|歌单|music|song/i
 const SHARE_MUSIC_ACTION_PATTERN = /分享(?:一首|几首|\d+首|点|些)?|(?:一首|几首|\d+首|[一二两三四五六七八九十]首).{0,12}(?:分享|听听|试试)|有什么可以分享|有啥可以分享/i
 const SIMILAR_PATTERN = /像|类似|相似|那种|那类|这类|这种感觉|同款|差不多|接近/i
-const SCENE_PATTERN = /场景|专注|工作|午休|睡前|通勤|下班|雨天|独处|运动|提神|放松|发呆|随机|随便/i
+// 注意：「随便/随机」是"你看着办"的授权词，不是场景信号——曾把「随便推荐一首陈默之」误判成
+// 场景请求导致完全没搜歌手（2026-08-16 真实故障，见 intent/evalCases.ts）。场景词必须自带头脑画面的名词。
+const SCENE_PATTERN = /场景|专注|工作|午休|睡前|通勤|下班|雨天|独处|运动|提神|放松|发呆/i
 const MUSIC_QUALITY_PATTERN = /慢|快|欢快|轻快|开心|快乐|愉快|安静|热闹|循环|舒缓|缓和|轻|燃|激情|激昂|高昂|亢奋|振奋|热血|澎湃|带感|节奏|动感|鼓点|有劲|提神|治愈|温柔|温暖|暖一点|暖和|暖心|怀旧|英文|欧美|英语|粤语|广东|韩语|kpop|日语|华语|民谣|摇滚|说唱|电子/i
 const EMOTION_PATTERN = /累|困|疲|睡|烦|燥|低落|emo|想哭|难过|伤心|开心|兴奋|阳光|孤独|焦虑|压力|失眠|无聊|烦躁|压抑/i
 const FEEDBACK_REF_PATTERN = /这首|这歌|刚才|当前|现在这首|它|这个|上一首|错误的歌|错误的歌曲|放错|播错/i
@@ -1219,10 +1221,12 @@ export function classifyFallbackChatIntent(text: string, context: ChatIntentCont
     }
   }
 
-  if (hasSceneSignal && hasMusicAction) {
+  // 歌手实体优先于场景：「雨天听陈默之」「陈默之的午休歌」——歌手是锚，场景只是修饰，
+  // 场景信息会随 recommendationIntent 继续下游传递，不会被丢掉。
+  if (artistQuery && (hasMusicAction || hasMusicFitRequest)) {
     return {
-      kind: 'scene_request',
-      confidence: 0.86,
+      kind: 'artist_request',
+      confidence: 0.9,
       text: trimmed,
       wantsMusic: true,
       routeSource: 'rules',
@@ -1234,10 +1238,10 @@ export function classifyFallbackChatIntent(text: string, context: ChatIntentCont
     }
   }
 
-  if (artistQuery && (hasMusicAction || hasMusicFitRequest)) {
+  if (hasSceneSignal && hasMusicAction) {
     return {
-      kind: 'artist_request',
-      confidence: 0.9,
+      kind: 'scene_request',
+      confidence: 0.86,
       text: trimmed,
       wantsMusic: true,
       routeSource: 'rules',
