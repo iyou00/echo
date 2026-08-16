@@ -62,6 +62,14 @@ export const INTENT_EVAL_CASES: IntentEvalCase[] = [
     addedAt: '2026-08-16',
   },
   {
+    id: 'real-2026-08-16-possessive-artist-tail',
+    text: '随便来一首苏星婕的',
+    expect: { kind: 'artist_request', artistQuery: '苏星婕', wantsMusic: true },
+    source: 'real-failure',
+    note: '0.1.16 真机验证时发现：尾「的」（所有格标记）被吞进实体，抽出歌手"苏星婕的"，触发歌手/歌名歧义追问。所有格收尾指向歌手；「放一首晴天」（无「的」）仍走歌名路径。',
+    addedAt: '2026-08-16',
+  },
+  {
     id: 'guard-random-filler-with-artist',
     text: '随便来点周杰伦',
     expect: { kind: 'artist_request', artistQuery: '周杰伦', wantsMusic: true },
