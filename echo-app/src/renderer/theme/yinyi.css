@@ -203,3 +203,16 @@
     animation: none;
   }
 }
+.d2-yinyi-letter .d2-empty {
+  min-height: 0;
+  place-items: start;
+  align-content: start;
+  padding: 6px 0 0;
+  text-align: left;
+}
+
+.d2-yinyi-letter .d2-empty .d2-empty-actions,
+.d2-yinyi-letter .d2-empty h3 {
+  justify-self: start;
+  text-align: left;
+}

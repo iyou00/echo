@@ -585,6 +585,16 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
   }, [chatStageMode, onStageModeChange])
   const isListening = Boolean(playbackState.current) && (playbackState.status === 'playing' || playbackState.status === 'loading')
   const hasBoundary = !hasLlmConfig || !profile
+  const [settled, setSettled] = useState(false)
+  const shouldSettle = chatStageMode === 'idle' && !hasBoundary && !currentScene
+  useEffect(() => {
+    if (!shouldSettle) {
+      setSettled(false)
+      return
+    }
+    const timer = window.setTimeout(() => setSettled(true), 12_000)
+    return () => window.clearTimeout(timer)
+  }, [shouldSettle])
   const presenceTitle = !hasLlmConfig
     ? '还差一条模型连接。'
     : !profile
@@ -600,7 +610,7 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
             ? '你说，我听着。'
             : '你继续忙。歌我接着，想说话时叫我。')
   return (
-    <div className={`phone-surface chat-page stage-${chatStageMode}${hasDialogue ? ' stage-chat' : ''}${hasBoundary ? ' stage-boundary' : ''}`}>
+    <div className={`phone-surface chat-page stage-${chatStageMode}${hasDialogue ? ' stage-chat' : ''}${hasBoundary ? ' stage-boundary' : ''}${settled ? ' settled' : ''}`}>
       <div className="d2-now-presence">
         <span>{currentScene ? 'ECHO · 场景正在继续' : isListening ? 'ECHO · 一起听' : chatStageMode === 'searching' ? 'ECHO · 正在找声音' : chatStageMode === 'streaming' ? 'ECHO · 正在回应' : chatStageMode === 'error' ? 'ECHO · 这里没接上' : hasDialogue ? 'ECHO · 正在交流' : 'ECHO · 此刻'}</span>
         <h1>{presenceTitle}</h1>

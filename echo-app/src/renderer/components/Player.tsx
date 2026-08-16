@@ -233,6 +233,14 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
         ? await echo.playback.next(current?.playbackInstanceId)
         : await echo.playback.finishCurrent(current?.playbackInstanceId)
       setState(next)
+      if (!next.current) {
+        setCodaText('今天的最后一首。收好。')
+        if (codaTimerRef.current !== null) window.clearTimeout(codaTimerRef.current)
+        codaTimerRef.current = window.setTimeout(() => {
+          codaTimerRef.current = null
+          setCodaText('')
+        }, 8000)
+      }
       if (next.current && trackId(next.current) !== currentId) {
         const variantIndex = completedCountRef.current
         completedCountRef.current += 1
@@ -287,6 +295,11 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
       afterLineTimerRef.current = null
     }
     setAfterLineText('')
+    if (codaTimerRef.current !== null) {
+      window.clearTimeout(codaTimerRef.current)
+      codaTimerRef.current = null
+    }
+    setCodaText('')
     const track = currentTrackRef.current
     if (!track) {
       setFavorited(false)
@@ -571,6 +584,8 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
   const feedbackNoteTimerRef = useRef<number | null>(null)
   const [afterLineText, setAfterLineText] = useState('')
   const afterLineTimerRef = useRef<number | null>(null)
+  const [codaText, setCodaText] = useState('')
+  const codaTimerRef = useRef<number | null>(null)
   const completedCountRef = useRef(0)
 
   function showFeedbackNote(message: string) {
@@ -585,6 +600,7 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
   useEffect(() => () => {
     if (feedbackNoteTimerRef.current !== null) window.clearTimeout(feedbackNoteTimerRef.current)
     if (afterLineTimerRef.current !== null) window.clearTimeout(afterLineTimerRef.current)
+    if (codaTimerRef.current !== null) window.clearTimeout(codaTimerRef.current)
   }, [])
 
   async function toggleCurrentFavorite() {
@@ -700,7 +716,7 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
           <div className="player-copy">
             <div className="player-title">{current?.title ?? `还没有${pageLabels.queue}`}</div>
             <div className="player-artist">
-              {playbackBoundaryCopy ? (
+              {codaText ? <span className="d2-coda">{codaText}</span> : playbackBoundaryCopy ? (
                 <span className="player-recovery">
                   <span>{playbackBoundaryCopy.title}</span>
                   <button type="button" title="重试播放链接" aria-label="重试播放链接" onClick={() => {
@@ -716,6 +732,13 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
                 current ? `${current.artist}${current.album ? ` · ${current.album}` : ''}` : '你开口以后，声音会在这里出现'
               )}
             </div>
+            {current && (
+              <div className="d2-next-up">
+                {canPlayNext && state.queue[0] ? (
+                  <>接下来 · <b>{state.queue[0].title}</b></>
+                ) : '听完这首再决定'}
+              </div>
+            )}
             {current && (
               <div className="d2-object-feedback" aria-label="歌曲反馈">
                 <button className={feedbackState === 'more_like_this' ? 'active' : ''} type="button" onClick={() => { void recordCurrentFeedback('more_like_this').catch(() => setPlaybackError('反馈没记下，可以稍后再试。')) }} title="多来这种" aria-label="多来这种"><ThumbsUp size={12} /></button>
@@ -741,6 +764,19 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
             </span>
           ))}
         </h2>
+        {current && (
+          <button
+            type="button"
+            className="d2-why-this"
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent('echo:quick-ask-open', {
+                detail: { text: `为什么现在给我放《${current.title}》？` },
+              }))
+            }}
+          >
+            再说说这首？
+          </button>
+        )}
         <p>{current ? '音乐继续走，你不用一直回应。' : '你想听点什么时，叫我一声。'}</p>
         <div className="player-controls d2-listen-controls">
           <button type="button" onClick={() => playPrevious().catch(() => undefined)} disabled={!canPlayPrevious} title="上一曲"><SkipBack size={15} /></button>
