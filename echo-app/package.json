@@ -1,7 +1,7 @@
 {
   "name": "echo-app",
   "private": true,
-  "version": "0.1.17",
+  "version": "0.1.18",
   "description": "Echo AI 音乐伴侣",
   "author": "Echo",
   "type": "module",
