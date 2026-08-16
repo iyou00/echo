@@ -1,6 +1,6 @@
 # Echo `echo-new` 交接文档
 
-更新时间：2026-08-16（设置界面打磨 0.1.11 之后）
+更新时间：2026-08-16（重叠修复 0.1.12 之后）
 交接范围：D1.3 结构性 UI 迁移 + 体验层七项新能力 + 两轮视觉打磨（本文件取代同日早前版本，历史见 git）。
 
 ## 1. 先读结论
@@ -9,7 +9,7 @@
 2. D1.3 迁移与七项 UX 增强均已完成：顶栏天气、反馈闭环、设置面包屑、每日重连动画、风信到达仪式、歌间旁白、Ctrl+K 想到就说。
 3. 两轮视觉打磨已完成：风信页 D1.3 重写（双栏信纸）+ 播放界面（细线进度条/封面呼吸/下一首预告/再说说这首）+ 留白失衡治理（0.1.10）；设置界面四项修正（0.1.11，见 §2.5）。
 4. `index.css` 剩余部分仍承载 Settings 详情表单、Chat 消息流、Voice 页旧类名，属于**下一轮退役对象**。
-5. 版本 `0.1.11`，安装包 `echo-app/release/Echo-Setup-0.1.11.exe`。
+5. 版本 `0.1.12`，安装包 `echo-app/release/Echo-Setup-0.1.12.exe`。
 6. 本机 Windows 开启了"减少动画"（`prefers-reduced-motion: reduce`），所有动效走缩短版/直跳是**设计内行为**。
 
 ## 2. 体验层七项新能力（2026-08-16）
@@ -47,13 +47,13 @@ src/renderer/components/meetingCurve.ts + MeetingCanvas.tsx  相遇线动画基�
 src/index.css                   旧 Ayin 残余——待退役
 ```
 
-## 4. 验证基线（0.1.11）
+## 4. 验证基线（0.1.12）
 
 ```text
 npm run lint               0 warning
 npm test                   104 文件 / 843 项
-npm run test:e2e:electron  5 场景 22 张截图
-npm run dist               0.1.11 安装器（release:verify 的冒烟段对正式安装有保护，覆盖升级用 /S 手动做）
+npm run test:e2e:electron  5 场景 22 张截图（shell-empty 与 boundary-model-invalid 均经视觉核验：无重复标题、无堆叠）
+npm run dist               0.1.12 安装器（release:verify 的冒烟段对正式安装有保护，覆盖升级用 /S 手动做）
 ```
 
 手动验收清单（E2E 无法覆盖、需真机确认）：
