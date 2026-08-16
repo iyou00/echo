@@ -66,6 +66,9 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
   const [favorited, setFavorited] = useState(false)
   const [feedbackState, setFeedbackState] = useState<'more_like_this' | 'not_right' | null>(null)
   const [audioLevels, setAudioLevels] = useState<number[]>([])
+  const audioLevelsRef = useRef<number[]>([])
+  audioLevelsRef.current = audioLevels
+  const artImgRef = useRef<HTMLImageElement | null>(null)
   const current = state.current
   const currentId = trackId(current)
   const currentKey = trackKey(current)
@@ -73,7 +76,7 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
   currentTrackRef.current = current
   const displayDuration = duration || (current?.durationMs ? current.durationMs / 1000 : 0)
   const progressRatio = displayDuration > 0 ? Math.min(1, currentTime / displayDuration) : 0
-  const activeSegments = Math.round(progressRatio * 30)
+  const [hoverRatio, setHoverRatio] = useState<number | null>(null)
   const canPlayPrevious = state.history.length > 0
   const canPlayNext = state.queue.length > 0
   const playbackBoundaryCopy = playbackBoundary ? boundaryPresentation(playbackBoundary) : null
@@ -84,6 +87,26 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
     next: () => void
     seek: (details: MediaSessionActionDetails) => void
   } | null>(null)
+
+  // 封面呼吸：随真实音频能量轻微推近，暂停时缓缓归位；reduced-motion 直接不做。
+  useEffect(() => {
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const img = artImgRef.current
+    if (!img || reducedMotion) return
+    let frame = 0
+    let smoothed = 0
+    const step = () => {
+      const target = localPlaying ? energyFromLevels(audioLevelsRef.current) : 0
+      smoothed += (target - smoothed) * 0.1
+      img.style.transform = `scale(${(1 + smoothed * 0.045).toFixed(4)})`
+      frame = window.requestAnimationFrame(step)
+    }
+    frame = window.requestAnimationFrame(step)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      img.style.transform = ''
+    }
+  }, [localPlaying, currentKey])
 
   const publishAudioEnergy = useCallback((detail: AudioEnergyDetail) => {
     window.dispatchEvent(new CustomEvent<AudioEnergyDetail>(AUDIO_ENERGY_EVENT, { detail }))
@@ -426,6 +449,8 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
   }
 
   function moveSeekDrag(event: PointerEvent<HTMLDivElement>) {
+    const rect = event.currentTarget.getBoundingClientRect()
+    setHoverRatio(Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)))
     if (!draggingSeekRef.current) return
     seekFromClientX(event.clientX, event.currentTarget, false)
   }
@@ -642,6 +667,7 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
       >
         <div className="d2-sound-art">
           <img
+            ref={artImgRef}
             src={artwork}
             alt={current?.artworkUrl ? `${current.title} 的专辑封面` : 'Echo 情境视觉，两段声音在同一路径相遇'}
             onError={(event) => {
@@ -730,6 +756,7 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
               onPointerMove={moveSeekDrag}
               onPointerUp={stopSeekDrag}
               onPointerCancel={stopSeekDrag}
+              onPointerLeave={() => setHoverRatio(null)}
               onKeyDown={(event) => { void seekFromKeyboard(event).catch(() => undefined) }}
               role="slider"
               tabIndex={current ? 0 : -1}
@@ -740,7 +767,15 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
               aria-valuetext={`${formatClock(currentTime)} / ${formatClock(displayDuration)}`}
               aria-disabled={!current}
             >
-              {Array.from({ length: 30 }).map((_, index) => <i key={index} className={index < activeSegments ? 'on' : ''} />)}
+              <span className="seg-base" />
+              <span className="seg-fill" style={{ width: `${progressRatio * 100}%` }} />
+              <span className="seg-dot" style={{ left: `${progressRatio * 100}%` }} />
+              {hoverRatio !== null && displayDuration > 0 && (
+                <>
+                  <span className="seg-hoverline" style={{ left: `${hoverRatio * 100}%` }} />
+                  <span className="seg-bubble" style={{ left: `${hoverRatio * 100}%` }}>{formatClock(hoverRatio * displayDuration)}</span>
+                </>
+              )}
             </div>
             <div className="d2-progress-time"><span>{formatClock(currentTime)}</span><span>{formatClock(displayDuration)}</span></div>
           </div>
