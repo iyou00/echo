@@ -1,6 +1,6 @@
 # Echo `echo-new` 交接文档
 
-更新时间：2026-08-16（播放视图解耦 0.1.14 之后）
+更新时间：2026-08-16（播放视图解耦 0.1.15 之后）
 交接范围：D1.3 结构性 UI 迁移 + 体验层七项新能力 + 两轮视觉打磨（本文件取代同日早前版本，历史见 git）。
 
 ## 1. 先读结论
@@ -9,7 +9,7 @@
 2. D1.3 迁移与七项 UX 增强均已完成：顶栏天气、反馈闭环、设置面包屑、每日重连动画、风信到达仪式、歌间旁白、Ctrl+K 想到就说。
 3. 两轮视觉打磨已完成：风信页 D1.3 重写（双栏信纸）+ 播放界面（细线进度条/封面呼吸/下一首预告/再说说这首）+ 留白失衡治理（0.1.10）；设置界面四项修正（0.1.11，见 §2.5）。
 4. `index.css` 剩余部分仍承载 Settings 详情表单、Chat 消息流、Voice 页旧类名，属于**下一轮退役对象**。
-5. 版本 `0.1.14`，安装包 `echo-app/release/Echo-Setup-0.1.14.exe`。
+5. 版本 `0.1.15`，安装包 `echo-app/release/Echo-Setup-0.1.15.exe`。
 6. 本机 Windows 开启了"减少动画"（`prefers-reduced-motion: reduce`），所有动效走缩短版/直跳是**设计内行为**。
 
 ## 2. 体验层七项新能力（2026-08-16）
@@ -35,7 +35,7 @@
 3. **设置字号可读性**：small 类文字从 9-10px 提到 10.5-11px（settings/service/profile/queue 全套），不再有小于 10.5px 的正文。
 4. **面包屑唯一导航**：删除三个子视图返回按钮，面包屑加 testid（`settings-crumb-overview/connections`）接管回跳；E2E 改用面包屑导航。
 
-## 2.6 一起听视图与传输解耦（2026-08-16，0.1.14）
+## 2.6 一起听视图与传输解耦（2026-08-16，0.1.15）
 
 用户反馈的两处交互问题（迷你封面 3 个播放入口、播放/暂停引起整页缩放）重构为「按钮管声音，眼睛管视图」：
 
@@ -59,16 +59,17 @@ src/renderer/theme/core.css     D1.3 主体 + 对旧类名的剩余覆盖
 src/renderer/theme/profile.css  品味/关于抽屉共用行样式
 src/renderer/theme/queue.css    队列抽屉
 src/renderer/components/meetingCurve.ts + MeetingCanvas.tsx  相遇线动画基建（首启 5900ms / 每日重连 1500ms / 风信 2000ms 共用）
+src/main/skills/intent/evalCases.ts   意图路由评测集（复利资产，见 §7）
 src/index.css                   旧 Ayin 残余——待退役
 ```
 
-## 4. 验证基线（0.1.14）
+## 4. 验证基线（0.1.15）
 
 ```text
 npm run lint               0 warning
-npm test                   104 文件 / 844 项
+npm test                   105 文件 / 851 项（含意图评测集 7 项）
 npm run test:e2e:electron  5 场景 22 张截图（shell-empty 与 boundary-model-invalid 均经视觉核验：无重复标题、无堆叠）
-npm run dist               0.1.14 安装器（release:verify 的冒烟段对正式安装有保护，覆盖升级用 /S 手动做）
+npm run dist               0.1.15 安装器（release:verify 的冒烟段对正式安装有保护，覆盖升级用 /S 手动做）
 ```
 
 手动验收清单（E2E 无法覆盖、需真机确认）：
@@ -77,7 +78,15 @@ npm run dist               0.1.14 安装器（release:verify 的冒烟段对正�
 3. 老用户（完成过首启）冷启动看到 1.5s 重连动画；首启用户只看完整前奏。
 4. 22 点风信生成后打开风信页，先仪式后信纸；红点在仪式结束后消失。
 
-## 5. 不要做的事
+## 5. 意图路由的架构方向与评测集（2026-08-16 起生效）
+
+真实故障（陈默之+随便 → 判成场景、从未搜歌手）确立的总方向：**搜索结果是路由的裁判，不是路由的产物**。分阶段推进：
+
+- 已落地（0.1.15，阶段 0+1）：随便/随机移出 SCENE_PATTERN；artist_request 优先于 scene_request；「你觉得X有什么好听的」与裸歌手收尾两个抽取模式（带词表/长度/描述词三道闸）；**意图评测集** `src/main/skills/intent/evalCases.ts`——每次真实失败在修复的同一提交里入集，永不重犯。首批 6 用例（含两轮歌手继承、抛弃信号守卫），上线前就抓出 3 个回归。
+- 下一阶段：接地前置（实体验证与路由 LLM 并行、证据注入 prompt）；路由输出结构化声明、kind 派生化；回退路径改保守模式（证据不足优先追问）。
+- 判定原则：歌手是锚、场景是修饰；「随便/随机」是授权词不是场景；续接轮（再/还有+会话）继承歌手槽，「算了/别的」清空。
+
+## 6. 不要做的事
 
 - 不要恢复覆盖式迁移：新页面直接用 `d2-` 类名 + 新 CSS 文件。
 - 不要把快捷条历史同步改为主进程 message-injected 广播（双写）。
@@ -86,7 +95,7 @@ npm run dist               0.1.14 安装器（release:verify 的冒烟段对正�
 - 队列"正在播放"行截图需要真实推荐数据，E2E 无法低成本伪造。
 - **只信 E2E 截图会漏真机状态**：E2E 是全新档案（无模型、无品味数据），用户真实档案命中的分支可能不同。布局改动要用 `scripts/capture-live.mjs` + `probe-live.mjs`（CDP 连 `--remote-debugging-port=9222` 的真实实例）实测 getBoundingClientRect 与截图后再发布。
 
-## 6. 下一位接手者的建议开工顺序
+## 7. 下一位接手者的建议开工顺序
 
 1. `npm ci && node scripts/rebuild-native.mjs && npm run verify` 确认基线。
 2. 继续退役 index.css 剩余部分（Settings 详情表单、Chat 消息流、Voice 页）。
