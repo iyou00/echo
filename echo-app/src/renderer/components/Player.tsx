@@ -8,7 +8,7 @@ import { boundaryPresentation } from '../boundaryPresentation'
 import { installMediaSessionActions } from './mediaSession'
 import { trackIdentity as trackKey } from '../../shared/trackIdentity'
 import { AUDIO_ENERGY_EVENT, energyFromLevels, levelsFromFrequencyData, type AudioEnergyDetail } from '../audioAnalysis'
-import { favoriteNote, feedbackFallbackNote, FEEDBACK_NOTE_MS } from './feedbackNote'
+import { favoriteNote, feedbackFallbackNote, feedbackFailedNote, FEEDBACK_NOTE_MS } from './feedbackNote'
 import { afterListeningLine, splitNarration } from './listeningNarration'
 
 interface PlayerProps {
@@ -214,7 +214,6 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
         const variantIndex = completedCountRef.current
         completedCountRef.current += 1
         setAfterLineText(afterListeningLine({
-          finishedTitle: current?.title,
           nextReason: next.current.reason ?? next.current.echoNote,
           variantIndex,
         }))
@@ -260,6 +259,11 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
     retryCountRef.current = 0
     setPlaybackError(null)
     setFeedbackState(null)
+    if (afterLineTimerRef.current !== null) {
+      window.clearTimeout(afterLineTimerRef.current)
+      afterLineTimerRef.current = null
+    }
+    setAfterLineText('')
     const track = currentTrackRef.current
     if (!track) {
       setFavorited(false)
@@ -569,7 +573,7 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
     if (!current) return
     const result = await echo.feedback.record(current, action, 'sound_object')
     setFeedbackState(action)
-    showFeedbackNote(result.ok ? (result.message || feedbackFallbackNote()) : feedbackFallbackNote())
+    showFeedbackNote(result.ok ? (result.message || feedbackFallbackNote()) : feedbackFailedNote())
   }
   const companionArtwork = './visuals/context-companion.png'
   const artwork = current?.artworkUrl || companionArtwork

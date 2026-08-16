@@ -1877,7 +1877,6 @@
 }
 
 .d2-feedback-note {
-  grid-column: 1 / -1;
   margin-top: 6px;
   color: var(--d2-forest);
   font: 10px/1.6 var(--d2-serif);

@@ -7,3 +7,7 @@ export function favoriteNote(favorited: boolean): string {
 export function feedbackFallbackNote(): string {
   return '记下了。'
 }
+
+export function feedbackFailedNote(): string {
+  return '没记下，稍后再试一次。'
+}

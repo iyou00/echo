@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { MeetingCanvas } from './MeetingCanvas'
 import { DAILY_RECONNECT_FADE_MS, dailyReconnectDuration } from './dailyReconnectPolicy'
 
@@ -18,9 +18,15 @@ export function DailyReconnect({ onComplete }: { onComplete: () => void }) {
     }
   }, [durationMs, onComplete])
 
+  const fadeTimerRef = useRef<number | null>(null)
+
+  useEffect(() => () => {
+    if (fadeTimerRef.current !== null) window.clearTimeout(fadeTimerRef.current)
+  }, [])
+
   function handleComplete() {
     setLeaving(true)
-    window.setTimeout(onComplete, DAILY_RECONNECT_FADE_MS)
+    fadeTimerRef.current = window.setTimeout(onComplete, DAILY_RECONNECT_FADE_MS)
   }
 
   return (

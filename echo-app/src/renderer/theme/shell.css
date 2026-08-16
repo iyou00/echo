@@ -88,26 +88,6 @@ body {
   line-height: 1;
 }
 
-.d2-brand span {
-  color: var(--d2-muted);
-  font-size: 9px;
-}
-
-.d2-brand span::before {
-  content: "";
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  margin-right: 6px;
-  border-radius: 50%;
-  background: var(--d2-red);
-  vertical-align: 1px;
-}
-
-.d2-brand span.connected::before {
-  background: var(--d2-forest);
-}
-
 .d2-context {
   display: flex;
   align-items: baseline;

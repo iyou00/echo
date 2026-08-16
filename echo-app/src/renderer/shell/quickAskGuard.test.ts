@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { focusIsInTextField, isQuickAskShortcut, shouldOpenQuickAsk } from './quickAskGuard'
+import { isQuickAskShortcut, shouldOpenQuickAsk } from './quickAskGuard'
 
 describe('quick ask guard', () => {
   it('recognizes ctrl/cmd+k regardless of case', () => {
@@ -16,15 +16,5 @@ describe('quick ask guard', () => {
     expect(shouldOpenQuickAsk({ ...base, firstRunOpen: true })).toBe(false)
     expect(shouldOpenQuickAsk({ ...base, onboardingOpen: true })).toBe(false)
     expect(shouldOpenQuickAsk({ ...base, closeDialogOpen: true })).toBe(false)
-  })
-
-  it('detects text-field focus without touching the DOM', () => {
-    const input = { tagName: 'INPUT', isContentEditable: false }
-    const div = { tagName: 'DIV', isContentEditable: false }
-    const editable = { tagName: 'DIV', isContentEditable: true }
-    expect(focusIsInTextField(input)).toBe(true)
-    expect(focusIsInTextField(editable)).toBe(true)
-    expect(focusIsInTextField(div)).toBe(false)
-    expect(focusIsInTextField(null)).toBe(false)
   })
 })

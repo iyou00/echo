@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { PageKey } from '../appState'
 import { isQuickAskShortcut, shouldOpenQuickAsk } from './quickAskGuard'
 import { splitNarration } from '../components/listeningNarration'
+import { getEchoApi } from '../api'
 
 type QuickAskReply = {
   content: string
@@ -33,6 +34,7 @@ export function QuickAskBar({
   const [reply, setReply] = useState<QuickAskReply | null>(null)
   const [error, setError] = useState('')
   const inputRef = useRef<HTMLInputElement | null>(null)
+  const askSessionRef = useRef(0)
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -41,8 +43,10 @@ export function QuickAskBar({
       event.preventDefault()
       if (page === 'chat') {
         const composer = document.querySelector<HTMLInputElement>('.d2-now-page .composer-row input')
-        composer?.focus()
-        return
+        if (composer) {
+          composer.focus()
+          return
+        }
       }
       setOpen(true)
     }
@@ -55,11 +59,11 @@ export function QuickAskBar({
   }, [open])
 
   function close() {
+    askSessionRef.current += 1
     setOpen(false)
     setText('')
     setReply(null)
     setError('')
-    setPending(false)
   }
 
   async function submit() {
@@ -68,13 +72,10 @@ export function QuickAskBar({
     setPending(true)
     setError('')
     setReply(null)
-    if (!window.echo) {
-      setPending(false)
-      setError('这句没接住，再试一次。')
-      return
-    }
+    const session = askSessionRef.current
     try {
-      const result = await window.echo.chat.send(value)
+      const result = await getEchoApi().chat.send(value)
+      if (askSessionRef.current !== session) return
       const returnedTracks = result.message.tracks?.length ? result.message.tracks : result.tracks
       setReply({ content: result.message.content, trackCount: returnedTracks.length })
       window.dispatchEvent(new CustomEvent('echo:quick-ask-exchange', {
@@ -84,10 +85,11 @@ export function QuickAskBar({
         },
       }))
     } catch (error) {
+      if (askSessionRef.current !== session) return
       const message = error instanceof Error ? error.message : String(error)
       setError(/已有任务|稍后再试/.test(message) ? '上一句还在想，等它说完。' : '这句没接住，再试一次。')
     } finally {
-      setPending(false)
+      if (askSessionRef.current === session) setPending(false)
     }
   }
 
@@ -124,6 +126,7 @@ export function QuickAskBar({
             disabled={pending}
             maxLength={500}
             onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing || event.keyCode === 229) return
               if (event.key === 'Escape') {
                 event.preventDefault()
                 close()

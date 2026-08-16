@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { History, MessageCircle, Settings, UserRound } from 'lucide-react'
 import type { PageKey } from '../appState'
 import { WindowControls } from '../components'
+import { getEchoApi } from '../api'
 
 type TopBarWeather = { city: string; condition: string; tempC: number } | null
 
@@ -33,7 +34,7 @@ export function TopBar({
   }, [])
   useEffect(() => {
     let alive = true
-    window.echo?.weather.get().then((info) => {
+    getEchoApi().weather.get().then((info) => {
       if (alive) setWeather(info)
     }).catch(() => undefined)
     return () => {
@@ -48,9 +49,9 @@ export function TopBar({
       <button className="d2-brand" type="button" onClick={() => onNavigate('chat')} title="回到此刻">
         <strong>Echo</strong>
       </button>
-      <div className="d2-context" aria-live="polite">
+      <div className="d2-context">
         <span>{today} · {now}</span>
-        {weather && weather.city && (
+        {weather && weather.city && Number.isFinite(weather.tempC) && (
           <span className="d2-context-weather">{weather.city} {weather.tempC}°{weather.condition ? ` · ${weather.condition}` : ''}</span>
         )}
         {!connected && <strong className="offline">等待连接</strong>}

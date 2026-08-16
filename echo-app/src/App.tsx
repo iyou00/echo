@@ -9,6 +9,7 @@ import { ReviewPage } from './renderer/pages/Review'
 import { SettingsPage } from './renderer/pages/Settings'
 import { VoicePage } from './renderer/pages/Voice'
 import { YinyiPage } from './renderer/pages/Yinyi'
+import { shouldShowYinyiArrival } from './renderer/pages/yinyiArrival'
 import { FirstRunWelcome } from './renderer/components/FirstRunWelcome'
 import { DailyReconnect } from './renderer/components/DailyReconnect'
 import { QuickAskBar } from './renderer/shell/QuickAskBar'
@@ -190,6 +191,8 @@ function App() {
     clearSceneContinuationRetry()
     onboardingDeferredForSessionRef.current = false
     handledImportTaskIdsRef.current.clear()
+    yinyiRitualShownRef.current = ''
+    setYinyiArrivalDate(null)
     const onboardingDisplay = getOnboardingDisplayState(nextSettings, false)
     dispatch({
       settings: nextSettings,
@@ -206,6 +209,9 @@ function App() {
       onboardingOpen: onboardingDisplay.onboardingOpen,
     })
   }, [dispatch, resetPlaybackSnapshot])
+
+  const earlyReturningUserRef = useRef(false)
+  const dailyReconnectDoneRef = useRef(false)
 
   useEffect(() => {
     let alive = true
@@ -229,7 +235,9 @@ function App() {
     }
 
     echo.settings.get().then((earlySettings) => {
-      if (alive) dispatch({ settings: earlySettings })
+      if (!alive) return
+      earlyReturningUserRef.current = Boolean(earlySettings?.meta?.firstRunWelcomeCompletedAt)
+      dispatch({ settings: earlySettings })
     }).catch(() => undefined)
 
     async function boot() {
@@ -289,6 +297,13 @@ function App() {
       } finally {
         const delay = remainingStartupDelay(bootStartedAt, performance.now())
         if (delay > 0) await new Promise((resolve) => window.setTimeout(resolve, delay))
+        if (earlyReturningUserRef.current && alive) {
+          // 等红绿线相遇再揭幕：动画挂载晚于 boot 开始，1500ms 最短显示盖不住相遇点。
+          const deadline = performance.now() + 3000
+          while (!dailyReconnectDoneRef.current && performance.now() < deadline) {
+            await new Promise((resolve) => window.setTimeout(resolve, 90))
+          }
+        }
         if (alive) dispatch({ bootReady: true })
       }
     }
@@ -415,22 +430,26 @@ function App() {
   const [yinyiArrivalDate, setYinyiArrivalDate] = useState<string | null>(null)
   const yinyiUnread = Boolean(latestYinyiDate) && latestYinyiDate !== (settings?.meta?.lastViewedYinyiAt ?? '')
 
-  useEffect(() => {
-    if (page !== 'yinyi' || !yinyiUnread || !latestYinyiDate) return
-    if (yinyiRitualShownRef.current === latestYinyiDate) return
-    yinyiRitualShownRef.current = latestYinyiDate
-    setYinyiArrivalDate(latestYinyiDate)
-  }, [page, yinyiUnread, latestYinyiDate])
-
-  useEffect(() => {
-    if (page !== 'yinyi') return
-    if (yinyiArrivalDate) return
+  const markYinyiViewed = useCallback(() => {
     if (!latestYinyiDate) return
     if (settings?.meta?.lastViewedYinyiAt === latestYinyiDate) return
     echo.settings.update('meta.lastViewedYinyiAt', latestYinyiDate)
       .then(setSettings)
       .catch((error) => logAppAsyncError('mark yinyi viewed', error))
-  }, [page, yinyiArrivalDate, latestYinyiDate, settings?.meta?.lastViewedYinyiAt, echo, setSettings])
+  }, [echo, latestYinyiDate, settings?.meta?.lastViewedYinyiAt, setSettings])
+
+  useEffect(() => {
+    if (!shouldShowYinyiArrival({ page, unread: yinyiUnread, latestDate: latestYinyiDate, alreadyShownFor: yinyiRitualShownRef.current })) return
+    yinyiRitualShownRef.current = latestYinyiDate
+    setYinyiArrivalDate(latestYinyiDate)
+  }, [page, yinyiUnread, latestYinyiDate])
+
+  // 兜底：本会话已播过仪式（或本就无需仪式）时，直接落"已读"。
+  useEffect(() => {
+    if (page !== 'yinyi') return
+    if (yinyiRitualShownRef.current === latestYinyiDate) return
+    markYinyiViewed()
+  }, [page, latestYinyiDate, markYinyiViewed])
 
   useEffect(() => {
     if (!bootReady || !settings) return
@@ -681,7 +700,10 @@ function App() {
     if (returningUser && !dailyReconnectDone) {
       return (
         <div className="echo-shell boot-shell">
-          <DailyReconnect onComplete={() => setDailyReconnectDone(true)} />
+          <DailyReconnect onComplete={() => {
+            dailyReconnectDoneRef.current = true
+            setDailyReconnectDone(true)
+          }} />
         </div>
       )
     }
@@ -747,7 +769,10 @@ function App() {
           <div className="shell-page" style={{ display: page === 'yinyi' ? 'flex' : 'none' }}>
             <YinyiPage
               arrivalDate={yinyiArrivalDate}
-              onArrivalSeen={() => setYinyiArrivalDate(null)}
+              onArrivalSeen={() => {
+                setYinyiArrivalDate(null)
+                markYinyiViewed()
+              }}
               {...commonProps}
               echo={echo}
               isActive={page === 'yinyi'}

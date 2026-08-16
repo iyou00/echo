@@ -29,8 +29,6 @@ export function splitNarration(text: string): NarrationSentence[] {
 }
 
 export type AfterListeningInput = {
-  /** 刚听完的那首 */
-  finishedTitle?: string
   /** 下一首的 Echo 理由（如果有） */
   nextReason?: string
   /** 简单轮换，让连续听完多首时文案不重样 */
@@ -53,11 +51,10 @@ const BRIDGE_LINES = [
  * 听完一首、下一首开始前的过渡句。确定性文案，不走 LLM——
  * 旁白要的是"在场感"，不是新的判断。
  */
-export function afterListeningLine({ finishedTitle, nextReason, variantIndex = 0 }: AfterListeningInput): string {
+export function afterListeningLine({ nextReason, variantIndex = 0 }: AfterListeningInput): string {
   const listened = LISTENED_LINES[Math.abs(variantIndex) % LISTENED_LINES.length]
   if (!nextReason) return listened
   const bridge = BRIDGE_LINES[Math.abs(variantIndex) % BRIDGE_LINES.length]
   const firstSentence = splitNarration(nextReason)[0]?.text ?? ''
-  void finishedTitle
   return `${listened}${bridge}${firstSentence}`
 }

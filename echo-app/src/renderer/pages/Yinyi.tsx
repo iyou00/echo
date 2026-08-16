@@ -37,11 +37,17 @@ function YinyiArrival({ date, onDone }: { date: string; onDone: () => void }) {
   const durationMs = yinyiArrivalDuration(reducedMotion)
   const doneRef = useRef(false)
 
+  const fadeTimerRef = useRef<number | null>(null)
+
+  useEffect(() => () => {
+    if (fadeTimerRef.current !== null) window.clearTimeout(fadeTimerRef.current)
+  }, [])
+
   const finish = useCallback(() => {
     if (doneRef.current) return
     doneRef.current = true
     setLeaving(true)
-    window.setTimeout(onDone, 320)
+    fadeTimerRef.current = window.setTimeout(onDone, 320)
   }, [onDone])
 
   useEffect(() => {
@@ -155,14 +161,13 @@ export function YinyiPage({ echo, isActive, openWithRandom, boundary, arrivalDat
   }, [echo])
 
   useEffect(() => {
+    if (arrivalDate) setDate(arrivalDate)
+  }, [arrivalDate])
+
+  useEffect(() => {
     const becameActive = isActive && !wasActiveRef.current
     wasActiveRef.current = isActive
-    if (!becameActive) return
-    if (arrivalDate) {
-      setDate(arrivalDate)
-      return
-    }
-    if (!openWithRandom) return
+    if (!becameActive || !openWithRandom || arrivalDate) return
     randomEntry().catch(() => undefined)
   }, [isActive, openWithRandom, randomEntry, arrivalDate])
 

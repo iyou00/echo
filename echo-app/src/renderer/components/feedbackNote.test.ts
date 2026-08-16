@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { favoriteNote, feedbackFallbackNote, FEEDBACK_NOTE_MS } from './feedbackNote'
+import { favoriteNote, feedbackFallbackNote, feedbackFailedNote, FEEDBACK_NOTE_MS } from './feedbackNote'
 
 describe('feedback notes', () => {
   it('confirms favoriting and unfavoriting with distinct copy', () => {
@@ -9,6 +9,11 @@ describe('feedback notes', () => {
 
   it('keeps the fallback note short and non-committal', () => {
     expect(feedbackFallbackNote().length).toBeLessThanOrEqual(8)
+  })
+
+  it('never confirms a failed record with positive copy', () => {
+    expect(feedbackFailedNote()).toContain('没记下')
+    expect(feedbackFailedNote()).not.toContain(feedbackFallbackNote())
   })
 
   it('keeps the auto-hide window in a gentle range', () => {
