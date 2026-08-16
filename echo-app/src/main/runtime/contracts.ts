@@ -12,6 +12,7 @@ export type RuntimeTaskKind =
   | 'voice-line'
   | 'listening-segment'
   | 'yinyi-generate'
+  | 'dream-review'
   | 'care-ping'
   | 'taste-refresh'
   | 'scheduler-catchup'

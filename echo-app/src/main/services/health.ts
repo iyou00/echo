@@ -25,6 +25,7 @@ export type SchedulerHealthArea =
   | 'taste-structured'
   | 'taste-portrait'
   | 'care-ping'
+  | 'dream'
 
 const schedulerHealthLabels: Record<SchedulerHealthArea, string> = {
   scheduler: '定时任务',
@@ -33,6 +34,7 @@ const schedulerHealthLabels: Record<SchedulerHealthArea, string> = {
   'taste-structured': '结构画像',
   'taste-portrait': '画像文案',
   'care-ping': '主动关心',
+  dream: '夜间复盘',
 }
 
 const schedulerHealthServices: Record<SchedulerHealthArea, ServiceHealthKind> = {
@@ -42,6 +44,7 @@ const schedulerHealthServices: Record<SchedulerHealthArea, ServiceHealthKind> = 
   'taste-structured': 'scheduler-taste-structured',
   'taste-portrait': 'scheduler-taste-portrait',
   'care-ping': 'scheduler-care-ping',
+  dream: 'scheduler-dream',
 }
 
 export function schedulerHealthMessage(area: SchedulerHealthArea, message: string): string {

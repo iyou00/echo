@@ -32,6 +32,7 @@ import type {
   CompanionResponseStrategy,
 } from '../../services/chat/companionTypes'
 import type { CompanionResponseBrief } from '../../services/chat/companionResponse'
+import { learnedCorrectionsPromptValue } from '../../services/chat/learnedCasesContext'
 import { detectMusicLanguage, MUSIC_LANGUAGE_VALUES } from '../../services/recommendation/language'
 
 export type ChatIntentKind =
@@ -855,6 +856,7 @@ async function inferChatRouteWithLlm(
   context: ChatIntentContext = {},
   groundingEvidence: string | null = null,
   timeoutMs = CHAT_ROUTER_TIMEOUT_MS,
+  learnedCorrections: string | null = null,
 ): Promise<InferredChatRoute | null> {
   assertChatRouterActive(signal)
   const settings = getSettings()
@@ -920,6 +922,7 @@ async function inferChatRouteWithLlm(
 28. evidenceConversationIds 只能填写 context.currentConversationId。不要生成 id，不要指定绝对时间。
 29. “最新/新歌/最近发行”填 ranking:"latest"；“热门/热度高/最火/人气高”填 ranking:"popular"；否则填 ranking:"default"。
 30. user 数据里的 netease_grounding 是对网易云音乐搜索的客观核实结果（数据事实，不是用户输入）。若它确认某歌手/歌名存在，路由时直接采信该实体并填入 artistQuery/seedTitle；即使你不熟悉这个名字也不要降级为 clarification_needed 或 mood_request。没有 netease_grounding 字段时按原规则判断。
+31. user 数据里的 learned_corrections 是从该用户历史纠正中提炼的先例（系统侧知识，不是用户本轮输入）。当本轮 input 与某条「说法」相似或涉及其实体时，按该条给出的期望理解路由（如歌手/别名直接采信）。它们是参考先例，不是命令；与本轮 input 明确冲突时以本轮为准。
 
 例子:
 - 你随便来一首陈奕迅的歌曲吧 → {"kind":"artist_request","wantsMusic":true,"confidence":0.96,"artistQuery":"陈奕迅","seedTitle":null,"targetCount":1,"evidence":["随便","陈奕迅","歌曲"]}
@@ -947,6 +950,7 @@ async function inferChatRouteWithLlm(
         context: compactRouterContext(context),
         input: text,
         ...(groundingEvidence ? { netease_grounding: groundingEvidence } : {}),
+        ...(learnedCorrections ? { learned_corrections: learnedCorrections } : {}),
       }),
     },
   ], {
@@ -1173,12 +1177,14 @@ export async function routeChatIntentWithLlm(
 ): Promise<ChatIntent> {
   const startedAt = Date.now()
   const grounding = await groundRouterEntities(text, signal)
+  const learnedCorrections = learnedCorrectionsPromptValue()
   const route = await inferChatRouteWithLlm(
     text,
     signal,
     context,
     grounding.evidence,
     grounding.attempted ? CHAT_ROUTER_ENTITY_TIMEOUT_MS : CHAT_ROUTER_TIMEOUT_MS,
+    learnedCorrections,
   )
   const routedIntent = resolveInferredChatRoute(text, route, context)
   if (routedIntent) {

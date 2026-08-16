@@ -267,6 +267,30 @@ const migrations: DbMigration[] = [
       `)
     },
   },
+  {
+    version: 13,
+    name: 'learned_cases',
+    up(database) {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS learned_cases (
+          id TEXT PRIMARY KEY,
+          user_id INTEGER NOT NULL,
+          kind TEXT NOT NULL,
+          trigger_text TEXT NOT NULL,
+          learned_json TEXT NOT NULL,
+          evidence_json TEXT NOT NULL,
+          confidence REAL NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          corroborations INTEGER NOT NULL DEFAULT 0,
+          source_date TEXT NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_learned_cases_status
+          ON learned_cases(user_id, status);
+      `)
+    },
+  },
 ]
 
 function backfillSettingsFirstUsedAt(database: Database.Database): void {

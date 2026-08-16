@@ -19,12 +19,14 @@ import {
   rescheduleCarePings,
   stopCarePingScheduler,
 } from './scheduler/carePingJobs'
+import { parseReviewAt, runDreamCatchup, runDreamDailyTask } from './scheduler/dreamJobs'
 
 export { listTodayCarePingPlans, rescheduleCarePings }
 
 let yinyiTask: ScheduledTask | null = null
 let tasteStructuredTask: ScheduledTask | null = null
 let tastePortraitTask: ScheduledTask | null = null
+let dreamTask: ScheduledTask | null = null
 
 function todayIso(): string {
   return localIsoDate(new Date())
@@ -60,6 +62,7 @@ export function registerScheduler(): void {
   rescheduleYinyi()
   rescheduleCarePings()
   rescheduleTasteProfile()
+  rescheduleDream()
   recordSchedulerHealth('scheduler', 'ok', '运行正常。')
 }
 
@@ -91,6 +94,20 @@ export function rescheduleTasteProfile(): void {
   })
 }
 
+export function rescheduleDream(): void {
+  dreamTask?.stop()
+  dreamTask = null
+
+  const settings = getSettings()
+  if (!settings.dream.enabled) return
+  const { hour, minute } = parseReviewAt(settings.dream.reviewAt)
+  dreamTask = cron.schedule(`${minute} ${hour} * * *`, async () => {
+    await runDreamDailyTask(todayIso()).catch((error) => {
+      recordScheduledFailure('dream', '执行失败。', error)
+    })
+  })
+}
+
 export function stopScheduler(): void {
   yinyiTask?.stop()
   yinyiTask = null
@@ -99,6 +116,8 @@ export function stopScheduler(): void {
   tasteStructuredTask = null
   tastePortraitTask?.stop()
   tastePortraitTask = null
+  dreamTask?.stop()
+  dreamTask = null
 }
 
 export function selectStartupCatchupPrimary(results: SchedulerCatchupResult[], now = new Date()): SchedulerCatchupResult {
@@ -110,6 +129,7 @@ export function selectStartupCatchupPrimary(results: SchedulerCatchupResult[], n
 export async function runStartupCatchup(): Promise<SchedulerCatchupReport> {
   const results: SchedulerCatchupResult[] = []
   results.push(await runYinyiCatchup())
+  results.push(await runDreamCatchup())
   const tasteResults = await runTasteProfileCatchup().catch((error) => {
     const message = error instanceof Error ? error.message : '画像补偿任务失败'
     return [{

@@ -12,6 +12,7 @@ const HEALTH_DEFAULTS: Record<ServiceHealthKind, string> = {
   'scheduler-taste-structured': '结构画像定时任务状态还没检查。',
   'scheduler-taste-portrait': '画像文案定时任务状态还没检查。',
   'scheduler-care-ping': '主动关心定时任务状态还没检查。',
+  "scheduler-dream": "夜间复盘",
   storage: '本地加密存储还没检查。',
 }
 

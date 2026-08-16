@@ -23,6 +23,10 @@ const defaultSettings: Settings = {
     generateAt: '22:00',
     openWithRandom: false,
   },
+  dream: {
+    enabled: true,
+    reviewAt: '23:30',
+  },
   carePings: {
     enabled: false,
     frequency: 'normal',
@@ -74,6 +78,8 @@ export const SETTINGS_PATHS: readonly SettingPath[] = [
   'llm.lastTestedOk',
   'yinyi.generateAt',
   'yinyi.openWithRandom',
+  'dream.enabled',
+  'dream.reviewAt',
   'carePings.enabled',
   'carePings.frequency',
   'carePings.detectFullscreen',
@@ -178,6 +184,7 @@ function validateSettingValue(path: SettingPath, value: unknown): unknown {
       return assertOptionalString(value, path)
     case 'llm.lastTestedOk':
     case 'yinyi.openWithRandom':
+    case 'dream.enabled':
     case 'carePings.enabled':
     case 'carePings.detectFullscreen':
     case 'carePings.quietHours.enabled':
@@ -188,6 +195,11 @@ function validateSettingValue(path: SettingPath, value: unknown): unknown {
     case 'yinyi.generateAt': {
       const text = assertString(value, path)
       if (!isValidClockTime(text)) throw new Error('生成时间格式需要是 HH:mm')
+      return text
+    }
+    case 'dream.reviewAt': {
+      const text = assertString(value, path)
+      if (!isValidClockTime(text)) throw new Error('复盘时间格式需要是 HH:mm')
       return text
     }
     case 'carePings.quietHours.start':
@@ -233,6 +245,7 @@ function mergeDefaults(value: Partial<Settings>): Settings {
     ...value,
     llm: { ...defaultSettings.llm, ...(value.llm ?? {}) },
     yinyi: { ...defaultSettings.yinyi, ...(value.yinyi ?? {}) },
+    dream: { ...defaultSettings.dream, ...(value.dream ?? {}) },
     carePings: {
       ...defaultSettings.carePings,
       ...(value.carePings ?? {}),

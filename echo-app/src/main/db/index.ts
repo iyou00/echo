@@ -164,6 +164,22 @@ export function initializeDatabase(database = getDb()): void {
     );
     CREATE INDEX IF NOT EXISTS idx_care_ping_schedule_lookup ON care_ping_schedule(date, planned_at ASC);
 
+    CREATE TABLE IF NOT EXISTS learned_cases (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      trigger_text TEXT NOT NULL,
+      learned_json TEXT NOT NULL,
+      evidence_json TEXT NOT NULL,
+      confidence REAL NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      corroborations INTEGER NOT NULL DEFAULT 0,
+      source_date TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_learned_cases_status ON learned_cases(user_id, status);
+
     CREATE TABLE IF NOT EXISTS scene_sessions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
@@ -369,6 +385,7 @@ export function resetDatabase(): void {
         DELETE FROM agent_action_outcomes;
         DELETE FROM agent_action_items;
         DELETE FROM agent_actions;
+        DELETE FROM learned_cases;
         DELETE FROM stage_context_evidence;
         DELETE FROM stage_contexts;
         DELETE FROM listening_segments;

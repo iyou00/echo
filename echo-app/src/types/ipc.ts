@@ -128,6 +128,7 @@ export type ServiceHealthKind =
   | 'scheduler-taste-structured'
   | 'scheduler-taste-portrait'
   | 'scheduler-care-ping'
+  | 'scheduler-dream'
   | 'storage'
 export type ServiceHealthStatus = 'ok' | 'degraded' | 'error' | 'unknown'
 export type RuntimeTaskStatus = 'running' | 'succeeded' | 'failed' | 'canceled'
@@ -361,7 +362,7 @@ export interface ImportTaskSnapshot {
 
 export interface SchedulerCatchupResult {
   ok: boolean
-  job: 'yinyi_daily' | 'taste_profile_structured' | 'taste_profile_portrait'
+  job: 'yinyi_daily' | 'taste_profile_structured' | 'taste_profile_portrait' | 'dream_review'
   date?: string
   status: 'completed' | 'failed' | 'skipped'
   message: string
@@ -530,6 +531,10 @@ export interface Settings {
     generateAt: string
     openWithRandom: boolean
   }
+  dream: {
+    enabled: boolean
+    reviewAt: string
+  }
   carePings: {
     enabled: boolean
     frequency: CareFrequency
@@ -582,6 +587,8 @@ export interface SettingPathValueMap {
   'llm.lastTestedAt': string
   'llm.lastTestedOk': boolean
   'yinyi.generateAt': string
+  'dream.enabled': boolean
+  'dream.reviewAt': string
   'yinyi.openWithRandom': boolean
   'carePings.enabled': boolean
   'carePings.frequency': CareFrequency

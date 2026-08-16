@@ -61,6 +61,10 @@ const mockSettings: Settings = {
     generateAt: '22:00',
     openWithRandom: false,
   },
+  dream: {
+    enabled: true,
+    reviewAt: '23:30',
+  },
   carePings: {
     enabled: false,
     frequency: 'normal',

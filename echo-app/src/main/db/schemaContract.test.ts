@@ -33,6 +33,7 @@ describe('database schema contract', () => {
       'track_feedback',
       'track_feedback_events',
       'taste_question_prompts',
+      'learned_cases',
     ]) {
       expect(migrationsSource, table).toContain(table)
     }

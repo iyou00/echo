@@ -2,7 +2,7 @@ import { ipcMain } from 'electron'
 import { getSettings, importPlaylistFromDialog, testLlm, updateSetting, updateSettingsBatch, downloadPlaylistTemplate, exportData, resetAllData, type SettingUpdatePatch } from '../services/settings'
 import { StorageUnavailableError } from '../utils/secureStorage'
 import { resetPlaybackState } from '../services/playback'
-import { rescheduleCarePings, rescheduleYinyi } from '../services/scheduler'
+import { rescheduleCarePings, rescheduleDream, rescheduleYinyi } from '../services/scheduler'
 import { getImportTaskSnapshot } from '../services/importTasks'
 import { clearRuntimeTasks, getRecentTasks } from '../runtime/runtime'
 import { broadcast, maskSettings } from './shared'
@@ -10,6 +10,7 @@ import { broadcast, maskSettings } from './shared'
 function applySettingsSideEffects(paths: string[]): void {
   if (paths.some((path) => path.startsWith('yinyi.'))) rescheduleYinyi()
   if (paths.some((path) => path.startsWith('carePings.'))) rescheduleCarePings()
+  if (paths.some((path) => path.startsWith('dream.'))) rescheduleDream()
 }
 
 export function registerSettingsIpc(): void {

@@ -1,7 +1,7 @@
 import { runTask } from '../../runtime/runtime'
 import type { AgentRunContext } from '../../runtime/agent'
 
-export type SchedulerRuntimeTaskKind = 'yinyi-generate' | 'care-ping' | 'taste-refresh' | 'scheduler-catchup'
+export type SchedulerRuntimeTaskKind = 'yinyi-generate' | 'care-ping' | 'taste-refresh' | 'scheduler-catchup' | 'dream-review'
 
 export interface SchedulerRuntimeResult {
   status: string
