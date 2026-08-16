@@ -196,7 +196,8 @@ export async function runDreamReview(date: string, options: { signal?: AbortSign
       maxTokens: 800,
     })
     content = completion
-  } catch {
+  } catch (error) {
+    console.warn('[dream] review model unavailable', error instanceof Error ? error.message : error)
     content = null
   }
   if (!content) {
