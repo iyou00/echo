@@ -1,15 +1,16 @@
 # Echo `echo-new` 交接文档
 
-更新时间：2026-08-16（UX 七提案落地之后）
-交接范围：D1.3 结构性 UI 迁移 + 体验层七项新能力（本文件取代同日早前版本，历史见 git）。
+更新时间：2026-08-16（设置界面打磨 0.1.11 之后）
+交接范围：D1.3 结构性 UI 迁移 + 体验层七项新能力 + 两轮视觉打磨（本文件取代同日早前版本，历史见 git）。
 
 ## 1. 先读结论
 
 1. 当前工作分支仍是 `echo-new`，不是 `main`。
 2. D1.3 迁移与七项 UX 增强均已完成：顶栏天气、反馈闭环、设置面包屑、每日重连动画、风信到达仪式、歌间旁白、Ctrl+K 想到就说。
-3. `index.css` 剩余部分仍承载 Settings 详情表单、Chat 消息流、Voice 页旧类名，属于**下一轮退役对象**。
-4. 版本 `0.1.9`，安装包 `echo-app/release/Echo-Setup-0.1.9.exe`。
-5. 本机 Windows 开启了"减少动画"（`prefers-reduced-motion: reduce`），所有动效走缩短版/直跳是**设计内行为**。
+3. 两轮视觉打磨已完成：风信页 D1.3 重写（双栏信纸）+ 播放界面（细线进度条/封面呼吸/下一首预告/再说说这首）+ 留白失衡治理（0.1.10）；设置界面四项修正（0.1.11，见 §2.5）。
+4. `index.css` 剩余部分仍承载 Settings 详情表单、Chat 消息流、Voice 页旧类名，属于**下一轮退役对象**。
+5. 版本 `0.1.11`，安装包 `echo-app/release/Echo-Setup-0.1.11.exe`。
+6. 本机 Windows 开启了"减少动画"（`prefers-reduced-motion: reduce`），所有动效走缩短版/直跳是**设计内行为**。
 
 ## 2. 体验层七项新能力（2026-08-16）
 
@@ -25,6 +26,15 @@
 
 架构约定：体验层改动全部只动渲染层（唯一例外：无）；快捷条的历史同步用渲染层 CustomEvent（`echo:quick-ask-exchange`），**不要**改回主进程广播（会与打字机流程双写用户消息）。确定性文案（听后感/反馈确认）刻意不走 LLM——旁白要的是在场感，不是新判断。
 
+## 2.5 设置界面四项修正（2026-08-16，0.1.11）
+
+用户真机反馈驱动的修正，全部只动渲染层：
+
+1. **模型缺失空状态左对齐**：「还差一条模型连接」提示块从舞台居中移到左栏（left 7.2%，max 470px），与 presence 同侧同对齐方式。CSS：`.d2-now-page .conversation.stage-dialogue > .empty-state`。
+2. **导入歌单视图 D1.3 化**：网易云登录/二维码/短信/进度条/从文件导入全部改为细线平面语言（衬线标题、方角二维码框、2px 红线进度条、底线输入框）。E2E 新增 `settings-import.png`（共 22 张）。
+3. **设置字号可读性**：small 类文字从 9-10px 提到 10.5-11px（settings/service/profile/queue 全套），不再有小于 10.5px 的正文。
+4. **面包屑唯一导航**：删除三个子视图返回按钮，面包屑加 testid（`settings-crumb-overview/connections`）接管回跳；E2E 改用面包屑导航。
+
 ## 3. 文件职责
 
 ```text
@@ -37,13 +47,13 @@ src/renderer/components/meetingCurve.ts + MeetingCanvas.tsx  相遇线动画基�
 src/index.css                   旧 Ayin 残余——待退役
 ```
 
-## 4. 验证基线（0.1.9）
+## 4. 验证基线（0.1.11）
 
 ```text
 npm run lint               0 warning
 npm test                   104 文件 / 843 项
-npm run test:e2e:electron  5 场景 24 张截图
-npm run release:verify     0.1.9 安装器 + 干净安装/覆盖升级/静默卸载
+npm run test:e2e:electron  5 场景 22 张截图
+npm run dist               0.1.11 安装器（release:verify 的冒烟段对正式安装有保护，覆盖升级用 /S 手动做）
 ```
 
 手动验收清单（E2E 无法覆盖、需真机确认）：
