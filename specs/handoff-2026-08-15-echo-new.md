@@ -30,7 +30,7 @@
 
 用户真机反馈驱动的修正，全部只动渲染层：
 
-1. **模型缺失空状态并入左栏**：「还差一条模型连接」提示从舞台中央并入左侧 presence 列——presence 标题是**唯一**大标题，boundary 块以 bare 模式渲染（无 ECHO 眉线、无重复标题，只留正文+按钮），位于标题下方续接；presence 的泛用描述行在该态隐藏。注意：不要把空状态整块（含标题）左移——presence 标题本来就写着同一句话，会叠成两句（0.1.11 首版犯过此错，0.1.12 修正）。
+1. **模型缺失空状态并入左栏**：「还差一条模型连接」提示从舞台中央并入左侧 presence 列——presence 标题是**唯一**大标题，boundary 块以 bare 模式渲染（无 ECHO 眉线、无重复标题，只留正文+按钮），位于标题下方续接；presence 的泛用描述行在该态隐藏。两版教训：①不要把空状态整块（含标题）左移——presence 标题本来就写着同一句话，会叠成两句；②CSS 必须对准**实际渲染类名** `.d2-empty`（EmptyState 组件输出），`.empty-state`/`.boundary-state` 是死类名（迁移遗留，已全部清除）。
 2. **导入歌单视图 D1.3 化**：网易云登录/二维码/短信/进度条/从文件导入全部改为细线平面语言（衬线标题、方角二维码框、2px 红线进度条、底线输入框）。E2E 新增 `settings-import.png`（共 22 张）。
 3. **设置字号可读性**：small 类文字从 9-10px 提到 10.5-11px（settings/service/profile/queue 全套），不再有小于 10.5px 的正文。
 4. **面包屑唯一导航**：删除三个子视图返回按钮，面包屑加 testid（`settings-crumb-overview/connections`）接管回跳；E2E 改用面包屑导航。
@@ -69,6 +69,7 @@ npm run dist               0.1.12 安装器（release:verify 的冒烟段对正�
 - 不要给确定性旁白/反馈文案接 LLM。
 - 不要在 renderer 重写 Agent 的主动预算、情境判断或结果归因。
 - 队列"正在播放"行截图需要真实推荐数据，E2E 无法低成本伪造。
+- **只信 E2E 截图会漏真机状态**：E2E 是全新档案（无模型、无品味数据），用户真实档案命中的分支可能不同。布局改动要用 `scripts/capture-live.mjs` + `probe-live.mjs`（CDP 连 `--remote-debugging-port=9222` 的真实实例）实测 getBoundingClientRect 与截图后再发布。
 
 ## 6. 下一位接手者的建议开工顺序
 
