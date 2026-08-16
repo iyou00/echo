@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawn, execSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -73,6 +73,31 @@ function assertFile(target, label) {
   if (!fs.existsSync(target) || fs.statSync(target).size === 0) {
     throw new Error(`${label} is missing: ${target}`)
   }
+}
+
+// 冒烟测试的静默安装会把机器上正式安装的 Echo 当作"旧版本"覆盖卸载。
+// 检测到正式安装（注册表卸载项或默认安装目录）时直接拒绝，除非显式放行。
+function detectRealInstall() {
+  const defaultInstall = path.join(process.env.LOCALAPPDATA ?? '', 'Programs', 'Echo', 'Echo.exe')
+  if (fs.existsSync(defaultInstall)) return defaultInstall
+  try {
+    const output = execSync(
+      'reg query HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall /s /f Echo /d',
+      { stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000 },
+    ).toString()
+    const displayNames = output.match(/DisplayName\s+REG_SZ\s+(.*)/g) ?? []
+    if (displayNames.some((line) => /\bEcho\b/.test(line))) return 'registry uninstall entry'
+  } catch {
+    // reg query 无匹配时退出码非 0，视为没有已安装。
+  }
+  return null
+}
+
+const realInstall = detectRealInstall()
+if (realInstall && process.env.ECHO_SMOKE_ALLOW_CLOBBER !== '1') {
+  console.error(`[installer] 检测到本机已正式安装 Echo（${realInstall}）。冒烟测试会静默覆盖并卸载它。`)
+  console.error('[installer] 如确要在此机器运行，请先卸载正式安装，或设置 ECHO_SMOKE_ALLOW_CLOBBER=1。')
+  process.exit(1)
 }
 
 console.log('[installer] clean install')
