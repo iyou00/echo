@@ -98,7 +98,6 @@ async function fadeVolume(
 
 export function VoicePage({
   echo,
-  navigate,
   playbackState,
   setPlaybackState,
   refreshQueue,
@@ -148,6 +147,7 @@ export function VoicePage({
   const [paragraphs, setParagraphs] = useState<Array<{ id: number; kind: 'text'; text: string } | { id: number; kind: 'music'; label: string }>>([])
   const [trackLabel, setTrackLabel] = useState('')
   const [fading, setFading] = useState(false)
+  const [entering, setEntering] = useState(false)
   const paraIdRef = useRef(0)
   const letterRef = useRef<HTMLDivElement | null>(null)
   const parts = useMemo(() => splitByProgress(text, status === 'done' || status === 'text-only-done' ? 1 : progress), [text, progress, status])
@@ -304,8 +304,43 @@ export function VoicePage({
       window.clearTimeout(failureRetryTimerRef.current)
       failureRetryTimerRef.current = null
     }
+    // 经导航离开（无显式退出按钮）：停 TTS 与墨线、恢复闪避音量、纸面回到落笔前。
+    if (statusRef.current !== 'idle') {
+      fadeRunRef.current += 1
+      if (musicTimerRef.current) {
+        window.clearTimeout(musicTimerRef.current)
+        musicTimerRef.current = null
+      }
+      stopTtsWave(true)
+      audioRef.current?.pause()
+      clearCurrentAudioUrl(false)
+      setProgress(0)
+      setNotice('')
+      setFading(false)
+      setText('')
+      setTrackLabel('')
+      setStatus('idle')
+      restorePlaybackVolume().catch((error) => console.warn('[Voice] restore volume failed (leave page)', error))
+    }
     if (sessionIdRef.current > 0) void endCurrentListeningSession().catch(() => undefined)
-  }, [endCurrentListeningSession, isActive])
+  }, [endCurrentListeningSession, isActive, restorePlaybackVolume])
+
+  useEffect(() => {
+    if (!isActive) return
+    setEntering(true)
+    const timer = window.setTimeout(() => setEntering(false), 900)
+    return () => window.clearTimeout(timer)
+  }, [isActive])
+
+  // 携带音乐进入：正在播的歌直接成为背景书签（点击可去一起听）
+  useEffect(() => {
+    if (!isActive) return
+    const current = playbackState.current
+    if (current && !trackLabel && statusRef.current === 'idle') {
+      setTrackLabel(`${current.title} · ${current.artist}`)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive, playbackState.current])
 
   useEffect(() => {
     if (!isActive) return undefined
@@ -638,37 +673,29 @@ export function VoicePage({
     return () => window.clearTimeout(timer)
   }, [isActive, status, voiceContinuous])
 
-  function backToChat() {
-    setVoiceContinuous(false)
-    voiceContinuousRef.current = false
-    void endCurrentListeningSession().catch(() => undefined)
-    voiceBaselinePlaybackKeyRef.current = ''
-    fadeRunRef.current += 1
-    if (musicTimerRef.current) window.clearTimeout(musicTimerRef.current)
-    if (failureRetryTimerRef.current) {
-      window.clearTimeout(failureRetryTimerRef.current)
-      failureRetryTimerRef.current = null
-    }
-    stopTtsWave(true)
-    audioRef.current?.pause()
-    restorePlaybackVolume().catch((error) => console.warn('[Voice] restore volume failed (backToChat)', error))
-    navigate('chat')
-  }
-
   function toggleContinuousListening() {
     const next = !voiceContinuous
     setVoiceContinuous(next)
     voiceContinuousRef.current = next
-    if (!next) {
-      // 收笔：手上的最后一句落款进信纸
-      if (statusRef.current === 'done' || statusRef.current === 'text-only-done') settleTextParagraph()
-      void endCurrentListeningSession().catch(() => undefined)
-    }
+    if (!next) void endCurrentListeningSession().catch(() => undefined)
     if (!next && failureRetryTimerRef.current) {
       window.clearTimeout(failureRetryTimerRef.current)
       failureRetryTimerRef.current = null
     }
   }
+
+  // 收笔落款：连续结束后（含说话中收笔、写完才收笔两种时机），手上的句子落进信纸，
+  // 视图回到落笔前——整封信留在纸上，墨点按钮随时可以再起一段。
+  useEffect(() => {
+    if (status !== 'done' && status !== 'text-only-done') return
+    if (voiceContinuous || !text.trim() || paragraphs.length === 0) return
+    const finished = text.trim()
+    paraIdRef.current += 1
+    setParagraphs((current) => [...current, { id: paraIdRef.current, kind: 'text', text: finished }])
+    setText('')
+    setTrackLabel('')
+    setStatus('idle')
+  }, [status, voiceContinuous, text, paragraphs.length])
 
   // 散句写完 → 墨散淡出 → 回落笔前（收笔后的信纸不淡出）
   useEffect(() => {
@@ -713,10 +740,39 @@ export function VoicePage({
         }}
         onEnded={() => finishSpeaking().catch(() => setStatus('done'))}
       />
-      <div className={`voice-sheet${status === 'idle' && paragraphs.length === 0 ? ' standby' : ''}`}>
+      <div className={`voice-sheet${status === 'idle' ? ' standby' : ''}${paragraphs.length > 0 ? ' with-letter' : ''}${entering ? ' entering' : ''}`}>
         <div className="voice-status-pill">E C H O · {statusLabel}</div>
 
-        {status === 'idle' && paragraphs.length === 0 ? (
+        {(paragraphs.length > 0 || status === 'speaking' || status === 'done' || status === 'text-only-done' || status === 'error') && (
+          <div className={`voice-letter${status === 'idle' ? ' docked' : ''}`} ref={letterRef}>
+            {paragraphs.map((entry) => (
+              entry.kind === 'music' ? (
+                <button
+                  className="voice-interlude"
+                  type="button"
+                  key={entry.id}
+                  onClick={() => onOpenListening?.()}
+                  title="到一起听看这首歌"
+                >
+                  <span className="rule" aria-hidden="true" />
+                  <span className="voice-interlude-text">♪ {entry.label} · 音乐接着走</span>
+                </button>
+              ) : (
+                <p className="voice-para" key={entry.id}>{entry.text}</p>
+              )
+            ))}
+            {text && status !== 'idle' && (
+              <div className={`voice-hand${fading ? ' fading' : ''}`}>
+                <span className="written">{parts.said}</span>
+                <span className="wetting">{parts.now}</span>
+                <span className="pending">{parts.pending}</span>
+                <span className="voice-caret" aria-hidden="true" />
+              </div>
+            )}
+          </div>
+        )}
+
+        {status === 'idle' ? (
           (() => {
             const greet = splitGreeting(idleGreeting)
             return (
@@ -732,7 +788,6 @@ export function VoicePage({
                 <button className="voice-keep-writing" type="button" onClick={() => { toggleContinuousListening(); void speak(true) }}>
                   或者，让它一直写下去
                 </button>
-                <button className="voice-leave" type="button" onClick={backToChat}>回首页</button>
               </div>
             )
           })()
@@ -743,33 +798,6 @@ export function VoicePage({
           </div>
         ) : (
           <>
-            <div className="voice-letter" ref={letterRef}>
-              {paragraphs.map((entry) => (
-                entry.kind === 'music' ? (
-                  <button
-                    className="voice-interlude"
-                    type="button"
-                    key={entry.id}
-                    onClick={() => onOpenListening?.()}
-                    title="到一起听看这首歌"
-                  >
-                    <span className="rule" aria-hidden="true" />
-                    <span className="voice-interlude-text">♪ {entry.label} · 音乐接着走</span>
-                  </button>
-                ) : (
-                  <p className="voice-para" key={entry.id}>{entry.text}</p>
-                )
-              ))}
-              {text && (
-                <div className={`voice-hand${fading ? ' fading' : ''}`}>
-                  <span className="written">{parts.said}</span>
-                  <span className="wetting">{parts.now}</span>
-                  <span className="pending">{parts.pending}</span>
-                  <span className="voice-caret" aria-hidden="true" />
-                </div>
-              )}
-            </div>
-
             {trackLabel && (
               <button className="voice-music-mark" type="button" onClick={() => onOpenListening?.()} title="到一起听看这首歌">
                 <small>背 景</small>
@@ -784,14 +812,11 @@ export function VoicePage({
             {notice && <div className="voice-notice" role="status">{notice}</div>}
             {voiceBoundary && <BoundaryState compact snapshot={voiceBoundary} onAction={() => { void speak(false, true) }} />}
 
-            <div className="voice-actions">
-              {voiceContinuous ? (
+            {voiceContinuous && (
+              <div className="voice-actions">
                 <button className="voice-action stop" type="button" onClick={toggleContinuousListening}>收 笔</button>
-              ) : (
-                <button className="voice-action" type="button" onClick={() => { void speak(false, true) }} disabled={status === 'speaking'}>再 写 几 句</button>
-              )}
-              <button className="voice-action" type="button" onClick={backToChat}>回首页</button>
-            </div>
+              </div>
+            )}
           </>
         )}
       </div>

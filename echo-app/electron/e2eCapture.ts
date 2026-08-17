@@ -216,6 +216,7 @@ async function captureFirstRun(target: BrowserWindow): Promise<CaptureMetric[]> 
   await waitForSelector(target, '.chat-page')
   await click(target, '.d2-nav-button[aria-label="回声"]')
   await waitForSelector(target, '.field-voice')
+  await wait(1100)
   metrics.push(await capture(target, 'voice-idle-stage.png'))
   await target.webContents.executeJavaScript('window.dispatchEvent(new KeyboardEvent(\'keydown\', { key: \'k\', ctrlKey: true }))', true)
   await wait(250)

@@ -42,6 +42,42 @@
   color: var(--d2-ink);
 }
 
+/* 铺纸入场：纸落下、眉标先画、问候随后浮现 */
+.voice-sheet.entering {
+  animation: voice-paper-settle 0.55s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+.voice-sheet.entering .voice-status-pill {
+  animation: voice-kicker-draw 0.7s ease both;
+}
+.voice-sheet.entering .voice-greet-primary {
+  animation: voice-greet-in 0.6s ease 0.35s both;
+}
+.voice-sheet.entering .voice-ink-btn,
+.voice-sheet.entering .voice-keep-writing {
+  animation: voice-greet-in 0.5s ease 0.55s both;
+}
+@keyframes voice-paper-settle {
+  from { opacity: 0; transform: translateY(10px) scale(1.012); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes voice-kicker-draw {
+  from { opacity: 0; letter-spacing: 6px; }
+  to { opacity: 1; letter-spacing: 3px; }
+}
+@keyframes voice-greet-in {
+  from { opacity: 0; transform: translateY(6px); filter: blur(2px); }
+  to { opacity: 1; transform: none; filter: blur(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-sheet.entering,
+  .voice-sheet.entering .voice-status-pill,
+  .voice-sheet.entering .voice-greet-primary,
+  .voice-sheet.entering .voice-ink-btn,
+  .voice-sheet.entering .voice-keep-writing {
+    animation: none;
+  }
+}
+
 /* 眉标：红色小字 + 细线（同风信页语言） */
 .voice-status-pill {
   position: absolute;
@@ -59,6 +95,16 @@
   height: 1px;
   background: currentColor;
   content: "";
+}
+
+/* 收笔后：信纸停靠上方，落笔前控件沉到下方 */
+.voice-letter.docked {
+  top: 100px;
+  bottom: 300px;
+}
+.voice-sheet.standby.with-letter .voice-standby {
+  place-content: end;
+  padding-bottom: 12%;
 }
 
 /* ——— 落笔前 ——— */
