@@ -141,7 +141,6 @@ export function VoicePage({
   const [voiceBoundary, setVoiceBoundary] = useState<UiBoundarySnapshot | null>(null)
   // —— 信笺：连续模式下写完的段落与音乐插曲累积在纸上；散句写完墨散淡出 ——
   const [paragraphs, setParagraphs] = useState<Array<{ id: number; kind: 'text'; text: string } | { id: number; kind: 'music'; label: string }>>([])
-  const [trackLabel, setTrackLabel] = useState('')
   const [entering, setEntering] = useState(false)
   const paraIdRef = useRef(0)
   const letterRef = useRef<HTMLDivElement | null>(null)
@@ -337,7 +336,6 @@ export function VoicePage({
       setProgress(0)
       setNotice('')
       setText('')
-      setTrackLabel('')
       setStatus('idle')
       restorePlaybackVolume().catch((error) => console.warn('[Voice] restore volume failed (leave page)', error))
     }
@@ -350,16 +348,6 @@ export function VoicePage({
     const timer = window.setTimeout(() => setEntering(false), 900)
     return () => window.clearTimeout(timer)
   }, [isActive])
-
-  // 携带音乐进入：正在播的歌直接成为背景书签（点击可去一起听）
-  useEffect(() => {
-    if (!isActive) return
-    const current = playbackState.current
-    if (current && !trackLabel && statusRef.current === 'idle') {
-      setTrackLabel(`${current.title} · ${current.artist}`)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isActive, playbackState.current])
 
   useEffect(() => {
     if (!isActive) return undefined
@@ -593,6 +581,7 @@ export function VoicePage({
       audioRef.current?.pause()
       musicStartedRef.current = false
       voiceBaselinePlaybackKeyRef.current = trackIdentity(playbackStateRef.current.current)
+      const hadFinishedHand = statusRef.current === 'done' || statusRef.current === 'text-only-done'
       setStatus('generating')
       setNotice('')
       setVoiceBoundary(null)
@@ -608,17 +597,16 @@ export function VoicePage({
         setStatus('idle')
         return
       }
-      const musicLabel = segment.track ? `${segment.track.title} · ${segment.track.artist}` : ''
-      // 连续模式：上一段写完的手迹落进信纸，再起新段
-      if (voiceContinuousRef.current && text.trim() && (statusRef.current !== 'idle' || paragraphs.length > 0)) {
+      // 连续模式：上一段"已写完"的手迹落进信纸再起新段。
+      // hadFinishedHand 在 generating 置位前捕获——否则占位句"让我说一段?"会被当成第一段沉淀。
+      if (voiceContinuousRef.current && hadFinishedHand && text.trim()) {
         settleTextParagraph()
       }
       setText(segment.text)
       trackRef.current = segment.track
-      setTrackLabel(musicLabel)
       if (segment.delivery === 'silent') {
         setText('')
-        settleMusicInterlude(musicLabel)
+        settleMusicInterlude(segment.track ? `${segment.track.title} · ${segment.track.artist}` : '')
         if (segment.track) {
           const next = await echo.playback.play(segment.track)
           setPlaybackState(next)
@@ -701,18 +689,30 @@ export function VoicePage({
     }
   }
 
-  // 收笔落款：连续结束后（含说话中收笔、写完才收笔两种时机），手上的句子落进信纸，
-  // 视图回到落笔前——整封信留在纸上，墨点按钮随时可以再起一段。
+  // 收笔落款：由「连续 → 停止」的下降沿驱动。说话中收笔的，等当前段写完再结算；
+  // 单句写完（从未进入连续）不触发——纸面停在墨迹已干，不再弹回落笔前。
+  const settleOnStopRef = useRef(false)
+  const prevContinuousRef = useRef(voiceContinuous)
   useEffect(() => {
+    if (prevContinuousRef.current && !voiceContinuous) settleOnStopRef.current = true
+    prevContinuousRef.current = voiceContinuous
+  }, [voiceContinuous])
+  useEffect(() => {
+    if (!settleOnStopRef.current) return
+    if (voiceContinuous) {
+      settleOnStopRef.current = false
+      return
+    }
     if (status !== 'done' && status !== 'text-only-done') return
-    if (voiceContinuous || !text.trim() || paragraphs.length === 0) return
+    settleOnStopRef.current = false
     const finished = text.trim()
-    paraIdRef.current += 1
-    setParagraphs((current) => [...current, { id: paraIdRef.current, kind: 'text', text: finished }])
+    if (finished) {
+      paraIdRef.current += 1
+      setParagraphs((current) => [...current, { id: paraIdRef.current, kind: 'text', text: finished }])
+    }
     setText('')
-    setTrackLabel('')
     setStatus('idle')
-  }, [status, voiceContinuous, text, paragraphs.length])
+  }, [status, voiceContinuous, text])
 
   return (
     <div className="phone-surface voice-page">
