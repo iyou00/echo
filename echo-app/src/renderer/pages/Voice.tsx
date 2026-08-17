@@ -150,8 +150,6 @@ export function VoicePage({
   const [entering, setEntering] = useState(false)
   const [grindCycle, setGrindCycle] = useState(0)
   const grindCycleRef = useRef(0)
-  const [speakCycle, setSpeakCycle] = useState(0)
-  const speakCycleRef = useRef(0)
   const paraIdRef = useRef(0)
   const letterRef = useRef<HTMLDivElement | null>(null)
   const parts = useMemo(() => splitByProgress(text, status === 'done' || status === 'text-only-done' ? 1 : progress), [text, progress, status])
@@ -787,19 +785,9 @@ export function VoicePage({
           </div>
         ) : (
           <>
-            {status === 'speaking' ? (
-              <div className="voice-curves" aria-hidden="true">
-                <MeetingCanvas
-                  key={`speak-${speakCycle}`}
-                  durationMs={2200}
-                  onComplete={() => { speakCycleRef.current += 1; setSpeakCycle(speakCycleRef.current) }}
-                />
-              </div>
-            ) : (
-              <svg className="voice-ink-stroke" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
-                <path d={inkPathD} />
-              </svg>
-            )}
+            <svg className={`voice-ink-stroke${status === 'speaking' ? ' breathing' : ''}`} viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
+              <path d={inkPathD} />
+            </svg>
 
             {notice && <div className="voice-notice" role="status">{notice}</div>}
             {voiceBoundary && <BoundaryState compact snapshot={voiceBoundary} onAction={() => { void speak(false, true) }} />}

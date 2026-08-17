@@ -304,21 +304,7 @@
   100% { opacity: 0; filter: blur(3px); }
 }
 
-/* 书写中的两线相遇曲线（品牌动画，循环播放） */
-.voice-curves {
-  position: absolute;
-  left: 50%;
-  bottom: 130px;
-  width: min(430px, 46%);
-  height: 120px;
-  transform: translateX(-72%);
-}
-.voice-curves canvas {
-  width: 100%;
-  height: 120px;
-}
-
-/* 墨线：写完后的静态留纸 */
+/* 墨线：书写中随音量呼吸（实时 SVG），写完静止留纸 */
 .voice-ink-stroke {
   position: absolute;
   left: 7%;
@@ -330,6 +316,9 @@
 .voice-ink-stroke path {
   fill: var(--d2-ink);
   opacity: 0.82;
+}
+.voice-ink-stroke.breathing {
+  filter: drop-shadow(0 1px 0 rgba(25, 32, 27, 0.06));
 }
 
 /* 提示与边界 */
