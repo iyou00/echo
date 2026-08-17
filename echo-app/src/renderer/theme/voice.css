@@ -5,6 +5,12 @@
    与风信页（深夜写的长信）构成"说与写"的对偶。
    ———————————————————————————————————————— */
 
+/* 联动：回声页里打开一起听视图时，纸面整页让位（回声引擎不停，回到此刻原样恢复）。
+   一起听是叠在夜色 shell 上的图层组，纸面若不隐藏就会与其重叠。 */
+.d2-shell.field-listening .voice-page {
+  display: none;
+}
+
 /* 页面底：纸面 + 灯下暖光（替代旧夜色） */
 .d2-shell.field-voice .voice-page {
   position: absolute;

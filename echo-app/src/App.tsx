@@ -693,6 +693,15 @@ function App() {
       dispatch({ listeningViewOpen: false })
     }
   }, [listeningViewOpen, playbackTrack, playbackStatus, dispatch])
+  // 点「回声」导航的意图是去纸面：从其它页面进入 voice 时，若残留一起听视图（如对话
+  // 点歌自动打开过）随之收起。已在 voice 页内点封面打开的一起听不受影响（页面未切换）。
+  const prevPageRef = useRef(page)
+  useEffect(() => {
+    if (page === 'voice' && prevPageRef.current !== 'voice' && listeningViewOpen) {
+      dispatch({ listeningViewOpen: false })
+    }
+    prevPageRef.current = page
+  }, [page, listeningViewOpen, dispatch])
   const drawerOpen = page === 'queue' || page === 'profile' || page === 'settings' || page === 'about'
   const [settingsDrawerTitle, setSettingsDrawerTitle] = useState('设置')
   const [dailyReconnectDone, setDailyReconnectDone] = useState(false)
