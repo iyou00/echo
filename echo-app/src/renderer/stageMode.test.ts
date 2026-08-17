@@ -37,6 +37,17 @@ describe('stage mode', () => {
     })).toBe('idle')
   })
 
+  it('lets the listening view win inside the voice page when a track plays', () => {
+    expect(deriveWindowFieldMode({
+      page: 'voice', voiceContinuous: true, currentScene: false,
+      hasCurrentTrack: true, listeningViewOpen: true, chatStageMode: 'idle',
+    })).toBe('listening')
+    expect(deriveWindowFieldMode({
+      page: 'voice', voiceContinuous: true, currentScene: false,
+      hasCurrentTrack: true, listeningViewOpen: false, chatStageMode: 'idle',
+    })).toBe('voice')
+  })
+
   it.each([
     ['recommendation', 'searching'],
     ['weather', 'searching'],

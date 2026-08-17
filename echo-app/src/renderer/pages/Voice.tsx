@@ -16,6 +16,8 @@ interface VoicePageProps extends AppPageProps {
   isActive?: boolean
   voiceContinuous: boolean
   setVoiceContinuous: (value: boolean) => void
+  /** 联动：点击音乐书签 → 打开一起听视图（连续回声不停） */
+  onOpenListening?: () => void
 }
 
 type VoiceStatus = 'idle' | 'generating' | 'speaking' | 'done' | 'text-only-done' | 'error'
@@ -104,6 +106,7 @@ export function VoicePage({
   isActive = false,
   voiceContinuous,
   setVoiceContinuous,
+  onOpenListening,
 }: VoicePageProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
@@ -141,8 +144,55 @@ export function VoicePage({
   const [waveLevels, setWaveLevels] = useState(idleWave)
   const [notice, setNotice] = useState('')
   const [voiceBoundary, setVoiceBoundary] = useState<UiBoundarySnapshot | null>(null)
+  // —— 信笺：连续模式下写完的段落与音乐插曲累积在纸上；散句写完墨散淡出 ——
+  const [paragraphs, setParagraphs] = useState<Array<{ id: number; kind: 'text'; text: string } | { id: number; kind: 'music'; label: string }>>([])
+  const [trackLabel, setTrackLabel] = useState('')
+  const [fading, setFading] = useState(false)
+  const paraIdRef = useRef(0)
+  const letterRef = useRef<HTMLDivElement | null>(null)
   const parts = useMemo(() => splitByProgress(text, status === 'done' || status === 'text-only-done' ? 1 : progress), [text, progress, status])
-  const statusLabel = status === 'generating' ? 'T H I N K I N G' : status === 'speaking' ? 'S P E A K I N G' : status === 'done' || status === 'text-only-done' ? 'D O N E' : 'S T A N D B Y'
+  const statusLabel = status === 'generating'
+    ? '研 墨 中'
+    : status === 'speaking'
+      ? '正 在 书 写'
+      : status === 'done' || status === 'text-only-done'
+        ? voiceContinuous ? '笔 未 停' : '墨 迹 已 干'
+        : status === 'error'
+          ? '墨 断 了'
+          : '落 笔 前'
+
+  function settleTextParagraph(): void {
+    const finished = text.trim()
+    if (!finished) return
+    paraIdRef.current += 1
+    setParagraphs((current) => [...current, { id: paraIdRef.current, kind: 'text', text: finished }])
+  }
+
+  function settleMusicInterlude(label: string): void {
+    if (!label) return
+    paraIdRef.current += 1
+    setParagraphs((current) => [...current, { id: paraIdRef.current, kind: 'music', label }])
+  }
+
+  // 墨线：waveLevels（TTS 频谱）→ 一条两端细中间饱满的墨带，粗细随音量呼吸
+  const inkPathD = useMemo(() => {
+    const width = 100, height = 40, mid = height / 2
+    const points = waveLevels.map((level, index) => {
+      const x = (index / (voiceWaveCount - 1)) * width
+      const envelope = Math.sin((index / (voiceWaveCount - 1)) * Math.PI) ** 1.5
+      const amplitude = Math.max(1.4, ((level - 12) / 70) * 15 * envelope + 1.2 * envelope)
+      return { x, top: mid - amplitude, bottom: mid + amplitude }
+    })
+    const head = points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.top.toFixed(2)}`).join(' ')
+    const tail = [...points].reverse().map((point) => `L ${point.x.toFixed(2)} ${point.bottom.toFixed(2)}`).join(' ')
+    return `${head} ${tail} Z`
+  }, [waveLevels])
+
+  // 信纸跟随：新段落落笔时滚到最新
+  useEffect(() => {
+    const letter = letterRef.current
+    if (letter) letter.scrollTop = letter.scrollHeight
+  }, [paragraphs, text])
 
   function clearCurrentAudioUrl(updateState = true) {
     if (prevAudioUrlRef.current.startsWith('blob:')) URL.revokeObjectURL(prevAudioUrlRef.current)
@@ -494,6 +544,7 @@ export function VoicePage({
       setNotice('')
       setVoiceBoundary(null)
       setProgress(0)
+      setFading(false)
       clearCurrentAudioUrl()
       restoreVolumeRef.current = await echo.playback.getVolume()
       volumeRestoreArmedRef.current = true
@@ -505,10 +556,17 @@ export function VoicePage({
         setStatus('idle')
         return
       }
+      const musicLabel = segment.track ? `${segment.track.title} · ${segment.track.artist}` : ''
+      // 连续模式：上一段写完的手迹落进信纸，再起新段
+      if (voiceContinuousRef.current && text.trim() && (statusRef.current !== 'idle' || paragraphs.length > 0)) {
+        settleTextParagraph()
+      }
       setText(segment.text)
       trackRef.current = segment.track
+      setTrackLabel(musicLabel)
       if (segment.delivery === 'silent') {
         setText('')
+        settleMusicInterlude(musicLabel)
         if (segment.track) {
           const next = await echo.playback.play(segment.track)
           setPlaybackState(next)
@@ -601,12 +659,33 @@ export function VoicePage({
     const next = !voiceContinuous
     setVoiceContinuous(next)
     voiceContinuousRef.current = next
-    if (!next) void endCurrentListeningSession().catch(() => undefined)
+    if (!next) {
+      // 收笔：手上的最后一句落款进信纸
+      if (statusRef.current === 'done' || statusRef.current === 'text-only-done') settleTextParagraph()
+      void endCurrentListeningSession().catch(() => undefined)
+    }
     if (!next && failureRetryTimerRef.current) {
       window.clearTimeout(failureRetryTimerRef.current)
       failureRetryTimerRef.current = null
     }
   }
+
+  // 散句写完 → 墨散淡出 → 回落笔前（收笔后的信纸不淡出）
+  useEffect(() => {
+    if (status !== 'done' && status !== 'text-only-done') return undefined
+    if (voiceContinuous || notice || voiceBoundary || paragraphs.length > 0) return undefined
+    const fadeTimer = window.setTimeout(() => setFading(true), 2100)
+    const clearTimer = window.setTimeout(() => {
+      setText('')
+      setTrackLabel('')
+      setFading(false)
+      setStatus('idle')
+    }, 2100 + 2600)
+    return () => {
+      window.clearTimeout(fadeTimer)
+      window.clearTimeout(clearTimer)
+    }
+  }, [status, voiceContinuous, notice, voiceBoundary, paragraphs.length])
 
   return (
     <div className="phone-surface voice-page">
@@ -634,9 +713,10 @@ export function VoicePage({
         }}
         onEnded={() => finishSpeaking().catch(() => setStatus('done'))}
       />
-      <div className={status === 'idle' ? 'voice-sheet standby' : 'voice-sheet'}>
+      <div className={`voice-sheet${status === 'idle' && paragraphs.length === 0 ? ' standby' : ''}`}>
         <div className="voice-status-pill">E C H O · {statusLabel}</div>
-        {status === 'idle' ? (
+
+        {status === 'idle' && paragraphs.length === 0 ? (
           (() => {
             const greet = splitGreeting(idleGreeting)
             return (
@@ -645,54 +725,72 @@ export function VoicePage({
                   <div className="voice-greet-primary">{greet.primary}</div>
                   {greet.secondary && <div className="voice-greet-secondary">{greet.secondary}</div>}
                 </div>
-                <button className="voice-orb-button" type="button" onClick={() => { void speak() }} aria-label="听 Echo 说几句">
-                  <span className="voice-orb" aria-hidden="true">
-                    <span className="voice-orb-ring ring-one" />
-                    <span className="voice-orb-ring ring-two" />
-                    <span className="voice-orb-core" />
-                  </span>
-                  <span className="voice-primary">听 Echo 说几句</span>
+                <button className="voice-ink-btn" type="button" onClick={() => { void speak() }} aria-label="听 Echo 说几句">
+                  <span className="voice-ink-dot" aria-hidden="true" />
+                  <span>再 写 几 句</span>
                 </button>
+                <button className="voice-keep-writing" type="button" onClick={() => { toggleContinuousListening(); void speak(true) }}>
+                  或者，让它一直写下去
+                </button>
+                <button className="voice-leave" type="button" onClick={backToChat}>回首页</button>
               </div>
             )
           })()
         ) : status === 'generating' ? (
-          <div className="voice-generating">
-            <span />
-            <span />
-            <span />
+          <div className="voice-grinding" aria-live="polite">
+            <span className="voice-grind-rule" />
+            <span>研 墨 中</span>
           </div>
         ) : (
           <>
-            <div className="voice-text">
-              <span className="said">{parts.said}</span>
-              <span className="now">{parts.now}</span>
-              <span className="pending">{parts.pending}</span>
+            <div className="voice-letter" ref={letterRef}>
+              {paragraphs.map((entry) => (
+                entry.kind === 'music' ? (
+                  <button
+                    className="voice-interlude"
+                    type="button"
+                    key={entry.id}
+                    onClick={() => onOpenListening?.()}
+                    title="到一起听看这首歌"
+                  >
+                    <span className="rule" aria-hidden="true" />
+                    <span className="voice-interlude-text">♪ {entry.label} · 音乐接着走</span>
+                  </button>
+                ) : (
+                  <p className="voice-para" key={entry.id}>{entry.text}</p>
+                )
+              ))}
+              {text && (
+                <div className={`voice-hand${fading ? ' fading' : ''}`}>
+                  <span className="written">{parts.said}</span>
+                  <span className="wetting">{parts.now}</span>
+                  <span className="pending">{parts.pending}</span>
+                  <span className="voice-caret" aria-hidden="true" />
+                </div>
+              )}
             </div>
-            <div className="big-wave">
-              <div className={status === 'speaking' ? 'tts-wave active' : status === 'done' || status === 'text-only-done' ? 'tts-wave music' : 'tts-wave'}>
-                {waveLevels.map((level, index) => (
-                  <span
-                    style={{
-                      height: `${level}px`,
-                      animationDelay: `${Math.abs(index - voiceWaveMid) * 0.055}s`,
-                      animationDuration: `${0.98 + (Math.abs(index - voiceWaveMid) % 5) * 0.06}s`,
-                    }}
-                    key={index}
-                  />
-                ))}
-              </div>
-            </div>
-            {notice && <div className="voice-notice">{notice}</div>}
+
+            {trackLabel && (
+              <button className="voice-music-mark" type="button" onClick={() => onOpenListening?.()} title="到一起听看这首歌">
+                <small>背 景</small>
+                <b>{trackLabel}</b>
+              </button>
+            )}
+
+            <svg className="voice-ink-stroke" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
+              <path d={inkPathD} />
+            </svg>
+
+            {notice && <div className="voice-notice" role="status">{notice}</div>}
             {voiceBoundary && <BoundaryState compact snapshot={voiceBoundary} onAction={() => { void speak(false, true) }} />}
-            <div className="voice-foot">
-              <div className="voice-actions">
-                <button className={voiceContinuous ? 'exit-btn voice-loop active' : 'exit-btn voice-loop'} type="button" onClick={toggleContinuousListening}>
-                  连 续 回 声
-                </button>
-                <button className="exit-btn" type="button" onClick={() => { void speak(false, true) }} disabled={status === 'speaking'}>再 来 一 次</button>
-                <button className="exit-btn" type="button" onClick={backToChat}>回 到 首 页</button>
-              </div>
+
+            <div className="voice-actions">
+              {voiceContinuous ? (
+                <button className="voice-action stop" type="button" onClick={toggleContinuousListening}>收 笔</button>
+              ) : (
+                <button className="voice-action" type="button" onClick={() => { void speak(false, true) }} disabled={status === 'speaking'}>再 写 几 句</button>
+              )}
+              <button className="voice-action" type="button" onClick={backToChat}>回首页</button>
             </div>
           </>
         )}

@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
-import { Mic2, Send, Square } from 'lucide-react'
+import { Send, Square } from 'lucide-react'
 import type { ActiveScene, ChatMessage, EchoApi, PlaybackState, SceneDefinition, SceneKey, ScenePlaybackResult, TasteProfile, Track, UiBoundarySnapshot } from '../../types/ipc'
 import type { AppPageProps } from '../appState'
 import { EmptyState, SceneRail, TrackCard } from '../components'
@@ -714,9 +714,6 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
             placeholder={hasLlmConfig ? '和 Echo 说点什么...' : '先填好 LLM 才能说话...'}
             disabled={!hasLlmConfig || sceneTaskRunning}
           />
-          <button className="voice-entry-button" type="button" onClick={() => navigate('voice')} title="听 Echo 说几句" aria-label="听 Echo 说几句">
-            <Mic2 size={16} />
-          </button>
           {sending ? (
             <button className="cancel-button" type="button" onClick={cancelMessage} title="让 Echo 先停一下">
               <Square size={13} fill="currentColor" />

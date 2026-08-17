@@ -803,6 +803,7 @@ function App() {
               isActive={page === 'voice'}
               voiceContinuous={voiceContinuous}
               setVoiceContinuous={setVoiceContinuous}
+              onOpenListening={() => dispatch({ listeningViewOpen: true })}
             />
           </div>
         </section>

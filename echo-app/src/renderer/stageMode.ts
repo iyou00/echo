@@ -39,7 +39,11 @@ export function deriveWindowFieldMode({
   chatStageMode: ChatStageMode
 }): WindowFieldMode {
   if (page === 'settings' || page === 'about') return 'quiet'
-  if (page === 'voice' || voiceContinuous) return 'voice'
+  if (page === 'voice' || voiceContinuous) {
+    // 回声页里用户点音乐书签/迷你封面显式打开一起听时，一起听优先；回声连续不停。
+    if (listeningViewOpen && hasCurrentTrack) return 'listening'
+    return 'voice'
+  }
   // 一起听视图由用户意图（listeningViewOpen）驱动，与播放/暂停状态解耦：
   // 暂停不收起，只有「回到此刻」或队列结束才收起。
   if (listeningViewOpen && hasCurrentTrack) return 'listening'

@@ -1,0 +1,392 @@
+/* ————————————————————————————————————————
+   回声页 · 纸上信笺（0.1.21）
+   概念：TTS 的时间性 = 书写的时间性。散句写完墨散淡出；
+   连续模式段落累积成信，音乐段是段落间的留白插曲。
+   与风信页（深夜写的长信）构成"说与写"的对偶。
+   ———————————————————————————————————————— */
+
+/* 页面底：纸面 + 灯下暖光（替代旧夜色） */
+.d2-shell.field-voice .voice-page {
+  position: absolute;
+  inset: 0;
+  background: var(--d2-paper);
+  color: var(--d2-ink);
+}
+.d2-shell.field-voice .voice-sheet,
+.d2-shell.field-voice .voice-sheet.standby {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 68% 44% at 50% 6%, rgba(228, 180, 110, 0.15), transparent 62%),
+    var(--d2-paper);
+}
+.d2-shell.field-voice .voice-sheet::before {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle at 1px 1px, rgba(25, 32, 27, 0.05) 0.5px, transparent 0);
+  background-size: 22px 22px;
+  content: "";
+  pointer-events: none;
+}
+/* 顶栏回到纸面配色 */
+.d2-shell.field-voice .d2-topbar {
+  border-color: var(--d2-line);
+  background: rgba(244, 241, 232, 0.96);
+  color: var(--d2-ink);
+}
+.d2-shell.field-voice .d2-brand,
+.d2-shell.field-voice .d2-context strong,
+.d2-shell.field-voice .d2-nav-button,
+.d2-shell.field-voice .d2-icon-button,
+.d2-shell.field-voice .wc-btn {
+  color: var(--d2-ink);
+}
+
+/* 眉标：红色小字 + 细线（同风信页语言） */
+.voice-status-pill {
+  position: absolute;
+  top: 46px;
+  left: 7%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--d2-red);
+  font: 700 10px/1 var(--d2-sans);
+  letter-spacing: 3px;
+}
+.voice-status-pill::before {
+  width: 30px;
+  height: 1px;
+  background: currentColor;
+  content: "";
+}
+
+/* ——— 落笔前 ——— */
+.voice-standby {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 42px;
+  text-align: center;
+}
+.voice-greet-primary {
+  color: var(--d2-ink);
+  font: 500 28px/1.55 var(--d2-serif);
+}
+.voice-greet-secondary {
+  margin-top: 12px;
+  color: var(--d2-muted);
+  font: 13px/1.9 var(--d2-serif);
+}
+.voice-ink-btn {
+  justify-self: center;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.voice-ink-dot {
+  position: relative;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 34%, #2c342e, var(--d2-ink) 62%);
+  transition: transform 0.5s ease;
+}
+.voice-ink-btn:hover .voice-ink-dot {
+  transform: scale(1.25);
+}
+.voice-ink-btn:hover .voice-ink-dot::after {
+  position: absolute;
+  inset: -9px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(25, 32, 27, 0.14), transparent 66%);
+  animation: voice-ink-bleed 1.6s ease-out infinite;
+  content: "";
+}
+@keyframes voice-ink-bleed {
+  from { transform: scale(0.6); opacity: 0.9; }
+  to { transform: scale(1.5); opacity: 0; }
+}
+.voice-ink-btn span:not(.voice-ink-dot) {
+  color: var(--d2-ink);
+  font: 13px/1 var(--d2-serif);
+  letter-spacing: 4px;
+}
+.voice-keep-writing {
+  justify-self: center;
+  margin-top: -22px;
+  padding-bottom: 3px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: none;
+  color: var(--d2-muted);
+  cursor: pointer;
+  font: 12px/1 var(--d2-serif);
+  letter-spacing: 1.5px;
+  transition: color 0.3s, border-color 0.3s;
+}
+.voice-keep-writing:hover {
+  color: var(--d2-forest);
+  border-bottom-color: var(--d2-forest);
+}
+.voice-leave {
+  justify-self: center;
+  margin-top: -6px;
+  border: 0;
+  background: none;
+  color: var(--d2-muted);
+  cursor: pointer;
+  font: 10px/1 var(--d2-sans);
+  letter-spacing: 2px;
+  opacity: 0.66;
+}
+.voice-leave:hover {
+  opacity: 1;
+  color: var(--d2-ink);
+}
+
+/* ——— 研墨中 ——— */
+.voice-grinding {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 18px;
+  justify-items: center;
+  color: var(--d2-muted);
+  font: 11px/1 var(--d2-serif);
+  letter-spacing: 4px;
+}
+.voice-grind-rule {
+  width: 120px;
+  height: 1px;
+  background: var(--d2-line);
+  position: relative;
+  overflow: hidden;
+}
+.voice-grind-rule::after {
+  position: absolute;
+  top: 0;
+  left: -40%;
+  width: 40%;
+  height: 1px;
+  background: var(--d2-ink);
+  animation: voice-grind 1.4s ease-in-out infinite;
+  content: "";
+}
+@keyframes voice-grind {
+  to { left: 100%; }
+}
+
+/* ——— 信纸 ——— */
+.voice-letter {
+  position: absolute;
+  top: 110px;
+  bottom: 190px;
+  left: 7%;
+  right: 22%;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.voice-letter::-webkit-scrollbar {
+  display: none;
+}
+.voice-para {
+  max-width: 620px;
+  margin: 0 0 28px;
+  color: var(--d2-ink);
+  font: 400 22px/2.05 var(--d2-serif);
+  opacity: 0.8;
+}
+.voice-interlude {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 620px;
+  margin: 4px 0 28px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--d2-forest);
+  cursor: pointer;
+  font: 12px/1 var(--d2-serif);
+  letter-spacing: 1px;
+  text-align: left;
+}
+.voice-interlude .rule {
+  flex: 0 0 46px;
+  height: 1px;
+  background: var(--d2-forest);
+  animation: voice-rule-breathe 2.4s ease-in-out infinite;
+}
+@keyframes voice-rule-breathe {
+  50% { transform: scaleX(1.18); opacity: 0.55; }
+}
+.voice-interlude:hover .voice-interlude-text {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+/* 手迹：written 已干 / wetting 墨未干 / pending 隐现待写 */
+.voice-hand {
+  max-width: 620px;
+  min-height: 96px;
+  color: var(--d2-ink);
+  font: 400 22px/2.05 var(--d2-serif);
+}
+.voice-hand .written {
+  opacity: 1;
+}
+.voice-hand .wetting {
+  font-weight: 600;
+  filter: blur(0.4px);
+}
+.voice-hand .pending {
+  opacity: 0;
+}
+.voice-hand .wetting,
+.voice-hand .pending {
+  display: inline-block;
+}
+.voice-caret {
+  display: inline-block;
+  width: 2px;
+  height: 20px;
+  margin-left: 2px;
+  vertical-align: -3px;
+  background: var(--d2-red);
+  animation: voice-caret 1s steps(2) infinite;
+}
+@keyframes voice-caret {
+  50% { opacity: 0; }
+}
+.voice-hand.fading {
+  animation: voice-ink-fade 2.6s ease forwards;
+}
+@keyframes voice-ink-fade {
+  0% { opacity: 1; }
+  55% { opacity: 1; }
+  100% { opacity: 0; filter: blur(3px); }
+}
+
+/* 音乐书签：右上一条森林色竖线 */
+.voice-music-mark {
+  position: absolute;
+  top: 116px;
+  right: 7%;
+  width: 190px;
+  padding: 2px 0 2px 12px;
+  border: 0;
+  border-left: 1px solid var(--d2-forest);
+  background: none;
+  cursor: pointer;
+  text-align: left;
+}
+.voice-music-mark small {
+  display: block;
+  color: var(--d2-muted);
+  font: 9px/1 var(--d2-sans);
+  letter-spacing: 2px;
+}
+.voice-music-mark b {
+  display: block;
+  margin-top: 6px;
+  overflow: hidden;
+  color: var(--d2-forest);
+  font: 500 13px/1.5 var(--d2-serif);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.voice-music-mark:hover b {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+/* 墨线：一条随音量呼吸的墨带 */
+.voice-ink-stroke {
+  position: absolute;
+  left: 7%;
+  right: 7%;
+  bottom: 148px;
+  height: 44px;
+  overflow: visible;
+}
+.voice-ink-stroke path {
+  fill: var(--d2-ink);
+  opacity: 0.82;
+}
+
+/* 提示与边界 */
+.voice-notice {
+  position: absolute;
+  left: 7%;
+  bottom: 112px;
+  color: var(--d2-muted);
+  font: 12px/1.7 var(--d2-serif);
+}
+.d2-shell.field-voice .boundary-notice {
+  border-color: var(--d2-line);
+  background: var(--d2-surface);
+  color: var(--d2-ink);
+}
+
+/* 动作：右下细线按钮 */
+.voice-actions {
+  position: absolute;
+  right: 7%;
+  bottom: 44px;
+  display: flex;
+  gap: 12px;
+}
+.voice-action {
+  padding: 9px 18px;
+  border: 1px solid var(--d2-line);
+  background: none;
+  color: var(--d2-muted);
+  cursor: pointer;
+  font: 11px/1 var(--d2-serif);
+  letter-spacing: 3px;
+  transition: color 0.3s, border-color 0.3s;
+}
+.voice-action:hover {
+  border-color: var(--d2-ink);
+  color: var(--d2-ink);
+}
+.voice-action.stop:hover {
+  border-color: var(--d2-red);
+  color: var(--d2-red);
+}
+.voice-action:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* reduced-motion：墨散/研墨/呼吸全部直显 */
+@media (prefers-reduced-motion: reduce) {
+  .voice-ink-btn:hover .voice-ink-dot::after,
+  .voice-grind-rule::after,
+  .voice-interlude .rule,
+  .voice-caret {
+    animation: none;
+  }
+  .voice-hand.fading {
+    animation: none;
+    opacity: 0.4;
+  }
+}
+
+/* 窄窗口适配 */
+@media (max-width: 1100px) {
+  .voice-letter {
+    right: 7%;
+  }
+  .voice-music-mark {
+    position: static;
+    margin: 0 0 10px 7%;
+  }
+}
