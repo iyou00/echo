@@ -2185,13 +2185,6 @@ button:disabled {
   }
 }
 
-.voice-mode-active .mini-player {
-  padding-top: 10px;
-}
-
-.voice-mode-active .mini-player > .wave-bars {
-  display: none;
-}
 
 .player-mini {
   position: relative;

@@ -874,7 +874,7 @@ function App() {
           onboardingOpen={onboardingOpen}
           closeDialogOpen={closeDialogOpen}
         />
-        <div className={`d2-player-layer player-${fieldMode} page-${page}${page === 'voice' ? ' voice-mode-active' : ''}`}>
+        <div className={`d2-player-layer player-${fieldMode} page-${page}`}>
           <Player
             echo={echo}
             state={playbackState}
