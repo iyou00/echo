@@ -1200,7 +1200,8 @@
 .d2-shell.field-listening .chat-page { background: var(--d2-night); color: #f5f5ec; }
 .d2-shell.field-listening .d2-now-presence, .d2-shell.field-listening .d2-ambient-facts, .d2-shell.field-listening .d2-quiet-mark, .d2-shell.field-listening .stage-dialogue { opacity: 0; pointer-events: none; }
 .d2-player-layer.player-listening .global-player { top: 50px; right: auto; left: 5.5%; width: 400px; color: #f5f5ec; }
-.d2-player-layer.player-voice .global-player { display: none; }
+.d2-player-layer.player-voice .global-player { top: 330px; right: 7%; left: auto; width: 230px; }
+.d2-player-layer.player-voice .d2-sound-art { height: 132px; }
 .d2-player-layer.player-listening .d2-sound-art { height: 400px; }
 .d2-player-layer.player-listening .d2-sound-art::after { background: var(--d2-red); }
 .d2-player-layer.player-listening .d2-sound-object figcaption { background: var(--d2-night); }

@@ -884,7 +884,7 @@ function App() {
             refreshQueue={refreshQueue}
             autoPlayNext={settings?.playback.autoPlayNext ?? true}
             currentScene={currentScene}
-            stageDismissed={fieldMode !== 'listening' && fieldMode !== 'voice'}
+            stageDismissed={fieldMode !== 'listening'}
             onExpandStage={() => dispatch({ listeningViewOpen: true })}
             voiceContinuous={isVoiceContinuousActive(page, voiceContinuous)}
             onSceneTrackEnded={(scene, mode) => {

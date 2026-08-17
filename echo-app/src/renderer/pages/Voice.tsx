@@ -147,10 +147,11 @@ export function VoicePage({
   // —— 信笺：连续模式下写完的段落与音乐插曲累积在纸上；散句写完墨散淡出 ——
   const [paragraphs, setParagraphs] = useState<Array<{ id: number; kind: 'text'; text: string } | { id: number; kind: 'music'; label: string }>>([])
   const [trackLabel, setTrackLabel] = useState('')
-  const [fading, setFading] = useState(false)
   const [entering, setEntering] = useState(false)
   const [grindCycle, setGrindCycle] = useState(0)
   const grindCycleRef = useRef(0)
+  const [speakCycle, setSpeakCycle] = useState(0)
+  const speakCycleRef = useRef(0)
   const paraIdRef = useRef(0)
   const letterRef = useRef<HTMLDivElement | null>(null)
   const parts = useMemo(() => splitByProgress(text, status === 'done' || status === 'text-only-done' ? 1 : progress), [text, progress, status])
@@ -319,7 +320,6 @@ export function VoicePage({
       clearCurrentAudioUrl(false)
       setProgress(0)
       setNotice('')
-      setFading(false)
       setText('')
       setTrackLabel('')
       setStatus('idle')
@@ -582,7 +582,6 @@ export function VoicePage({
       setNotice('')
       setVoiceBoundary(null)
       setProgress(0)
-      setFading(false)
       clearCurrentAudioUrl()
       restoreVolumeRef.current = await echo.playback.getVolume()
       volumeRestoreArmedRef.current = true
@@ -700,23 +699,6 @@ export function VoicePage({
     setStatus('idle')
   }, [status, voiceContinuous, text, paragraphs.length])
 
-  // 散句写完 → 墨散淡出 → 回落笔前（收笔后的信纸不淡出）
-  useEffect(() => {
-    if (status !== 'done' && status !== 'text-only-done') return undefined
-    if (voiceContinuous || notice || voiceBoundary || paragraphs.length > 0) return undefined
-    const fadeTimer = window.setTimeout(() => setFading(true), 2100)
-    const clearTimer = window.setTimeout(() => {
-      setText('')
-      setTrackLabel('')
-      setFading(false)
-      setStatus('idle')
-    }, 2100 + 2600)
-    return () => {
-      window.clearTimeout(fadeTimer)
-      window.clearTimeout(clearTimer)
-    }
-  }, [status, voiceContinuous, notice, voiceBoundary, paragraphs.length])
-
   return (
     <div className="phone-surface voice-page">
       <audio
@@ -765,7 +747,7 @@ export function VoicePage({
               )
             ))}
             {text && status !== 'idle' && (
-              <div className={`voice-hand${fading ? ' fading' : ''}`}>
+              <div className="voice-hand">
                 <span className="written">{parts.said}</span>
                 <span className="wetting">{parts.now}</span>
                 <span className="pending">{parts.pending}</span>
@@ -805,25 +787,30 @@ export function VoicePage({
           </div>
         ) : (
           <>
-            {trackLabel && (
-              <button className="voice-music-mark" type="button" onClick={() => onOpenListening?.()} title="到一起听看这首歌">
-                <small>背 景</small>
-                <b>{trackLabel}</b>
-              </button>
+            {status === 'speaking' ? (
+              <div className="voice-curves" aria-hidden="true">
+                <MeetingCanvas
+                  key={`speak-${speakCycle}`}
+                  durationMs={2200}
+                  onComplete={() => { speakCycleRef.current += 1; setSpeakCycle(speakCycleRef.current) }}
+                />
+              </div>
+            ) : (
+              <svg className="voice-ink-stroke" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
+                <path d={inkPathD} />
+              </svg>
             )}
-
-            <svg className="voice-ink-stroke" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
-              <path d={inkPathD} />
-            </svg>
 
             {notice && <div className="voice-notice" role="status">{notice}</div>}
             {voiceBoundary && <BoundaryState compact snapshot={voiceBoundary} onAction={() => { void speak(false, true) }} />}
 
-            {voiceContinuous && (
-              <div className="voice-actions">
+            <div className="voice-actions">
+              {voiceContinuous ? (
                 <button className="voice-action stop" type="button" onClick={toggleContinuousListening}>收 笔</button>
-              </div>
-            )}
+              ) : (
+                <button className="voice-action" type="button" onClick={() => { void speak(false, true) }}>再 写 几 句</button>
+              )}
+            </div>
           </>
         )}
       </div>

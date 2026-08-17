@@ -304,40 +304,21 @@
   100% { opacity: 0; filter: blur(3px); }
 }
 
-/* 音乐书签：右上一条森林色竖线 */
-.voice-music-mark {
+/* 书写中的两线相遇曲线（品牌动画，循环播放） */
+.voice-curves {
   position: absolute;
-  top: 116px;
-  right: 7%;
-  width: 190px;
-  padding: 2px 0 2px 12px;
-  border: 0;
-  border-left: 1px solid var(--d2-forest);
-  background: none;
-  cursor: pointer;
-  text-align: left;
+  left: 50%;
+  bottom: 130px;
+  width: min(430px, 46%);
+  height: 120px;
+  transform: translateX(-72%);
 }
-.voice-music-mark small {
-  display: block;
-  color: var(--d2-muted);
-  font: 9px/1 var(--d2-sans);
-  letter-spacing: 2px;
-}
-.voice-music-mark b {
-  display: block;
-  margin-top: 6px;
-  overflow: hidden;
-  color: var(--d2-forest);
-  font: 500 13px/1.5 var(--d2-serif);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.voice-music-mark:hover b {
-  text-decoration: underline;
-  text-underline-offset: 4px;
+.voice-curves canvas {
+  width: 100%;
+  height: 120px;
 }
 
-/* 墨线：一条随音量呼吸的墨带 */
+/* 墨线：写完后的静态留纸 */
 .voice-ink-stroke {
   position: absolute;
   left: 7%;
