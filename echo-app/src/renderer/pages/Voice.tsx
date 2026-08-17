@@ -765,8 +765,8 @@ export function VoicePage({
               <div className="voice-hand">
                 <span className="written">{parts.said}</span>
                 <span className="wetting">{parts.now}</span>
-                <span className="pending">{parts.pending}</span>
                 <span className="voice-caret" aria-hidden="true" />
+                <span className="pending">{parts.pending}</span>
               </div>
             )}
           </div>
