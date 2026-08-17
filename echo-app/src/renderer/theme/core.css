@@ -1194,6 +1194,9 @@
 }
 
 .d2-shell.field-listening { background: var(--d2-night); }
+/* app-frame 自带纸面底，对话路径被 chat-page 夜色盖住；回声路径 voice-page 隐藏后会露出
+   这层淡绿——一起听态必须连它一起入夜。 */
+.d2-shell.field-listening .app-frame { background: var(--d2-night); }
 .d2-shell.field-listening .d2-topbar { border-color: #343a33; background: rgba(21, 24, 20, 0.98); color: #f5f5ec; }
 .d2-shell.field-listening .d2-brand, .d2-shell.field-listening .d2-context strong, .d2-shell.field-listening .d2-nav-button, .d2-shell.field-listening .d2-icon-button, .d2-shell.field-listening .wc-btn { color: #f5f5ec; }
 .d2-shell.field-listening .d2-context .d2-context-weather { color: #aeb6ad; }
