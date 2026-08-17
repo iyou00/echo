@@ -6,6 +6,7 @@ import { sameTrack, trackIdentity } from '../../shared/trackIdentity'
 import { friendlyOperationError } from '../../shared/runtimeRecovery'
 import { nextVoiceFailureAction, shouldAcceptVoiceContinuousTrigger, shouldTriggerNextVoiceSegment } from './voiceContinuous'
 import { BoundaryState } from '../components/BoundaryState'
+import { MeetingCanvas } from '../components/MeetingCanvas'
 
 interface VoicePageProps extends AppPageProps {
   echo: EchoApi
@@ -148,6 +149,8 @@ export function VoicePage({
   const [trackLabel, setTrackLabel] = useState('')
   const [fading, setFading] = useState(false)
   const [entering, setEntering] = useState(false)
+  const [grindCycle, setGrindCycle] = useState(0)
+  const grindCycleRef = useRef(0)
   const paraIdRef = useRef(0)
   const letterRef = useRef<HTMLDivElement | null>(null)
   const parts = useMemo(() => splitByProgress(text, status === 'done' || status === 'text-only-done' ? 1 : progress), [text, progress, status])
@@ -781,9 +784,9 @@ export function VoicePage({
                   <div className="voice-greet-primary">{greet.primary}</div>
                   {greet.secondary && <div className="voice-greet-secondary">{greet.secondary}</div>}
                 </div>
-                <button className="voice-ink-btn" type="button" onClick={() => { void speak() }} aria-label="听 Echo 说几句">
+                <button className="voice-ink-btn" type="button" onClick={() => { void speak() }} aria-label={paragraphs.length > 0 ? '再听 Echo 写几句' : '赏歌一曲'}>
                   <span className="voice-ink-dot" aria-hidden="true" />
-                  <span>再 写 几 句</span>
+                  <span>{paragraphs.length > 0 ? '再 写 几 句' : '赏 歌 一 曲'}</span>
                 </button>
                 <button className="voice-keep-writing" type="button" onClick={() => { toggleContinuousListening(); void speak(true) }}>
                   或者，让它一直写下去
@@ -793,7 +796,11 @@ export function VoicePage({
           })()
         ) : status === 'generating' ? (
           <div className="voice-grinding" aria-live="polite">
-            <span className="voice-grind-rule" />
+            <MeetingCanvas
+              key={grindCycleRef.current}
+              durationMs={1600}
+              onComplete={() => { grindCycleRef.current += 1; setGrindCycle(grindCycleRef.current) }}
+            />
             <span>研 墨 中</span>
           </div>
         ) : (

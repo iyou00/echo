@@ -196,37 +196,21 @@
   color: var(--d2-ink);
 }
 
-/* ——— 研墨中 ——— */
+/* ——— 研墨中：品牌相遇曲线 ——— */
 .voice-grinding {
   position: absolute;
   inset: 0;
   display: grid;
   place-content: center;
-  gap: 18px;
+  gap: 26px;
   justify-items: center;
   color: var(--d2-muted);
   font: 11px/1 var(--d2-serif);
   letter-spacing: 4px;
 }
-.voice-grind-rule {
-  width: 120px;
-  height: 1px;
-  background: var(--d2-line);
-  position: relative;
-  overflow: hidden;
-}
-.voice-grind-rule::after {
-  position: absolute;
-  top: 0;
-  left: -40%;
-  width: 40%;
-  height: 1px;
-  background: var(--d2-ink);
-  animation: voice-grind 1.4s ease-in-out infinite;
-  content: "";
-}
-@keyframes voice-grind {
-  to { left: 100%; }
+.voice-grinding canvas {
+  width: min(360px, 60vw);
+  height: 120px;
 }
 
 /* ——— 信纸 ——— */
@@ -415,7 +399,6 @@
 /* reduced-motion：墨散/研墨/呼吸全部直显 */
 @media (prefers-reduced-motion: reduce) {
   .voice-ink-btn:hover .voice-ink-dot::after,
-  .voice-grind-rule::after,
   .voice-interlude .rule,
   .voice-caret {
     animation: none;

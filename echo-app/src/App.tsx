@@ -683,9 +683,11 @@ function App() {
   useEffect(() => {
     const starting = playbackStatus === 'playing' || playbackStatus === 'loading'
     if (!playbackTrack || !starting || listeningAutoOpenedRef.current) return
+    // 回声页的背景音乐不带走视图（那是纸上的书签）；也不消耗本次会话的首跳资格。
+    if (page === 'voice' || voiceContinuous) return
     listeningAutoOpenedRef.current = true
     if (!listeningDismissed) dispatch({ listeningViewOpen: true })
-  }, [playbackTrack, playbackStatus, listeningDismissed, dispatch])
+  }, [playbackTrack, playbackStatus, listeningDismissed, page, voiceContinuous, dispatch])
   useEffect(() => {
     if (listeningViewOpen && !playbackTrack && playbackStatus === 'idle') {
       dispatch({ listeningViewOpen: false })
