@@ -6,7 +6,6 @@ import { sameTrack, trackIdentity } from '../../shared/trackIdentity'
 import { friendlyOperationError } from '../../shared/runtimeRecovery'
 import { nextVoiceFailureAction, shouldAcceptVoiceContinuousTrigger, shouldTriggerNextVoiceSegment } from './voiceContinuous'
 import { BoundaryState } from '../components/BoundaryState'
-import { MeetingCanvas } from '../components/MeetingCanvas'
 
 interface VoicePageProps extends AppPageProps {
   echo: EchoApi
@@ -22,13 +21,6 @@ interface VoicePageProps extends AppPageProps {
 }
 
 type VoiceStatus = 'idle' | 'generating' | 'speaking' | 'done' | 'text-only-done' | 'error'
-
-const voiceWaveCount = 25
-const voiceWaveMid = (voiceWaveCount - 1) / 2
-const idleWave = Array.from({ length: voiceWaveCount }, (_, index) => {
-  const distance = Math.abs(index - voiceWaveMid) / voiceWaveMid
-  return Math.round(16 + (1 - distance) * 46)
-})
 
 function splitByProgress(text: string, progress: number) {
   const index = Math.max(0, Math.min(text.length, Math.floor(text.length * progress)))
@@ -141,15 +133,16 @@ export function VoicePage({
   const [idleGreeting, setIdleGreeting] = useState(() => pickVoiceIdleGreeting({ playbackState }))
   const [audioUrl, setAudioUrl] = useState('')
   const [progress, setProgress] = useState(0)
-  const [waveLevels, setWaveLevels] = useState(idleWave)
+  // 墨线按 preview 的算法运行：时间正弦永远呼吸，音量只做幅度增强——
+  // 音频分析不可用时线条依然是活的，不会死平。
+  const [inkTime, setInkTime] = useState(0)
+  const inkLevelRef = useRef(0)
   const [notice, setNotice] = useState('')
   const [voiceBoundary, setVoiceBoundary] = useState<UiBoundarySnapshot | null>(null)
   // —— 信笺：连续模式下写完的段落与音乐插曲累积在纸上；散句写完墨散淡出 ——
   const [paragraphs, setParagraphs] = useState<Array<{ id: number; kind: 'text'; text: string } | { id: number; kind: 'music'; label: string }>>([])
   const [trackLabel, setTrackLabel] = useState('')
   const [entering, setEntering] = useState(false)
-  const [grindCycle, setGrindCycle] = useState(0)
-  const grindCycleRef = useRef(0)
   const paraIdRef = useRef(0)
   const letterRef = useRef<HTMLDivElement | null>(null)
   const parts = useMemo(() => splitByProgress(text, status === 'done' || status === 'text-only-done' ? 1 : progress), [text, progress, status])
@@ -176,19 +169,44 @@ export function VoicePage({
     setParagraphs((current) => [...current, { id: paraIdRef.current, kind: 'music', label }])
   }
 
-  // 墨线：waveLevels（TTS 频谱）→ 一条两端细中间饱满的墨带，粗细随音量呼吸
+  // 墨线（preview 原算法）：轴线 wob 游移，thick 双正弦起伏，env 两端收细；
+  // energy 用实时音量缩放整体幅度。
   const inkPathD = useMemo(() => {
-    const width = 100, height = 40, mid = height / 2
-    const points = waveLevels.map((level, index) => {
-      const x = (index / (voiceWaveCount - 1)) * width
-      const envelope = Math.sin((index / (voiceWaveCount - 1)) * Math.PI) ** 1.5
-      const amplitude = Math.max(1.4, ((level - 12) / 70) * 15 * envelope + 1.2 * envelope)
-      return { x, top: mid - amplitude, bottom: mid + amplitude }
-    })
-    const head = points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.top.toFixed(2)}`).join(' ')
-    const tail = [...points].reverse().map((point) => `L ${point.x.toFixed(2)} ${point.bottom.toFixed(2)}`).join(' ')
-    return `${head} ${tail} Z`
-  }, [waveLevels])
+    const width = 200, height = 40, mid = height / 2
+    const t = inkTime
+    const energy = 1 + inkLevelRef.current * 1.6
+    const top: string[] = []
+    const bottom: string[] = []
+    const steps = 100
+    for (let i = 0; i <= steps; i += 1) {
+      const u = i / steps
+      const x = u * width
+      const env = Math.sin(u * Math.PI) ** 1.5
+      const wob = Math.sin(u * 7 + t) * 5.5 * env
+      const thick = (2.2 + Math.sin(u * 12 - t * 1.7) * 1.4 + Math.sin(t * 2.3) * 0.9) * env * energy
+      const y = mid + wob
+      top.push(`${i === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${(y - thick).toFixed(2)}`)
+      bottom.push(`L ${x.toFixed(2)} ${(y + thick).toFixed(2)}`)
+    }
+    return `${top.join(' ')} ${bottom.reverse().join(' ')} Z`
+  }, [inkTime])
+
+  // 书写中：墨线自走时钟（rAF），音频电平缓入缓出
+  useEffect(() => {
+    if (status !== 'speaking') return undefined
+    let raf = 0
+    const tick = () => {
+      setInkTime((t) => t + 0.055)
+      raf = window.requestAnimationFrame(tick)
+    }
+    tick()
+    return () => window.cancelAnimationFrame(raf)
+  }, [status])
+
+  useEffect(() => {
+    if (status === 'speaking') return
+    inkLevelRef.current = 0
+  }, [status])
 
   // 信纸跟随：新段落落笔时滚到最新
   useEffect(() => {
@@ -430,7 +448,7 @@ export function VoicePage({
       window.cancelAnimationFrame(rafRef.current)
       rafRef.current = null
     }
-    if (reset) setWaveLevels(idleWave)
+    if (reset) inkLevelRef.current = 0
   }
 
   async function startTtsWave() {
@@ -458,18 +476,17 @@ export function VoicePage({
       const data = new Uint8Array(analyser.frequencyBinCount)
       const tick = () => {
         analyser.getByteFrequencyData(data)
-        setWaveLevels(Array.from({ length: voiceWaveCount }, (_, index) => {
-          const value = data[index % data.length] ?? 0
-          const distance = Math.abs(index - voiceWaveMid) / voiceWaveMid
-          const shape = 1 - distance * 0.62
-          return Math.max(14, Math.round((18 + (value / 255) * 68) * shape))
-        }))
+        let sum = 0
+        for (let i = 0; i < data.length; i += 1) sum += data[i]
+        const avg = sum / data.length / 255
+        inkLevelRef.current = inkLevelRef.current * 0.7 + avg * 0.3
         rafRef.current = window.requestAnimationFrame(tick)
       }
       stopTtsWave()
       tick()
     } catch {
-      setWaveLevels(idleWave.map((level, index) => level + (index % 3) * 8))
+      // 分析器不可用（如合成手势挂起 AudioContext）：墨线由时间驱动继续呼吸。
+      inkLevelRef.current = 0
     }
   }
 
@@ -776,11 +793,14 @@ export function VoicePage({
           })()
         ) : status === 'generating' ? (
           <div className="voice-grinding" aria-live="polite">
-            <MeetingCanvas
-              key={grindCycleRef.current}
-              durationMs={1600}
-              onComplete={() => { grindCycleRef.current += 1; setGrindCycle(grindCycleRef.current) }}
-            />
+            <svg className="voice-grind-svg" viewBox="0 0 240 96" aria-hidden="true">
+              <ellipse className="grind-pool" cx="120" cy="72" rx="86" ry="10" />
+              <ellipse className="grind-ink" cx="120" cy="72" rx="58" ry="6.5" />
+              <g className="grind-stick">
+                <rect x="-5" y="0" width="10" height="26" rx="2" />
+                <rect className="grind-stick-tip" x="-5" y="23" width="10" height="4" rx="2" />
+              </g>
+            </svg>
             <span>研 墨 中</span>
           </div>
         ) : (

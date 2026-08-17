@@ -196,7 +196,7 @@
   color: var(--d2-ink);
 }
 
-/* ——— 研墨中：品牌相遇曲线 ——— */
+/* ——— 研墨中：砚台与墨锭（手绘 SVG） ——— */
 .voice-grinding {
   position: absolute;
   inset: 0;
@@ -208,9 +208,47 @@
   font: 11px/1 var(--d2-serif);
   letter-spacing: 4px;
 }
-.voice-grinding canvas {
-  width: min(360px, 60vw);
-  height: 120px;
+.voice-grind-svg {
+  width: min(300px, 52vw);
+  overflow: visible;
+}
+/* 砚池：细线勾勒 */
+.grind-pool {
+  fill: none;
+  stroke: var(--d2-line);
+  stroke-width: 1;
+}
+/* 磨出的墨：随研磨缓缓变浓 */
+.grind-ink {
+  fill: var(--d2-ink);
+  animation: grind-ink-thicken 3.2s ease-in-out infinite alternate;
+}
+@keyframes grind-ink-thicken {
+  from { opacity: 0.1; }
+  to { opacity: 0.5; }
+}
+/* 墨锭：沿砚池往复研磨，带一点倾角摆动；红色笔尖是它与纸接触的那一点 */
+.grind-stick {
+  fill: var(--d2-ink);
+  transform: translate(120px, 40px) rotate(6deg);
+  transform-origin: bottom center;
+  animation: grind-stick-move 1.7s ease-in-out infinite alternate;
+}
+@keyframes grind-stick-move {
+  from { transform: translate(58px, 40px) rotate(9deg); }
+  to { transform: translate(182px, 40px) rotate(-9deg); }
+}
+.grind-stick-tip {
+  fill: var(--d2-red);
+}
+@media (prefers-reduced-motion: reduce) {
+  .grind-ink,
+  .grind-stick {
+    animation: none;
+  }
+  .grind-stick {
+    transform: translate(120px, 40px) rotate(4deg);
+  }
 }
 
 /* ——— 信纸 ——— */
