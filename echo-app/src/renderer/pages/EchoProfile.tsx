@@ -36,6 +36,15 @@ function displayDate(value?: string) {
   return new Date(value).toLocaleDateString('zh-CN')
 }
 
+function displayDateTime(value?: string) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const clock = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
+  if (date.toDateString() === new Date().toDateString()) return `今天 ${clock}`
+  return `${date.toLocaleDateString('zh-CN')} ${clock}`
+}
+
 const AUDIT_TAG_TEXT: Record<MemoryAuditKind, string> = {
   correction: '纠正',
   favorite: '收藏',
@@ -584,7 +593,7 @@ export function EchoProfilePage({ echo, navigate, profile, playbackState, setPla
             {status !== 'idle' && <div className={`d2-profile-status ${status}`}>{statusMessage}</div>}
 
             <div className="pf-hero-meta">
-              <span>{portraitUpdatedAt ? `画像更新于 ${displayDate(portraitUpdatedAt)}` : '画像 · 尚未生成'}</span>
+              <span>{portraitUpdatedAt ? `画像更新于 ${displayDateTime(portraitUpdatedAt)}` : '画像 · 尚未生成'}</span>
               <div className="pf-hero-tools">
                 <button type="button" onClick={regenerate} disabled={profileBusy}>{profileBusy ? '正在重写…' : '更新理解'}</button>
                 <button type="button" onClick={() => navigate('settings')}>设置</button>

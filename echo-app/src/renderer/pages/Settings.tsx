@@ -17,6 +17,22 @@ import {
   shouldRefreshProfileForSemanticTask,
 } from './settingsSemanticRefresh'
 
+type SettingsSectionKey = 'music' | 'yinyi' | 'chat' | 'stage' | 'learned' | 'voice' | 'care' | 'window' | 'llm' | 'data' | 'tasks'
+
+const SECTION_META: Record<SettingsSectionKey, { group: string; title: string; desc: string }> = {
+  music: { group: '连 接 与 来 源', title: '音乐来源', desc: '登录信息只保存在本机。登录网易云后 Echo 才能替你找歌、放歌，歌单也可以从文件导入。' },
+  llm: { group: '连 接 与 来 源', title: 'AI 模型', desc: '密钥只保存在本机，保存后可测试连接。' },
+  voice: { group: '连 接 与 来 源', title: '天气与语音', desc: '更改会自动保存。' },
+  yinyi: { group: '相 处 方 式', title: '风信生成', desc: '更改会自动保存。' },
+  chat: { group: '相 处 方 式', title: '絮语与启动', desc: '更改会自动保存。' },
+  stage: { group: '相 处 方 式', title: '此刻的理解', desc: '更改会自动保存。' },
+  learned: { group: '相 处 方 式', title: 'Echo 学到了什么', desc: '每天夜里 Echo 会复盘当天的对话，把被你纠正过的地方记下来。这里能看到它学到的每一条，随时可以删除。' },
+  care: { group: '相 处 方 式', title: '主动关心', desc: '更改会自动保存。' },
+  tasks: { group: '系 统', title: '运行任务', desc: '任务在后台继续，不需要守着。' },
+  window: { group: '系 统', title: '窗口与关闭', desc: '更改会自动保存。' },
+  data: { group: '系 统', title: '本地数据', desc: '清空前需要再次确认。' },
+}
+
 interface SettingsPageProps extends AppPageProps {
   echo: EchoApi
   settings: Settings | null
@@ -296,7 +312,7 @@ export function SettingsPage({
 
   const [activeTab, setActiveTab] = useState<'sync' | 'pref' | 'sys'>(hasLlmConfig ? 'sync' : 'sys')
   const [settingsView, setSettingsView] = useState<'overview' | 'connections' | 'tasks' | 'details'>('details')
-  const [detailTarget, setDetailTarget] = useState<'music' | 'yinyi' | 'chat' | 'stage' | 'learned' | 'voice' | 'care' | 'window' | 'llm' | 'data' | 'tasks'>(hasLlmConfig ? 'music' : 'llm')
+  const [detailTarget, setDetailTarget] = useState<SettingsSectionKey>(hasLlmConfig ? 'music' : 'llm')
   const [detailParent, setDetailParent] = useState<'overview' | 'connections'>('overview')
 
   const [showNeteaseDrawer, setShowNeteaseDrawer] = useState(false)
@@ -1473,7 +1489,11 @@ export function SettingsPage({
       <div className="d2-settings-main">
       {detailTarget === 'tasks' ? (
       <div className="d2-settings-subview" data-testid="settings-tasks-view">
-                <p className="d2-settings-autosave">任务在后台继续，不需要守着</p>
+                <header className="sec-head">
+                  <div className="sec-kicker">系 统</div>
+                  <h1 className="sec-title">运行任务</h1>
+                  <p className="sec-desc">任务在后台继续，不需要守着。</p>
+                </header>
                 <section className="d2-settings-linear-section">
                   <h3>运行任务</h3>
                   {visibleRuntimeTasks.length > 0
@@ -1495,13 +1515,12 @@ export function SettingsPage({
               </div>
       ) : (
         <>
-      <p className="d2-settings-detail-note">{{
-        llm: '密钥只保存在本机，保存后可测试连接',
-        music: '登录信息只保存在本机',
-        data: '清空前需要再次确认',
-      }[detailTarget as 'llm' | 'music' | 'data'] ?? '更改会自动保存'}</p>
-
       <div className="scroll-panel">
+        <header className="sec-head">
+          <div className="sec-kicker">{SECTION_META[detailTarget].group}</div>
+          <h1 className="sec-title">{SECTION_META[detailTarget].title}</h1>
+          <p className="sec-desc">{SECTION_META[detailTarget].desc}</p>
+        </header>
         {/* Pinned Progress HUD */}
         {(globalImportStatus || visibleImportProgress) && (
           <div className="import-progress-hud" aria-live="polite">
@@ -1790,7 +1809,6 @@ export function SettingsPage({
               </Section>
 
               <Section label="E C H O 学 到 了 什 么" className="settings-detail-section target-learned" data-testid="settings-learned">
-                <p className="d2-settings-detail-note">每天夜里 Echo 会复盘当天的对话，把被你纠正过的地方记下来。这里能看到它学到的每一条，随时可以删除。</p>
                 <div className="d2-settings-rows">
                   <div className="d2-settings-row">
                     <div className="d2-settings-row-main">

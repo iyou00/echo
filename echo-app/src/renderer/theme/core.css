@@ -115,13 +115,6 @@
 .d2-settings-links button:hover { background: rgba(24, 71, 52, 0.045); }
 .d2-settings-status { margin-top: 12px; color: var(--d2-muted); font-size: 10px; }
 
-.d2-settings-subview {
-  min-height: 0;
-  flex: 1;
-  overflow: auto;
-  padding: 0 30px 32px;
-}
-
 .d2-connection-list { border-bottom: 1px solid var(--d2-line); }
 .d2-connection-field { padding: 15px 0 14px; border-top: 1px solid var(--d2-line); }
 .d2-connection-field header { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; }
@@ -154,8 +147,6 @@
 .d2-service-line em { flex: none; font-size: 9px; font-style: normal; }
 .d2-settings-danger-link { margin-top: 24px; border-color: var(--d2-red); color: var(--d2-red); }
 
-.d2-settings-detail-note { margin: 14px 30px 8px; color: var(--d2-muted); font-size: 10px; }
-.settings-page:has(.d2-settings-form) .scroll-panel { padding: 0 30px 32px; background: var(--d2-surface); }
 .d2-settings-form .settings-detail-section { display: none; }
 .d2-settings-form.detail-music .target-music,
 .d2-settings-form.detail-yinyi .target-yinyi,

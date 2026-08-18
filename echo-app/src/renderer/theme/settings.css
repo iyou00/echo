@@ -4,8 +4,7 @@
    字号基准 14px；表单内部样式仍由 core.css 的 d2-settings-form 体系承载。
    ———————————————————————————————————————— */
 
-.shell-page[data-page='settings'] .settings-page,
-.shell-page[data-page='about'] .about-page {
+.shell-page[data-page='settings'] .settings-page {
   position: absolute;
   inset: 0;
   display: grid;
@@ -13,6 +12,31 @@
   background: var(--d2-paper);
   color: var(--d2-ink);
   animation: settings-page-in 0.5s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+/* —— 关于 Echo：整页容器（对齐设置/品味/队列标准） —— */
+.shell-page[data-page='about'] {
+  position: absolute;
+  inset: 0;
+  background: var(--d2-paper);
+  color: var(--d2-ink);
+  animation: settings-page-in 0.5s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+.shell-page[data-page='about'] .d2-about {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 44px 64px 60px;
+}
+.shell-page[data-page='about'] .d2-about .about-letter {
+  max-width: 680px;
+  margin: 16px 0 0;
+}
+.shell-page[data-page='about'] .d2-profile-date {
+  margin: 0;
+  color: var(--d2-red);
+  font: 700 10px/1 var(--d2-sans);
+  letter-spacing: 3px;
 }
 @keyframes settings-page-in {
   from { opacity: 0; transform: translateY(8px); }
@@ -87,24 +111,39 @@
   flex: 1;
   overflow-y: auto;
 }
-.d2-settings-detail-note {
-  padding: 20px 48px 0;
-  color: var(--d2-muted);
-  font: 12px/1.8 var(--d2-sans);
-}
+/* —— 右内容区：所有分区同一容器（44/64/60 · 纸面底） —— */
+.shell-page[data-page='settings'] .settings-page .scroll-panel,
 .shell-page[data-page='settings'] .settings-page .d2-settings-subview {
-  padding: 40px 48px;
+  flex: 1;
   overflow-y: auto;
+  padding: 44px 64px 60px;
+  background: var(--d2-paper);
 }
-.shell-page[data-page='settings'] .settings-page .d2-settings-form {
-  padding: 0 48px 48px;
+
+/* 分区标准头部：kicker 组名 + 衬线标题 + 描述（对齐设计稿） */
+.sec-kicker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  color: var(--d2-red);
+  font: 700 10px/1 var(--d2-sans);
+  letter-spacing: 3px;
+}
+.sec-kicker::before { content: ""; width: 28px; height: 1px; background: var(--d2-red); }
+.sec-title { margin: 0 0 8px; color: var(--d2-ink); font: 500 26px/1.4 var(--d2-serif); }
+.sec-desc { margin: 0 0 34px; max-width: 640px; color: var(--d2-muted); font: 13px/1.8 var(--d2-sans); }
+
+/* 运行任务子视图的段落标题升格为衬线 */
+.shell-page[data-page='settings'] .d2-settings-linear-section > h3,
+.shell-page[data-page='settings'] .d2-settings-linear-section > header h3 {
+  font: 500 15px/1.5 var(--d2-serif);
 }
 
 /* 整页下的表单排版微调（原本为窄列设计） */
 .shell-page[data-page='settings'] .field .field-hint { font-size: 11.5px; }
-.shell-page[data-page='settings'] .d2-settings-form .field { max-width: 760px; }
 
 @media (prefers-reduced-motion: reduce) {
   .shell-page[data-page='settings'] .settings-page,
-  .shell-page[data-page='about'] .about-page { animation: none; }
+  .shell-page[data-page='about'] { animation: none; }
 }

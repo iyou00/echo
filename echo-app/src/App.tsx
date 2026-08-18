@@ -817,7 +817,7 @@ function App() {
               refreshQueue={refreshQueue}
               refreshProfile={refreshProfile}
               boundary={boundaries.find((item) => item.code === 'taste_empty')}
-              onOpenLearned={() => dispatch({ page: 'settings', settingsLearnedToken: settingsLearnedToken + 1 })}
+              onOpenLearned={() => dispatch((current) => ({ page: 'settings', settingsLearnedToken: current.settingsLearnedToken + 1 }))}
             />
         </div>
         <div className="shell-page" data-page="settings" style={{ display: page === 'settings' ? 'flex' : 'none' }}>

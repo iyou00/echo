@@ -527,6 +527,7 @@ export function QueuePage({
               <p className="qf-muted">还没收藏过歌呢。在{pageLabels.chat}里听到喜欢的，点歌曲卡片右上的 ♡，我帮你留着。</p>
             ) : (
               <>
+                {favoritesLoading && favorites.length === 0 && <p className="qf-muted" role="status">正在读取收藏…</p>}
                 {favorites.map((track, index) => (
                   <div
                     className="q-row clickable no-drag"
