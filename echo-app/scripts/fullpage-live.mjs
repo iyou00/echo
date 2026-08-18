@@ -80,11 +80,42 @@ report.railLlm = await click('[data-testid="settings-rail-llm"]')
 await sleep(500)
 report.detailLlm = await visible('.d2-settings-form.detail-llm')
 report.detailMusic = await (await click('[data-testid="settings-rail-music"]') && sleep(400).then(() => visible('.d2-settings-form.detail-music')))
-await click('[data-testid="settings-rail-window"]')
-await sleep(500)
-report.windowOptions = await evalJson(`document.querySelectorAll('.window-size-options .window-size-option').length`)
-await shot('live-settings-window')
 await shot('live-settings')
+
+// 逐分区采样：内容区里所有非透明、非纸面的计算底色元素
+const sections = ['music','llm','voice','yinyi','chat','stage','learned','care','tasks','window','data']
+report.sectionBackgrounds = {}
+for (const key of sections) {
+  const clicked = await click(`[data-testid="settings-rail-${key}"]`)
+  if (!clicked) { report.sectionBackgrounds[key] = 'RAIL-MISS'; continue }
+  await sleep(260)
+  if (key === 'music' || key === 'care' || key === 'learned') await shot(`live-settings-${key}`)
+  report.sectionBackgrounds[key] = await evalJson(`(() => {
+    const main = document.querySelector('.d2-settings-main')
+    if (!main) return 'NO-MAIN'
+    const hits = []
+    const walk = (el) => {
+      for (const child of el.children) {
+        const bg = getComputedStyle(child).backgroundColor
+        const cls = (child.className && typeof child.className === 'string') ? child.className.split(' ')[0] : child.tagName
+        if (child instanceof HTMLElement && bg && bg !== 'rgba(0, 0, 0, 0)') {
+          const rgb = bg.match(/\d+(?:\.\d+)?/g)
+          const r = Math.round(Number(rgb?.[0] ?? 0)), g = Math.round(Number(rgb?.[1] ?? 0)), b = Math.round(Number(rgb?.[2] ?? 0))
+          const isPaper = Math.abs(r-238)<6 && Math.abs(g-240)<6 && Math.abs(b-235)<6
+          if (!isPaper) hits.push(cls + ':' + bg)
+        }
+        walk(child)
+      }
+    }
+    walk(main)
+    const inputs = []
+    for (const el of document.querySelectorAll('.d2-settings-main input, .d2-settings-main select')) {
+      const bg = getComputedStyle(el).backgroundColor
+      if (bg && bg !== 'rgba(0, 0, 0, 0)') inputs.push(el.type + '|' + el.className + '|' + bg)
+    }
+    return { blocks: hits.length ? hits.slice(0, 8) : [], inputs }
+  })()`)
+}
 
 // 品味：整页 + hero 或空态
 await click('.d2-nav-button[aria-label="品味"]')

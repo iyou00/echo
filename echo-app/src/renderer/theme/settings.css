@@ -154,3 +154,18 @@
   .shell-page[data-page='settings'] .settings-page,
   .shell-page[data-page='about'] { animation: none; }
 }
+
+/* —— 背景统一：清掉上一代 index.css 残留在设置页的底色 ——
+   .section 白卡（--bg-primary）、.care-settings-section 淡绿、无类控件的灰底
+   全部归零；表单行直接躺在纸面上，与任务分区/品味页/队列页一致。 */
+.shell-page[data-page='settings'] .settings-page .section,
+.shell-page[data-page='settings'] .settings-page .care-settings-section {
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+}
+.shell-page[data-page='settings'] .settings-page input:where(
+    :not([type='checkbox']):not([type='radio']):not([type='color']):not([type='range'])),
+.shell-page[data-page='settings'] .settings-page select {
+  background: transparent;
+}
