@@ -32,6 +32,7 @@ export interface AppState {
   firstRunWelcomeOpen: boolean
   settingsImportFocusToken: number
   settingsApiFocusToken: number
+  settingsLearnedToken: number
   playbackState: PlaybackState
   boundaries: UiBoundarySnapshot[]
 }
@@ -82,6 +83,7 @@ function initialAppState(): AppState {
     firstRunWelcomeOpen: false,
     settingsImportFocusToken: 0,
     settingsApiFocusToken: 0,
+    settingsLearnedToken: 0,
     playbackState: {
       current: null,
       position: 0,

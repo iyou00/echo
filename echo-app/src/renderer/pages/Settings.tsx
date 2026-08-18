@@ -27,10 +27,10 @@ interface SettingsPageProps extends AppPageProps {
   refreshQueue: () => Promise<Track[]>
   importFocusToken?: number
   apiFocusToken?: number
+  learnedFocusToken?: number
   importTask: ImportTaskSnapshot | null
   onOnboardingLlmReady?: () => Promise<void>
   onRestartOnboarding?: () => void
-  onTitleChange?: (title: string) => void
   onDataReset?: (settings: Settings) => void
 }
 
@@ -191,10 +191,10 @@ export function SettingsPage({
   refreshQueue,
   importFocusToken = 0,
   apiFocusToken = 0,
+  learnedFocusToken = 0,
   importTask,
   onOnboardingLlmReady,
   onRestartOnboarding,
-  onTitleChange,
   onDataReset,
 }: SettingsPageProps) {
   const {
@@ -698,6 +698,17 @@ export function SettingsPage({
       apiSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
     }, 120)
   }, [apiFocusToken])
+
+  const learnedFocusRef = useRef(() => {})
+  learnedFocusRef.current = () => {
+    void refreshLearnedCases()
+    openDetails('pref', 'learned')
+  }
+
+  useEffect(() => {
+    if (!learnedFocusToken) return
+    learnedFocusRef.current()
+  }, [learnedFocusToken])
 
   useEffect(() => {
     if (!showNeteaseDrawer) return

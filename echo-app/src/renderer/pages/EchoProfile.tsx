@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
-import type { EchoApi, MemoryAuditSummary, PlaybackState, ProfileInsight, TasteProfile, TasteProfileVersion, TasteQuestion, Track, UiBoundarySnapshot } from '../../types/ipc'
+import type { EchoApi, MemoryAuditItem, MemoryAuditKind, MemoryAuditSummary, PlaybackState, ProfileInsight, TasteProfile, TasteProfileVersion, TasteQuestion, Track, UiBoundarySnapshot } from '../../types/ipc'
 import type { AppPageProps } from '../appState'
-import { BrandLogo, EmptyState } from '../components'
 import { latestRunningRuntimeTask, useRuntimeTasks } from '../hooks/useRuntimeTasks'
 import { friendlyOperationError } from '../../shared/runtimeRecovery'
 import { trackIdentity } from '../../shared/trackIdentity'
@@ -29,11 +28,57 @@ interface EchoProfileProps extends AppPageProps {
   refreshQueue: () => Promise<Track[]>
   refreshProfile: () => Promise<void>
   boundary?: UiBoundarySnapshot
+  onOpenLearned?: () => void
 }
 
 function displayDate(value?: string) {
   if (!value) return ''
   return new Date(value).toLocaleDateString('zh-CN')
+}
+
+const AUDIT_TAG_TEXT: Record<MemoryAuditKind, string> = {
+  correction: '纠正',
+  favorite: '收藏',
+  loop: '循环',
+  played: '听过',
+  skip: '跳过',
+  explicit_like: '口头',
+  explicit_miss: '口头',
+}
+
+const AUDIT_TAG_TONE: Record<MemoryAuditKind, string> = {
+  correction: 'red',
+  favorite: 'green',
+  loop: '',
+  played: '',
+  skip: 'red',
+  explicit_like: 'green',
+  explicit_miss: 'red',
+}
+
+function auditTimeLabel(value?: string) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })
+}
+
+function renderAuditEvent(item: MemoryAuditItem) {
+  const meterWidth = Math.round(Math.min(Math.max(item.weight ?? 0.4, 0.05), 1) * 100)
+  const negative = item.kind === 'skip' || item.kind === 'explicit_miss'
+  return (
+    <div className="ev-row" key={item.id}>
+      <span className={`tag ${AUDIT_TAG_TONE[item.kind]}`}>{item.label || AUDIT_TAG_TEXT[item.kind]}</span>
+      <span className="what">
+        {item.title}
+        {item.detail && <small>{item.detail}</small>}
+      </span>
+      <div className="meter" aria-hidden="true">
+        <i style={{ width: `${meterWidth}%`, ...(negative ? { background: 'var(--d2-red)' } : null) }} />
+      </div>
+      <time>{auditTimeLabel(item.createdAt)}</time>
+    </div>
+  )
 }
 
 function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)) }
@@ -114,7 +159,7 @@ function discoveryLabel(value: number) {
   return '探索适中'
 }
 
-export function EchoProfilePage({ echo, navigate, profile, playbackState, setPlaybackState, refreshQueue, refreshProfile, boundary }: EchoProfileProps) {
+export function EchoProfilePage({ echo, navigate, profile, playbackState, setPlaybackState, refreshQueue, refreshProfile, boundary, onOpenLearned }: EchoProfileProps) {
   const [busy, setBusy] = useState(false)
   const [phase, setPhase] = useState<'idle' | 'loading' | 'in'>('idle')
   const [playingKey, setPlayingKey] = useState('')
@@ -142,7 +187,6 @@ export function EchoProfilePage({ echo, navigate, profile, playbackState, setPla
   const [activeMoodFilter, setActiveMoodFilter] = useState<string>('all')
   const [tunerActiveEra, setTunerActiveEra] = useState<string>('20s')
   const [showEnergyDetails, setShowEnergyDetails] = useState<boolean>(false)
-  const [activeTab, setActiveTab] = useState<'summary' | 'evidence' | 'versions'>('summary')
 
   // Retained task and cancellation hook
   const runtimeTasks = useRuntimeTasks(echo)
@@ -415,6 +459,13 @@ export function EchoProfilePage({ echo, navigate, profile, playbackState, setPla
     }
   }
 
+  const loadMemoryAuditRef = useRef(loadMemoryAudit)
+  loadMemoryAuditRef.current = loadMemoryAudit
+
+  useEffect(() => {
+    if (profile) void loadMemoryAuditRef.current()
+  }, [profile])
+
   async function restoreProfileVersion(id: number) {
     if (restoringVersionId != null) return
     setRestoringVersionId(id)
@@ -452,253 +503,139 @@ export function EchoProfilePage({ echo, navigate, profile, playbackState, setPla
   const sceneItems = sceneSource.map((scene) => ({ ...scene, strength: signalStrengthLabel(scene.frequency) }))
   const recentInsights = (profile?.insights?.recentChanges ?? []).filter((item) => !dismissedInsights.has(item.id))
   const hasSignatureBehaviorEvidence = filteredSignatureDisplay.some(profileItemHasBehaviorEvidence)
-  const coreSignals = [
-    displayedGenres[0] ? {
-      label: '声音方向',
-      value: displayedGenres[0].name,
-      note: displayedGenres[0].trend === 'up'
-        ? `最近更明显 · ${profileEvidenceSourceLabel(displayedGenres[0], '来自已有画像')}`
-        : `${signalStrengthLabel(displayedGenres[0].weight)} · ${profileEvidenceSourceLabel(displayedGenres[0], '来自已有画像')}`,
-      tone: 'warm',
-    } : null,
-    positiveArtistItems[0] ? {
-      label: '熟悉的人声',
-      value: positiveArtistItems[0].name,
-      note: positiveArtistItems[0].note ?? profileEvidenceSourceLabel(positiveArtistItems[0]),
-      tone: 'ink',
-    } : null,
-    moodItems[0] ? {
-      label: '常出现的状态',
-      value: moodItems[0].tag,
-      note: `${signalStrengthLabel(moodItems[0].frequency)} · ${profileEvidenceSourceLabel(moodItems[0], '来自已有画像')}`,
-      tone: 'blue',
-    } : null,
-    energyKnown ? {
-      label: '听歌能量',
-      value: energyLabel(energyPercent),
-      note: statMetaLabel(evidence, 'energy', tempoKnown && topTempo ? tempoLabel(topTempo.tempo) : '节奏还在观察'),
-      tone: 'warm',
-    } : null,
-    topEra ? {
-      label: '年代线索',
-      value: topEra[0],
-      note: statMetaLabel(evidence, 'era', signalStrengthLabel(topEra[1])),
-      tone: 'ink',
-    } : null,
-  ].filter((item): item is NonNullable<typeof item> => Boolean(item)).slice(0, 3)
   const signatureSectionLabel = activeMoodFilter === 'all'
-    ? (hasSignatureBehaviorEvidence ? '这些歌，最能说明' : '这些歌，留下了线索')
+    ? (hasSignatureBehaviorEvidence ? '这 些 歌 ， 最 能 说 明' : '这 些 歌 ， 留 下 了 线 索')
     : `${activeMoodFilter}时，你更像这些歌`
+  const auditItems = memoryAudit?.items ?? []
+  const auditCorrections = auditItems.filter((item) => item.kind === 'correction')
+  const auditEvents = auditItems.filter((item) => item.kind !== 'correction')
+  const weekStartMs = Date.now() - 7 * 24 * 60 * 60 * 1000
+  const isThisWeek = (item: MemoryAuditItem) => Boolean(item.createdAt && new Date(item.createdAt).getTime() >= weekStartMs)
+  const auditThisWeek = auditEvents.filter(isThisWeek)
+  const auditEarlier = auditEvents.filter((item) => !isThisWeek(item))
   const portraitPhase = profileBusy && phase === 'idle' ? 'loading' : phase
 
   return (
     <div className="d2-profile">
       {!profile ? (
         boundary && !profileBusy
-            ? <BoundaryState snapshot={boundary} onAction={() => navigate('settings')} />
-            : <EmptyState
-                icon={<BrandLogo className="empty-logo" size={56} />}
-                title={profileBusy ? '等我一下。' : '我还没听过你的歌呢。你给我导一份歌单,我读一下,然后我们再正经聊。'}
-                body={undefined}
-                sign={profileBusy ? undefined : '— Echo · 等你'}
-                action={!profileBusy && <button className="primary-button empty-cta" onClick={() => navigate('settings')}>导 入 歌 单</button>}
-              />
+          ? <BoundaryState snapshot={boundary} onAction={() => navigate('settings')} />
+          : (
+            <div className="pf-empty">
+              <div className="ring" aria-hidden="true">♪</div>
+              <h2>{profileBusy ? '等我一下。' : '我还没听过你的歌。'}</h2>
+              <p>{profileBusy ? '正在整理你给我的线索……' : '放几首，或者导入一份歌单——画像从这里开始长。听过的每一首、说过的每一句，我都会记成线索。'}</p>
+              {!profileBusy && (
+                <div className="pf-empty-cta">
+                  <button type="button" className="pf-btn" onClick={() => navigate('settings')}>去导入歌单</button>
+                  <button type="button" className="pf-btn plain" onClick={() => navigate('chat')}>先去聊聊</button>
+                </div>
+              )}
+            </div>
+          )
       ) : (
         <>
-          <div className="d2-profile-head">
-            <div className="d2-profile-tabs" role="tablist" aria-label="品味理解视图">
-              <button type="button" role="tab" aria-selected={activeTab === 'summary'} className={activeTab === 'summary' ? 'active' : ''} onClick={() => setActiveTab('summary')}>理解</button>
-              <button type="button" role="tab" aria-selected={activeTab === 'evidence'} className={activeTab === 'evidence' ? 'active' : ''} onClick={() => setActiveTab('evidence')}>依据</button>
-              <button type="button" role="tab" aria-selected={activeTab === 'versions'} className={activeTab === 'versions' ? 'active' : ''} onClick={() => { setActiveTab('versions'); void loadMemoryAudit() }}>版本</button>
-            </div>
-            <div className="d2-profile-tools">
-              <button type="button" onClick={regenerate} disabled={profileBusy}>{profileBusy ? '正在重写…' : '更新理解'}</button>
-              <button type="button" onClick={() => navigate('settings')}>设置</button>
-            </div>
-          </div>
+          <div className="pf-hero">
+            <div className="pf-kicker">E C H O 眼 里 的 你</div>
+            {portraitPhase === 'loading' ? (
+              <div className="d2-profile-skeleton" role="status" aria-label="画像生成中">
+                <span className="long" />
+                <span className="mid" />
+                <span className="short" />
+              </div>
+            ) : (
+              <h1 className="pf-portrait">
+                {profile.echo_portrait.split(/(，|。|、|！|？|”|“)/).map((segment, index) => {
+                  const match = findPortraitClueMatch(
+                    segment,
+                    artistItems.map((artist) => artist.name),
+                    genreItems.map((genre) => genre.name),
+                  )
 
-          {activeTab === 'summary' && (
-            <div className="d2-profile-subview" role="tabpanel">
-              {portraitPhase === 'loading' ? (
-                <div className="d2-profile-skeleton" role="status" aria-label="画像生成中">
-                  <span className="long" />
-                  <span className="mid" />
-                  <span className="short" />
-                </div>
-              ) : (
-                <p className="d2-profile-copy">
-                  {profile.echo_portrait.split(/(，|。|、|！|？|”|“)/).map((segment, index) => {
-                    const match = findPortraitClueMatch(
-                      segment,
-                      artistItems.map((artist) => artist.name),
-                      genreItems.map((genre) => genre.name),
-                    )
-
-                    if (match) {
-                      return (
-                        <button
-                          type="button"
-                          key={index}
-                          className="d2-profile-mark"
-                          onClick={() => triggerClueEvidence(segment)}
-                        >
-                          {segment}
-                        </button>
-                      )
-                    }
-                    return <span key={index}>{segment}</span>
-                  })}
-                </p>
-              )}
-
-              {clueEvidence && (
-                <div className="d2-profile-clue" role="status">
-                  <div className="d2-profile-clue-head">
-                    <span>为什么这么说</span>
-                    <strong>{clueEvidence.title}</strong>
-                    <button type="button" onClick={() => setClueEvidence(null)} title="收起依据" aria-label="收起依据">×</button>
-                  </div>
-                  <p>{clueEvidence.detail}</p>
-                  <small>{clueEvidence.source}</small>
-                </div>
-              )}
-
-              {(displayedGenres.length > 0 || moodItems.length > 0) && (
-                <div className="d2-profile-tags">
-                  {displayedGenres.slice(0, 3).map((genre) => <span key={genre.name}>{genre.name}</span>)}
-                  {moodItems.slice(0, 3).map((mood) => <span key={mood.tag}>{mood.tag}</span>)}
-                </div>
-              )}
-
-              {status !== 'idle' && <div className={`d2-profile-status ${status}`}>{statusMessage}</div>}
-
-              {coreSignals.length > 0 && coreSignals.map((signal) => (
-                <div className="d2-profile-row" key={`${signal.label}-${signal.value}`}>
-                  <div>
-                    <strong>{signal.value}</strong>
-                    <small>{signal.note}</small>
-                  </div>
-                  <span className="d2-profile-row-label">{signal.label}</span>
-                </div>
-              ))}
-
-              <div className="d2-profile-subtitle">这周，我对你改观的一点</div>
-              {recentInsights.length > 0 ? recentInsights.slice(0, 2).map((insight) => (
-                <div className="d2-profile-row" key={insight.id}>
-                  <div>
-                    <strong>{insight.statement}</strong>
-                    <small>{insight.evidenceLabel}</small>
-                    <div className="d2-insight-actions" role="group" aria-label={`回应：${insight.statement}`}>
-                      <button type="button" disabled={Boolean(savingInsightId)} onClick={() => respondToInsight(insight, 'confirm')}>是我</button>
-                      <button type="button" disabled={Boolean(savingInsightId)} onClick={() => respondToInsight(insight, 'temporary')}>只是最近</button>
-                      <button type="button" disabled={Boolean(savingInsightId)} onClick={() => respondToInsight(insight, 'reject')}>不太对</button>
-                    </div>
-                  </div>
-                </div>
-              )) : (
-                <p className="d2-profile-muted">最近的线索还不够跨天，我先不急着替你下结论。</p>
-              )}
-
-              {questions[0] && (
-                <>
-                  <div className="d2-profile-subtitle">我还没看清</div>
-                  <p className="d2-profile-question-copy">{questions[0].content}</p>
-                  <div className="d2-profile-question-answer">
-                    <form
-                      className="d2-profile-question-form"
-                      onSubmit={(event) => {
-                        event.preventDefault()
-                        void answerProfileQuestion()
-                      }}
-                    >
-                      <input value={questionDraft} onChange={(event) => setQuestionDraft(event.target.value)} maxLength={180} placeholder="跟 Echo 说一句" />
-                      <button type="submit" disabled={!questionDraft.trim() || questionSaving}>{questionSaving ? '记着' : '告诉 Echo'}</button>
-                    </form>
-                  </div>
-                </>
-              )}
-
-              {correctionOpen ? (
-                <div className="d2-profile-correct">
-                  <textarea
-                    value={correctionDraft}
-                    onChange={(event) => setCorrectionDraft(event.target.value)}
-                    maxLength={300}
-                    placeholder="比如：我最近听王菲比较多，是那几天刚好在听。"
-                  />
-                  <div className="d2-profile-correct-actions">
-                    <button className="d2-profile-row-btn" type="button" onClick={() => { setCorrectionOpen(false); setCorrectionDraft('') }} disabled={correctionSaving}>取消</button>
-                    <button className="d2-profile-row-btn primary" type="button" onClick={submitCorrection} disabled={!correctionDraft.trim() || correctionSaving}>{correctionSaving ? '保存中' : '记下'}</button>
-                  </div>
-                </div>
-              ) : (
-                <button className="d2-profile-correct-link" type="button" onClick={() => setCorrectionOpen(true)}>这段理解不准</button>
-              )}
-
-              <footer className="d2-profile-foot">
-                {portraitUpdatedAt ? `画像更新于 ${displayDate(portraitUpdatedAt)}` : '画像 · 尚未生成'}
-              </footer>
-            </div>
-          )}
-
-          {activeTab === 'evidence' && (
-            <div className="d2-profile-subview" role="tabpanel">
-              <div className="d2-profile-subtitle">{signatureSectionLabel}</div>
-              {moodItems.length > 0 && (
-                <div className="d2-profile-moods" role="tablist" aria-label="按氛围查看代表歌曲">
-                  <button type="button" role="tab" aria-selected={activeMoodFilter === 'all'} className={activeMoodFilter === 'all' ? 'active' : ''} onClick={() => setActiveMoodFilter('all')}>全部</button>
-                  {moodItems.slice(0, 5).map((mood) => {
-                    const isSelected = activeMoodFilter === mood.tag
+                  if (match) {
                     return (
                       <button
                         type="button"
-                        role="tab"
-                        aria-selected={isSelected}
-                        className={isSelected ? 'active' : ''}
-                        key={mood.tag}
-                        onClick={() => setActiveMoodFilter(isSelected ? 'all' : mood.tag)}
+                        key={index}
+                        className="d2-profile-mark"
+                        onClick={() => triggerClueEvidence(segment)}
                       >
-                        {mood.tag}
+                        {segment}
                       </button>
                     )
-                  })}
+                  }
+                  return <span key={index}>{segment}</span>
+                })}
+              </h1>
+            )}
+
+            {clueEvidence && (
+              <div className="d2-profile-clue" role="status">
+                <div className="d2-profile-clue-head">
+                  <span>为什么这么说</span>
+                  <strong>{clueEvidence.title}</strong>
+                  <button type="button" onClick={() => setClueEvidence(null)} title="收起依据" aria-label="收起依据">×</button>
+                </div>
+                <p>{clueEvidence.detail}</p>
+                <small>{clueEvidence.source}</small>
+              </div>
+            )}
+
+            {status !== 'idle' && <div className={`d2-profile-status ${status}`}>{statusMessage}</div>}
+
+            <div className="pf-hero-meta">
+              <span>{portraitUpdatedAt ? `画像更新于 ${displayDate(portraitUpdatedAt)}` : '画像 · 尚未生成'}</span>
+              <div className="pf-hero-tools">
+                <button type="button" onClick={regenerate} disabled={profileBusy}>{profileBusy ? '正在重写…' : '更新理解'}</button>
+                <button type="button" onClick={() => navigate('settings')}>设置</button>
+              </div>
+            </div>
+          </div>
+
+          <div className="pf-dims">
+            <div className="dim">
+              <small>声 音 方 向</small>
+              <h3>{displayedGenres.length > 0 ? `${displayedGenres[0].name}为主${displayedGenres[1] ? `，也有${displayedGenres[1].name}` : ''}` : '还在观察'}</h3>
+              {displayedGenres.length > 0 && (
+                <div className="tags">
+                  {displayedGenres.slice(0, 4).map((genre) => <i key={genre.name}>{genre.name} {genre.displayPercentLabel}</i>)}
                 </div>
               )}
-              {filteredSignatureDisplay.length === 0 ? (
-                <p className="d2-profile-muted">
-                  {activeMoodFilter === 'all' ? '还没有足够的主动线索，我先不替你选代表歌曲。' : '在这个情绪切片下，还没有收集到契合的歌曲。'}
-                </p>
-              ) : (
-                filteredSignatureDisplay.map((item, index) => {
-                  const trackKeyStr = trackIdentity(item.track)
-                  const isCurrentTrack = Boolean(trackKeyStr && trackKeyStr === trackIdentity(playbackState.current))
-                  const isPlayingThis = playingKey === trackKeyStr
-
-                  return (
-                    <div className={`d2-profile-row${isCurrentTrack ? ' current' : ''}`} key={`${item.track.title}-${index}`}>
-                      <div>
-                        <strong>{String(index + 1).padStart(2, '0')} · {item.track.title}</strong>
-                        <small>{item.track.artist}{item.track.year ? ` · ${item.track.year}` : ''}</small>
-                        {item.note && <small className="d2-profile-row-note">{item.note}</small>}
-                      </div>
-                      <button
-                        className="d2-profile-row-btn"
-                        type="button"
-                        title="播放这首代表曲目"
-                        onClick={() => playSignature(item.track)}
-                        disabled={isPlayingThis}
-                      >
-                        {isPlayingThis ? '正在放' : '播放'}
-                      </button>
-                    </div>
-                  )
-                })
+              <div className="ev">{displayedGenres[0] ? (displayedGenres[0].trend === 'up' ? '最近更明显' : signalStrengthLabel(displayedGenres[0].weight)) : '线索还少'}</div>
+            </div>
+            <div className="dim">
+              <small>情 绪 底 色</small>
+              <h3>{moodItems.length > 0 ? moodItems.slice(0, 2).map((mood) => mood.tag).join('、') : energyKnown ? energyLabel(energyPercent) : '还在观察'}</h3>
+              {moodItems.length > 0 && (
+                <div className="tags">{moodItems.slice(0, 4).map((mood) => <i key={mood.tag}>{mood.tag}</i>)}</div>
               )}
-
-              <div className="d2-profile-subtitle">完整音乐档案</div>
+              <div className="ev">{energyKnown ? `${energyLabel(energyPercent)} · ${statMetaLabel(evidence, 'energy', tempoKnown && topTempo ? tempoLabel(topTempo.tempo) : '节奏还在观察')}` : '能量线索还不够，我会继续观察'}</div>
+              {(energyKnown || tempoKnown) && (
+                <>
+                  <button className="dim-more" type="button" onClick={() => setShowEnergyDetails((current) => !current)} aria-expanded={showEnergyDetails}>
+                    {showEnergyDetails ? '收起节奏细节' : '节奏细节'}
+                    <ChevronDown className={showEnergyDetails ? 'expanded' : ''} size={12} />
+                  </button>
+                  {showEnergyDetails && (
+                    <div className="dim-detail">
+                      {tempoKnown && tempoEntries.map((entry) => (
+                        <div className="d2-profile-kv" key={entry.tempo}><span>{tempoLabel(entry.tempo)}</span><strong>{signalStrengthLabel(entry.rawValue)}</strong></div>
+                      ))}
+                      <div className="d2-profile-kv"><span>探索倾向</span><strong>{discoveryLabel(profile.discovery_appetite ?? 0.5)}</strong></div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            <div className="dim">
+              <small>年 代 与 新 旧</small>
+              <h3>{topEra ? `${topEra[0]} 的声音最多` : '还在观察'}</h3>
               {eraEntries.length > 0 && (
-                <div className="d2-profile-group">
-                  <div className="d2-profile-group-label">年代偏好</div>
+                <div className="tags">{eraEntries.slice(0, 3).map(([era, value]) => <i key={era}>{era} {asPercent(value)}%</i>)}</div>
+              )}
+              <div className="ev">{statMetaLabel(evidence, 'era', topEra ? signalStrengthLabel(topEra[1]) : '继续观察')}</div>
+              {eraEntries.length > 0 && (
+                <>
                   <div className="d2-profile-era-scale">
                     {ERA_SCALE.map((era) => (
                       <button type="button" key={era} className={tunerActiveEra === era ? 'active' : ''} onClick={() => setTunerActiveEra(era)}>
@@ -710,121 +647,196 @@ export function EchoProfilePage({ echo, navigate, profile, playbackState, setPla
                     <span>{tunerActiveEra}</span>
                     <strong>{signalStrengthLabel(profile.era_preference?.[tunerActiveEra] ?? 0)}</strong>
                   </div>
-                  <p className="d2-profile-muted">{eraEvidenceLine(profile, tunerActiveEra).replace(/占比\s*\d+%[，,]?\s*/g, '')}</p>
-                </div>
-              )}
-              <div className="d2-profile-group">
-                <div className="d2-profile-group-label">节奏与能量</div>
-                <button className="d2-profile-energy-row" type="button" onClick={() => setShowEnergyDetails((current) => !current)} aria-expanded={showEnergyDetails}>
-                  {energyKnown && (
-                    <span className="d2-profile-meter" aria-hidden="true">
-                      <span style={{ width: `${energyPercent}%` }} />
-                    </span>
-                  )}
-                  <span className="d2-profile-energy-desc">
-                    {energyKnown
-                      ? `${energyLabel(energyPercent)} · ${tempoKnown && topTempo ? tempoLabel(topTempo.tempo) : '节奏还在观察'}`
-                      : '能量线索还不够，我会按真实播放继续观察。'}
-                  </span>
-                  <ChevronDown className={showEnergyDetails ? 'expanded' : ''} size={14} />
-                </button>
-                {showEnergyDetails && (
-                  <div className="d2-profile-energy-detail">
-                    {tempoKnown && tempoEntries.map((entry) => (
-                      <div className="d2-profile-kv" key={entry.tempo}><span>{tempoLabel(entry.tempo)}</span><strong>{signalStrengthLabel(entry.rawValue)}</strong></div>
-                    ))}
-                    <div className="d2-profile-kv"><span>探索倾向</span><strong>{discoveryLabel(profile.discovery_appetite ?? 0.5)}</strong></div>
-                  </div>
-                )}
-              </div>
-              {displayedGenres.length > 0 && (
-                <div className="d2-profile-group">
-                  <div className="d2-profile-group-label">声音方向</div>
-                  {displayedGenres.map((genre) => (
-                    <div className="d2-profile-row" key={genre.name}>
-                      <div>
-                        <strong>{genre.name}</strong>
-                        <small>{genre.trend === 'up' ? '最近更明显' : genre.trend === 'down' ? '最近变少' : signalStrengthLabel(genre.weight)} · {profileEvidenceSourceLabel(genre, '来自已有画像')}</small>
-                        {genre.note && <small className="d2-profile-row-note">{genre.note}</small>}
-                        <span className="d2-profile-meter" aria-hidden="true"><span style={{ width: `${genre.barPercent}%` }} /></span>
-                      </div>
-                      <span className="d2-profile-row-label">{genre.displayPercentLabel}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {positiveArtistItems.length > 0 && (
-                <div className="d2-profile-group">
-                  <div className="d2-profile-group-label">艺人线索</div>
-                  {positiveArtistItems.slice(0, 5).map((artist) => (
-                    <div className="d2-profile-row" key={artist.name}>
-                      <div>
-                        <strong>{artist.name}</strong>
-                        <small>{artist.note ?? profileEvidenceSourceLabel(artist)}</small>
-                        <span className="d2-profile-meter" aria-hidden="true"><span style={{ width: `${asPercent(artist.affinity)}%` }} /></span>
-                      </div>
-                      <span className="d2-profile-row-label">{asPercent(artist.affinity)}%</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div className="d2-profile-group">
-                <div className="d2-profile-group-label">常出现的听歌场景</div>
-                {sceneItems.length > 0 ? (
-                  sceneItems.map((scene) => (
-                    <div className="d2-profile-kv" key={scene.tag}><span>{scene.tag}</span><strong>{scene.strength}</strong></div>
-                  ))
-                ) : <p className="d2-profile-muted">场景线索还少，我会继续观察你通常在什么时候听什么。</p>}
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'versions' && (
-            <div className="d2-profile-subview" role="tabpanel">
-              {memoryLoadState === 'loading' && <p className="d2-profile-muted" role="status">正在整理…</p>}
-              {memoryLoadState === 'error' && (
-                <div className="d2-profile-row">
-                  <div><strong>这次没读到我记住的线索。</strong></div>
-                  <button className="d2-profile-row-btn" type="button" onClick={() => void loadMemoryAudit(true)}>重新读取</button>
-                </div>
-              )}
-              {memoryLoadState === 'loaded' && memoryAudit && (
-                memoryAudit.items.length > 0 ? (
-                  memoryAudit.items.map((item) => (
-                    <div className="d2-profile-row" key={item.id}>
-                      <span className="d2-profile-row-label">{item.label}</span>
-                      <div>
-                        <strong>{item.title}</strong>
-                        {item.detail && <small>{item.detail}</small>}
-                      </div>
-                    </div>
-                  ))
-                ) : <p className="d2-profile-muted">还没有形成可核对的记忆。</p>
-              )}
-              {memoryLoadState === 'loaded' && profileVersions && profileVersions.length > 0 && (
-                <>
-                  <div className="d2-profile-subtitle">画像版本</div>
-                  {profileVersions.slice(0, 6).map((version) => (
-                    <div className="d2-profile-row" key={version.id}>
-                      <div>
-                        <strong>{displayDate(version.createdAt)}</strong>
-                        <small>{version.summary ?? version.portrait}</small>
-                      </div>
-                      <button
-                        className="d2-profile-row-btn"
-                        type="button"
-                        disabled={restoringVersionId != null}
-                        onClick={() => restoreProfileVersion(version.id)}
-                        title="恢复这版画像"
-                      >
-                        {restoringVersionId === version.id ? '恢复中' : '恢复'}
-                      </button>
-                    </div>
-                  ))}
+                  <p className="d2-profile-muted">{eraEvidenceLine(profile, tunerActiveEra)}</p>
                 </>
               )}
             </div>
+            <div className="dim">
+              <small>常 去 场 景</small>
+              <h3>{sceneItems.length > 0 ? sceneItems.slice(0, 2).map((scene) => scene.tag).join('、') : '还在观察'}</h3>
+              {sceneItems.length > 0 && (
+                <div className="tags">{sceneItems.slice(0, 4).map((scene) => <i key={scene.tag}>{scene.tag}</i>)}</div>
+              )}
+              <div className="ev">{sceneItems[0]?.strength ?? '场景线索还少'}</div>
+            </div>
+          </div>
+
+          <div className="sub-kicker pf-gap">{signatureSectionLabel}</div>
+          {moodItems.length > 0 && (
+            <div className="d2-profile-moods" role="tablist" aria-label="按氛围查看代表歌曲">
+              <button type="button" role="tab" aria-selected={activeMoodFilter === 'all'} className={activeMoodFilter === 'all' ? 'active' : ''} onClick={() => setActiveMoodFilter('all')}>全部</button>
+              {moodItems.slice(0, 5).map((mood) => {
+                const isSelected = activeMoodFilter === mood.tag
+                return (
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={isSelected}
+                    className={isSelected ? 'active' : ''}
+                    key={mood.tag}
+                    onClick={() => setActiveMoodFilter(isSelected ? 'all' : mood.tag)}
+                  >
+                    {mood.tag}
+                  </button>
+                )
+              })}
+            </div>
           )}
+          {filteredSignatureDisplay.length === 0 ? (
+            <p className="d2-profile-muted">
+              {activeMoodFilter === 'all' ? '还没有足够的主动线索，我先不替你选代表歌曲。' : '在这个情绪切片下，还没有收集到契合的歌曲。'}
+            </p>
+          ) : (
+            filteredSignatureDisplay.map((item, index) => {
+              const trackKeyStr = trackIdentity(item.track)
+              const isCurrentTrack = Boolean(trackKeyStr && trackKeyStr === trackIdentity(playbackState.current))
+              const isPlayingThis = playingKey === trackKeyStr
+
+              return (
+                <div className={`d2-profile-row${isCurrentTrack ? ' current' : ''}`} key={`${item.track.title}-${index}`}>
+                  <div>
+                    <strong>{String(index + 1).padStart(2, '0')} · {item.track.title}</strong>
+                    <small>{item.track.artist}{item.track.year ? ` · ${item.track.year}` : ''}</small>
+                    {item.note && <small className="d2-profile-row-note">{item.note}</small>}
+                  </div>
+                  <button
+                    className="d2-profile-row-btn"
+                    type="button"
+                    title="播放这首代表曲目"
+                    onClick={() => playSignature(item.track)}
+                    disabled={isPlayingThis}
+                  >
+                    {isPlayingThis ? '正在放' : '播放'}
+                  </button>
+                </div>
+              )
+            })
+          )}
+          {positiveArtistItems.length > 0 && (
+            <div className="d2-profile-group pf-artists">
+              <div className="d2-profile-group-label">人声线索</div>
+              {positiveArtistItems.slice(0, 5).map((artist) => (
+                <div className="d2-profile-row" key={artist.name}>
+                  <div>
+                    <strong>{artist.name}</strong>
+                    <small>{artist.note ?? profileEvidenceSourceLabel(artist)}</small>
+                    <span className="d2-profile-meter" aria-hidden="true"><span style={{ width: `${asPercent(artist.affinity)}%` }} /></span>
+                  </div>
+                  <span className="d2-profile-row-label">{asPercent(artist.affinity)}%</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="sub-kicker pf-gap">它 记 下 的 证 据<span className="n">· 本周与更早</span></div>
+          {memoryLoadState === 'loading' && <p className="d2-profile-muted" role="status">正在整理…</p>}
+          {memoryLoadState === 'error' && (
+            <div className="d2-profile-row">
+              <div><strong>这次没读到我记住的线索。</strong></div>
+              <button className="d2-profile-row-btn" type="button" onClick={() => void loadMemoryAudit(true)}>重新读取</button>
+            </div>
+          )}
+          {memoryLoadState === 'loaded' && auditEvents.length === 0 && <p className="d2-profile-muted">还没有形成可核对的记忆。</p>}
+          {memoryLoadState === 'loaded' && auditThisWeek.length > 0 && (
+            <>
+              <div className="ev-group">本 周</div>
+              {auditThisWeek.map(renderAuditEvent)}
+            </>
+          )}
+          {memoryLoadState === 'loaded' && auditEarlier.length > 0 && (
+            <>
+              <div className="ev-group">更 早</div>
+              {auditEarlier.map(renderAuditEvent)}
+            </>
+          )}
+          {memoryLoadState === 'loaded' && profileVersions && profileVersions.length > 0 && (
+            <>
+              <div className="sub-kicker pf-gap">画 像 版 本</div>
+              {profileVersions.slice(0, 6).map((version) => (
+                <div className="d2-profile-row" key={version.id}>
+                  <div>
+                    <strong>{displayDate(version.createdAt)}</strong>
+                    <small>{version.summary ?? version.portrait}</small>
+                  </div>
+                  <button
+                    className="d2-profile-row-btn"
+                    type="button"
+                    disabled={restoringVersionId != null}
+                    onClick={() => restoreProfileVersion(version.id)}
+                    title="恢复这版画像"
+                  >
+                    {restoringVersionId === version.id ? '恢复中' : '恢复'}
+                  </button>
+                </div>
+              ))}
+            </>
+          )}
+
+          <div className="sub-kicker pf-gap">这 周 ， 我 对 你 改 观 的 一 点</div>
+          {recentInsights.length > 0 ? recentInsights.slice(0, 2).map((insight) => (
+            <div className="d2-profile-row" key={insight.id}>
+              <div>
+                <strong>{insight.statement}</strong>
+                <small>{insight.evidenceLabel}</small>
+                <div className="d2-insight-actions" role="group" aria-label={`回应：${insight.statement}`}>
+                  <button type="button" disabled={Boolean(savingInsightId)} onClick={() => respondToInsight(insight, 'confirm')}>是我</button>
+                  <button type="button" disabled={Boolean(savingInsightId)} onClick={() => respondToInsight(insight, 'temporary')}>只是最近</button>
+                  <button type="button" disabled={Boolean(savingInsightId)} onClick={() => respondToInsight(insight, 'reject')}>不太对</button>
+                </div>
+              </div>
+            </div>
+          )) : (
+            <p className="d2-profile-muted">最近的线索还不够跨天，我先不急着替你下结论。</p>
+          )}
+
+          {questions[0] && (
+            <>
+              <div className="d2-profile-subtitle pf-gap">我还没看清</div>
+              <p className="d2-profile-question-copy">{questions[0].content}</p>
+              <div className="d2-profile-question-answer">
+                <form
+                  className="d2-profile-question-form"
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    void answerProfileQuestion()
+                  }}
+                >
+                  <input value={questionDraft} onChange={(event) => setQuestionDraft(event.target.value)} maxLength={180} placeholder="跟 Echo 说一句" />
+                  <button type="submit" disabled={!questionDraft.trim() || questionSaving}>{questionSaving ? '记着' : '告诉 Echo'}</button>
+                </form>
+              </div>
+            </>
+          )}
+
+          <div className="sub-kicker pf-gap">你 纠 正 过 它</div>
+          {auditCorrections.length > 0 ? auditCorrections.map((item) => (
+            <div className="corr" key={item.id}>
+              <q>{item.title}</q>
+              <small>{[auditTimeLabel(item.createdAt), item.detail].filter(Boolean).join(' · ')}</small>
+            </div>
+          )) : (
+            <p className="d2-profile-muted">还没有被你纠正过的记忆。说错了就直接讲，我会当场改。</p>
+          )}
+          {correctionOpen ? (
+            <div className="d2-profile-correct">
+              <textarea
+                value={correctionDraft}
+                onChange={(event) => setCorrectionDraft(event.target.value)}
+                maxLength={300}
+                placeholder="比如：我最近听王菲比较多，是那几天刚好在听。"
+              />
+              <div className="d2-profile-correct-actions">
+                <button className="d2-profile-row-btn" type="button" onClick={() => { setCorrectionOpen(false); setCorrectionDraft('') }} disabled={correctionSaving}>取消</button>
+                <button className="d2-profile-row-btn primary" type="button" onClick={submitCorrection} disabled={!correctionDraft.trim() || correctionSaving}>{correctionSaving ? '保存中' : '记下'}</button>
+              </div>
+            </div>
+          ) : (
+            <button className="d2-profile-correct-link" type="button" onClick={() => setCorrectionOpen(true)}>这段理解不准</button>
+          )}
+          {onOpenLearned && (
+            <p className="cross-link">这些纠正沉淀在 <button type="button" className="cross-link-btn" onClick={onOpenLearned}>设置 · Echo 学到了什么</button>，可随时删除或停用夜间复盘。</p>
+          )}
+          <p className="migrate-note">觉得哪里说得不对？不用找设置——直接对 Echo 说「你记错了，……」，它会当场改。</p>
         </>
       )}
     </div>

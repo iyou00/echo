@@ -98,6 +98,7 @@ function App() {
     firstRunWelcomeOpen,
     settingsImportFocusToken,
     settingsApiFocusToken,
+    settingsLearnedToken,
     playbackState,
     boundaries,
   } = state
@@ -702,13 +703,11 @@ function App() {
     }
     prevPageRef.current = page
   }, [page, listeningViewOpen, dispatch])
-  const drawerOpen = page === 'queue' || page === 'profile'
+  const drawerOpen = page === 'queue'
   const [dailyReconnectDone, setDailyReconnectDone] = useState(false)
   const offlineBoundary = boundaries.find((item) => item.code === 'offline')
   const modelInvalidBoundary = boundaries.find((item) => item.code === 'model_invalid')
-  const drawerTitle = page === 'queue'
-    ? '音乐与队列'
-    : 'Echo 对你的理解'
+  const drawerTitle = '音乐与队列'
 
   const commonProps: AppPageProps = { navigate: setPage }
   const closeDrawer = useCallback(() => setPage('chat'), [setPage])
@@ -813,6 +812,19 @@ function App() {
             />
           </div>
         </section>
+        <div className="shell-page" data-page="profile" style={{ display: page === 'profile' ? 'flex' : 'none' }}>
+          <EchoProfilePage
+              {...commonProps}
+              echo={echo}
+              profile={profile}
+              playbackState={playbackState}
+              setPlaybackState={setPlaybackState}
+              refreshQueue={refreshQueue}
+              refreshProfile={refreshProfile}
+              boundary={boundaries.find((item) => item.code === 'taste_empty')}
+              onOpenLearned={() => dispatch({ page: 'settings', settingsLearnedToken: settingsLearnedToken + 1 })}
+            />
+        </div>
         <div className="shell-page" data-page="settings" style={{ display: page === 'settings' ? 'flex' : 'none' }}>
           <SettingsPage
               {...commonProps}
@@ -825,6 +837,7 @@ function App() {
               refreshQueue={refreshQueue}
               importFocusToken={settingsImportFocusToken}
               apiFocusToken={settingsApiFocusToken}
+              learnedFocusToken={settingsLearnedToken}
               importTask={importTask}
               onOnboardingLlmReady={advanceOnboardingAfterLlmReady}
               onRestartOnboarding={() => {
@@ -851,20 +864,6 @@ function App() {
               updateAutoPlayNext={updateAutoPlayNext}
             />
           </div>
-          {page === 'profile' && (
-            <div className="d2-drawer-view">
-            <EchoProfilePage
-                {...commonProps}
-                echo={echo}
-                profile={profile}
-                playbackState={playbackState}
-                setPlaybackState={setPlaybackState}
-                refreshQueue={refreshQueue}
-                refreshProfile={refreshProfile}
-                boundary={boundaries.find((item) => item.code === 'taste_empty')}
-              />
-            </div>
-          )}
         </ContextDrawer>
         {fieldMode === 'listening' && (
           <button className="d2-now-return" type="button" onClick={() => dispatch({ listeningViewOpen: false, listeningDismissed: true })}>
