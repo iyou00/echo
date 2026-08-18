@@ -25,8 +25,12 @@ export function registerAppWindowIpc(): void {
     if (!target) throw new Error('当前没有可调整的 Echo 窗口')
     if (!isWindowSizePreset(preset)) throw new Error('窗口尺寸档位无效')
     const size = windowSizeForPreset(preset)
-    target.setSize(size.width, size.height, true)
+    // Windows 上 resizable:false 的窗口连续 setSize 会失效（首次生效，之后被系统钉死），
+    // 调整前临时解锁、调整完锁回；animate 关掉避免连续切换时与动画竞态。
+    target.setResizable(true)
+    target.setSize(size.width, size.height, false)
     target.center()
+    target.setResizable(false)
     return { ok: true, preset, ...size }
   })
   ipcMain.handle('window:close', () => {

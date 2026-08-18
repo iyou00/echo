@@ -1480,7 +1480,7 @@ export function SettingsPage({
           <button type="button" data-testid="settings-rail-tasks" className={railActive('tasks')} onClick={() => openDetails('sys', 'tasks')}>运行任务</button>
           <button type="button" data-testid="settings-rail-window" className={railActive('window')} onClick={() => openDetails('sys', 'window')}>窗口与关闭</button>
           <button type="button" data-testid="settings-rail-data" className={railActive('data')} onClick={() => openDetails('sys', 'data')}>本地数据</button>
-          <button type="button" data-testid="settings-rail-about" onClick={() => navigate('about')}>关于 Echo</button>
+          <button type="button" data-testid="settings-rail-about" className="d2-rail-item" onClick={() => navigate('about')}>关于 Echo</button>
         </div>
         <button type="button" className="d2-rail-restart" onClick={onRestartOnboarding}>重新查看引导</button>
         <button type="button" className="d2-rail-restart" onClick={() => { void openFeedback() }} title="打开反馈渠道">反馈与建议</button>
