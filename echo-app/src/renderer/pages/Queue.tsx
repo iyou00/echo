@@ -15,7 +15,8 @@ function formatClock(ms: number) {
   return `${minutes}:${String(seconds).padStart(2, '0')}`
 }
 
-function formatClockOfDay(value: string) {
+function formatClockOfDay(value?: string) {
+  if (!value) return ''
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ''
   return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
@@ -706,7 +707,7 @@ export function QueuePage({
                                 ♥
                               </button>
                             </div>
-                            {track.recommendedAt ? <time>{formatClockOfDay(track.recommendedAt)}</time> : null}
+                            {(track.queueStatusAt ?? track.recommendedAt) ? <time>{formatClockOfDay(track.queueStatusAt ?? track.recommendedAt)}</time> : null}
                           </div>
                         )
                       })}

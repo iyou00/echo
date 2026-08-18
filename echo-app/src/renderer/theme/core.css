@@ -1,26 +1,12 @@
-.d2-settings-overview {
-  min-height: 0;
-  flex: 1;
-  overflow: auto;
-  padding: 14px 30px 30px;
-}
-
-.d2-settings-autosave {
-  margin: 0 0 23px;
-  color: var(--d2-muted);
-  font-size: 10px;
-}
-
-.d2-settings-size > strong,
 .d2-settings-row strong {
   display: block;
   font-size: 12px;
   font-weight: 600;
 }
 
-.d2-settings-size .window-size-options { margin-top: 10px; }
-.d2-settings-size .window-size-option { padding: 9px 5px; font-size: 10px; }
-.d2-settings-size .window-size-note { margin-top: 8px; font-size: 10px; }
+.d2-settings-form .window-size-options { margin-top: 10px; }
+.d2-settings-form .window-size-option { padding: 9px 5px; font-size: 10px; }
+.d2-settings-form .window-size-note { margin-top: 8px; font-size: 10px; }
 
 .d2-settings-rows {
   margin-top: 21px;
@@ -88,31 +74,7 @@
 .d2-settings-row .switch input:checked + span::after { background: var(--d2-surface); transform: translateX(11px); }
 .d2-settings-row .switch input:focus-visible + span { outline: 1px solid var(--d2-red); outline-offset: 2px; }
 
-.d2-settings-links {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  margin-top: 22px;
-  border-top: 1px solid var(--d2-line);
-  border-left: 1px solid var(--d2-line);
-}
-
-.d2-settings-links button {
-  display: flex;
-  min-height: 43px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 12px;
-  border: 0;
-  border-right: 1px solid var(--d2-line);
-  border-bottom: 1px solid var(--d2-line);
-  background: transparent;
-  color: var(--d2-ink);
-  font-size: 10px;
-  text-align: left;
-}
-
-.d2-settings-row:hover,
-.d2-settings-links button:hover { background: rgba(24, 71, 52, 0.045); }
+.d2-settings-row:hover { background: rgba(24, 71, 52, 0.045); }
 .d2-settings-status { margin-top: 12px; color: var(--d2-muted); font-size: 10px; }
 
 .d2-connection-list { border-bottom: 1px solid var(--d2-line); }
@@ -222,9 +184,6 @@
 }
 .d2-settings-form .first-run > div { font-size: 11px; font-weight: 600; }
 .d2-settings-form .first-run p { margin: 5px 0 0; color: var(--d2-muted); font-size: 9px; line-height: 1.6; }
-.settings-page:has(.d2-settings-form) .settings-support-links,
-.settings-page:has(.d2-settings-form) .settings-support-status,
-.settings-page:has(.d2-settings-form) .page-foot { display: none; }
 
 .d2-now-page .chat-page {
   position: relative;

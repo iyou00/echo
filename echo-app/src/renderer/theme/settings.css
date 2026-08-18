@@ -111,6 +111,13 @@
   flex: 1;
   overflow-y: auto;
 }
+/* 读取失败等兜底态：单列居中，不进 rail 网格 */
+.shell-page[data-page='settings'] .settings-page.settings-page-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 /* —— 右内容区：所有分区同一容器（44/64/60 · 纸面底） —— */
 .shell-page[data-page='settings'] .settings-page .scroll-panel,
 .shell-page[data-page='settings'] .settings-page .d2-settings-subview {

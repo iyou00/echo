@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
-import { Download, Info, MessageCircle, Upload } from 'lucide-react'
+import { Download, Upload } from 'lucide-react'
 import type { AgentActionSummary, CareFrequency, EchoApi, ImportProgressPayload, ImportTaskSnapshot, LearnedCaseView, SemanticSummary, Settings, StageContext, Track, UiBoundarySnapshot, WindowSizePreset } from '../../types/ipc'
 import type { AppPageProps } from '../appState'
 import { EmptyState, Section } from '../components'
@@ -318,7 +318,6 @@ export function SettingsPage({
   const [showNeteaseDrawer, setShowNeteaseDrawer] = useState(false)
   const [renderNeteaseDrawer, setRenderNeteaseDrawer] = useState(false)
   const [ttsEditingCustom, setTtsEditingCustom] = useState(false)
-  const [feedbackStatus, setFeedbackStatus] = useState('')
   const [semanticSummary, setSemanticSummary] = useState<SemanticSummary | null>(null)
   const [semanticSummaryStatus, setSemanticSummaryStatus] = useState('')
   const [neteasePhone, setNeteasePhone] = useState('')
@@ -859,11 +858,10 @@ export function SettingsPage({
   }
 
   async function openFeedback() {
-    setFeedbackStatus('')
     try {
       await echo.app.openFeedback()
-    } catch {
-      setFeedbackStatus('暂时没打开，稍后再试。')
+    } catch (error) {
+      console.warn('[settings] open feedback failed', error)
     }
   }
 
@@ -1374,7 +1372,7 @@ export function SettingsPage({
 
   if (!settings) {
     return (
-      <div className="phone-surface settings-page">
+      <div className="phone-surface settings-page settings-page-fallback">
         <EmptyState
           title="设置读取失败"
           body="本地配置读取超时或数据库正忙。"
@@ -1485,6 +1483,7 @@ export function SettingsPage({
           <button type="button" data-testid="settings-rail-about" onClick={() => navigate('about')}>关于 Echo</button>
         </div>
         <button type="button" className="d2-rail-restart" onClick={onRestartOnboarding}>重新查看引导</button>
+        <button type="button" className="d2-rail-restart" onClick={() => { void openFeedback() }} title="打开反馈渠道">反馈与建议</button>
       </aside>
       <div className="d2-settings-main">
       {detailTarget === 'tasks' ? (
@@ -2249,20 +2248,6 @@ export function SettingsPage({
           )}
         </form>
 
-        <div className="settings-support-links">
-          <button type="button" className="settings-support-link" onClick={() => { void openFeedback() }}>
-            <MessageCircle size={13} aria-hidden="true" />
-            反馈与建议
-          </button>
-          <span className="settings-support-separator" aria-hidden="true">·</span>
-          <button type="button" className="settings-support-link" onClick={() => navigate('about')}>
-            <Info size={13} aria-hidden="true" />
-            关于 Echo
-          </button>
-        </div>
-        {feedbackStatus && <div className="settings-support-status" role="status">{feedbackStatus}</div>}
-
-        <footer className="page-foot">E C H O · v 0 . 1 . 5</footer>
       </div>
         </>
       )}

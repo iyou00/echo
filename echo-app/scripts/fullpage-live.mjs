@@ -80,6 +80,10 @@ report.railLlm = await click('[data-testid="settings-rail-llm"]')
 await sleep(500)
 report.detailLlm = await visible('.d2-settings-form.detail-llm')
 report.detailMusic = await (await click('[data-testid="settings-rail-music"]') && sleep(400).then(() => visible('.d2-settings-form.detail-music')))
+await click('[data-testid="settings-rail-window"]')
+await sleep(500)
+report.windowOptions = await evalJson(`document.querySelectorAll('.window-size-options .window-size-option').length`)
+await shot('live-settings-window')
 await shot('live-settings')
 
 // 品味：整页 + hero 或空态
