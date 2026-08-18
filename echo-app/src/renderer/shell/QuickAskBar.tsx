@@ -58,18 +58,6 @@ export function QuickAskBar({
     if (open) inputRef.current?.focus()
   }, [open])
 
-  // 其他界面（如一起听的"再说说这首？"）请求打开并预填。
-  useEffect(() => {
-    function handleOpenRequest(event: Event) {
-      const detail = (event as CustomEvent<{ text?: string }>).detail
-      if (!shouldOpenQuickAsk({ hasLlmConfig, firstRunOpen, onboardingOpen, closeDialogOpen })) return
-      setOpen(true)
-      if (detail?.text) setText(detail.text)
-    }
-    window.addEventListener('echo:quick-ask-open', handleOpenRequest)
-    return () => window.removeEventListener('echo:quick-ask-open', handleOpenRequest)
-  }, [closeDialogOpen, firstRunOpen, hasLlmConfig, onboardingOpen])
-
   function close() {
     askSessionRef.current += 1
     setOpen(false)

@@ -748,19 +748,6 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
             </span>
           ))}
         </h2>
-        {current && (
-          <button
-            type="button"
-            className="d2-why-this"
-            onClick={() => {
-              window.dispatchEvent(new CustomEvent('echo:quick-ask-open', {
-                detail: { text: `为什么现在给我放《${current.title}》？` },
-              }))
-            }}
-          >
-            再说说这首？
-          </button>
-        )}
         <p>{current ? '音乐继续走，你不用一直回应。' : '你想听点什么时，叫我一声。'}</p>
         <div className="player-controls d2-listen-controls">
           <button type="button" onClick={() => playPrevious().catch(() => undefined)} disabled={!canPlayPrevious} title="上一曲"><SkipBack size={15} /></button>

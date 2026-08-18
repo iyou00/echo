@@ -1935,25 +1935,6 @@
   color: var(--d2-mint);
 }
 
-.d2-why-this {
-  justify-self: start;
-  margin: 14px 0 0;
-  padding: 0 0 2px;
-  border: 0;
-  border-bottom: 1px solid #596157;
-  background: transparent;
-  color: #aeb6ad;
-  font: 10px/1.4 var(--d2-sans);
-  letter-spacing: 1px;
-  cursor: pointer;
-  transition: color .15s ease, border-color .15s ease;
-}
-
-.d2-why-this:hover {
-  border-bottom-color: var(--d2-red);
-  color: #f5f5ec;
-}
-
 
 /* ---- D1.3 音乐来源导入视图（网易云登录 / 文件导入 / 进度） ---- */
 .d2-settings-form .import-method { margin: 22px 0 0; padding: 18px 0 0; border-top: 1px solid var(--d2-line); border-radius: 0; background: transparent; box-shadow: none; }
@@ -2009,5 +1990,4 @@
 .d2-queue-foot { font-size: 10px; }
 .d2-empty p { font-size: 13px; }
 .d2-empty .empty-cta { font-size: 11px; }
-.d2-why-this { font-size: 11px; }
 .d2-next-up { font-size: 11px; }
