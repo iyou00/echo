@@ -257,22 +257,8 @@ body {
   line-height: 1.6;
 }
 
-@media (max-width: 1200px) {
-  .d2-topbar {
-    grid-template-columns: 130px 1fr auto 70px;
-    padding-left: 16px;
-  }
-
-  .d2-context span,
-  .d2-nav-button span {
-    display: none;
-  }
-
-  .d2-nav-button {
-    width: 32px;
-    padding: 0;
-  }
-}
+/* 1152（小号档）即可完整放下文字导航；旧的窄屏图标化规则已随文字导航上线而移除，
+   它曾把导航文字隐藏、只留浅色小图标，在小号窗口下几乎不可见。 */
 
 @media (prefers-reduced-motion: reduce) {
   .d2-window-field {
