@@ -11,6 +11,8 @@ type TopBarWeather = { city: string; condition: string; tempC: number } | null
 const mainDestinations: Array<{ key: PageKey; label: string; icon: typeof MessageCircle }> = [
   { key: 'yinyi', label: '风信', icon: MessageCircle },
   { key: 'voice', label: '回声', icon: Mic2 },
+  { key: 'profile', label: '品味', icon: UserRound },
+  { key: 'settings', label: '设置', icon: Settings },
 ]
 
 export function TopBar({
@@ -73,12 +75,6 @@ export function TopBar({
             {key === 'yinyi' && yinyiUnread && <i aria-label="有新风信" />}
           </button>
         ))}
-        <button className={page === 'profile' ? 'd2-icon-button active' : 'd2-icon-button'} type="button" onClick={() => onNavigate('profile')} title="品味" aria-label="品味">
-          <UserRound size={17} strokeWidth={1.7} /><span>品味</span>
-        </button>
-        <button className={page === 'settings' || page === 'about' ? 'd2-icon-button active' : 'd2-icon-button'} type="button" onClick={() => onNavigate('settings')} title="设置" aria-label="设置">
-          <Settings size={17} strokeWidth={1.7} /><span>设置</span>
-        </button>
       </nav>
       <WindowControls onMinimize={onMinimize} onClose={onClose} />
     </header>

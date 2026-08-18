@@ -9,6 +9,7 @@ import './renderer/theme/profile.css'
 import './renderer/theme/queue.css'
 import './renderer/theme/yinyi.css'
 import './renderer/theme/voice.css'
+import './renderer/theme/settings.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

@@ -702,18 +702,13 @@ function App() {
     }
     prevPageRef.current = page
   }, [page, listeningViewOpen, dispatch])
-  const drawerOpen = page === 'queue' || page === 'profile' || page === 'settings' || page === 'about'
-  const [settingsDrawerTitle, setSettingsDrawerTitle] = useState('设置')
+  const drawerOpen = page === 'queue' || page === 'profile'
   const [dailyReconnectDone, setDailyReconnectDone] = useState(false)
   const offlineBoundary = boundaries.find((item) => item.code === 'offline')
   const modelInvalidBoundary = boundaries.find((item) => item.code === 'model_invalid')
   const drawerTitle = page === 'queue'
     ? '音乐与队列'
-    : page === 'profile'
-      ? 'Echo 对你的理解'
-      : page === 'about'
-        ? '关于 Echo'
-        : settingsDrawerTitle
+    : 'Echo 对你的理解'
 
   const commonProps: AppPageProps = { navigate: setPage }
   const closeDrawer = useCallback(() => setPage('chat'), [setPage])
@@ -818,6 +813,30 @@ function App() {
             />
           </div>
         </section>
+        <div className="shell-page" data-page="settings" style={{ display: page === 'settings' ? 'flex' : 'none' }}>
+          <SettingsPage
+              {...commonProps}
+              echo={echo}
+              settings={settings}
+              setSettings={setSettings}
+              reloadSettings={reloadSettings}
+              hasLlmConfig={hasLlmConfig}
+              refreshProfile={refreshProfile}
+              refreshQueue={refreshQueue}
+              importFocusToken={settingsImportFocusToken}
+              apiFocusToken={settingsApiFocusToken}
+              importTask={importTask}
+              onOnboardingLlmReady={advanceOnboardingAfterLlmReady}
+              onRestartOnboarding={() => {
+                onboardingDeferredForSessionRef.current = false
+                dispatch({ onboardingOpen: true, page: 'chat' })
+              }}
+              onDataReset={handleDataReset}
+            />
+        </div>
+        <div className="shell-page" data-page="about" style={{ display: page === 'about' ? 'flex' : 'none' }}>
+          <AboutEchoPage {...commonProps} />
+        </div>
         <ContextDrawer open={drawerOpen} title={drawerTitle} view={page} onClose={closeDrawer}>
           <div className="d2-drawer-view" style={{ display: page === 'queue' ? 'flex' : 'none' }}>
             <QueuePage
@@ -845,31 +864,6 @@ function App() {
                 boundary={boundaries.find((item) => item.code === 'taste_empty')}
               />
             </div>
-          )}
-          <div className="d2-drawer-view" style={{ display: page === 'settings' ? 'flex' : 'none' }}>
-            <SettingsPage
-              {...commonProps}
-              echo={echo}
-              settings={settings}
-              setSettings={setSettings}
-              reloadSettings={reloadSettings}
-              hasLlmConfig={hasLlmConfig}
-              refreshProfile={refreshProfile}
-              refreshQueue={refreshQueue}
-              importFocusToken={settingsImportFocusToken}
-              apiFocusToken={settingsApiFocusToken}
-              importTask={importTask}
-              onOnboardingLlmReady={advanceOnboardingAfterLlmReady}
-              onRestartOnboarding={() => {
-                onboardingDeferredForSessionRef.current = false
-                dispatch({ onboardingOpen: true, page: 'chat' })
-              }}
-              onTitleChange={setSettingsDrawerTitle}
-              onDataReset={handleDataReset}
-            />
-          </div>
-          {page === 'about' && (
-            <div className="d2-drawer-view"><AboutEchoPage {...commonProps} /></div>
           )}
         </ContextDrawer>
         {fieldMode === 'listening' && (

@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
-import { ChevronRight, Download, Info, MessageCircle, Upload } from 'lucide-react'
+import { Download, Info, MessageCircle, Upload } from 'lucide-react'
 import type { AgentActionSummary, CareFrequency, EchoApi, ImportProgressPayload, ImportTaskSnapshot, LearnedCaseView, SemanticSummary, Settings, StageContext, Track, UiBoundarySnapshot, WindowSizePreset } from '../../types/ipc'
 import type { AppPageProps } from '../appState'
 import { EmptyState, Section } from '../components'
@@ -295,14 +295,10 @@ export function SettingsPage({
   } = useSettingsPageState()
 
   const [activeTab, setActiveTab] = useState<'sync' | 'pref' | 'sys'>(hasLlmConfig ? 'sync' : 'sys')
-  const [settingsView, setSettingsView] = useState<'overview' | 'connections' | 'tasks' | 'details'>('overview')
-  const [detailTarget, setDetailTarget] = useState<'music' | 'yinyi' | 'chat' | 'stage' | 'learned' | 'voice' | 'care' | 'window' | 'llm' | 'data'>('music')
+  const [settingsView, setSettingsView] = useState<'overview' | 'connections' | 'tasks' | 'details'>('details')
+  const [detailTarget, setDetailTarget] = useState<'music' | 'yinyi' | 'chat' | 'stage' | 'learned' | 'voice' | 'care' | 'window' | 'llm' | 'data' | 'tasks'>(hasLlmConfig ? 'music' : 'llm')
   const [detailParent, setDetailParent] = useState<'overview' | 'connections'>('overview')
 
-  useEffect(() => {
-    const detailTitles = { music: '音乐来源', yinyi: '风信生成', chat: '絮语与启动', stage: '此刻的理解', learned: 'Echo 学到了什么', voice: '天气与语音', care: '主动关心', window: '窗口与关闭', llm: 'AI 模型', data: '本地数据' }
-    onTitleChange?.(settingsView === 'overview' ? '设置' : settingsView === 'connections' ? '连接与来源' : settingsView === 'tasks' ? '运行任务' : detailTitles[detailTarget])
-  }, [detailTarget, onTitleChange, settingsView])
   const [showNeteaseDrawer, setShowNeteaseDrawer] = useState(false)
   const [renderNeteaseDrawer, setRenderNeteaseDrawer] = useState(false)
   const [ttsEditingCustom, setTtsEditingCustom] = useState(false)
@@ -1434,121 +1430,58 @@ export function SettingsPage({
   const carePausedUntil = settings.carePings.pausedUntil && Date.parse(settings.carePings.pausedUntil) > Date.now()
     ? new Date(settings.carePings.pausedUntil)
     : null
-  const detailTitles = { music: '音乐来源', yinyi: '风信生成', chat: '絮语与启动', stage: '此刻的理解', learned: 'Echo 学到了什么', voice: '天气与语音', care: '主动关心', window: '窗口与关闭', llm: 'AI 模型', data: '本地数据' }
-  const breadcrumbItems: Array<{ label: string; testId?: string; onClick?: () => void }> = settingsView === 'overview'
-    ? [{ label: '设置' }]
-    : settingsView === 'connections'
-      ? [{ label: '设置', testId: 'settings-crumb-overview', onClick: () => setSettingsView('overview') }, { label: '连接与来源' }]
-      : settingsView === 'tasks'
-        ? [{ label: '设置', testId: 'settings-crumb-overview', onClick: () => setSettingsView('overview') }, { label: '运行任务' }]
-        : detailParent === 'connections'
-          ? [{ label: '设置', testId: 'settings-crumb-overview', onClick: () => setSettingsView('overview') }, { label: '连接与来源', testId: 'settings-crumb-connections', onClick: () => setSettingsView('connections') }, { label: detailTitles[detailTarget] }]
-          : [{ label: '设置', testId: 'settings-crumb-overview', onClick: () => setSettingsView('overview') }, { label: detailTitles[detailTarget] }]
-
+  const railActive = (key: string) => `d2-rail-item${settingsView === 'details' && detailTarget === key ? ' on' : ''}`
   return (
     <div className="phone-surface settings-page">
-      {settingsView !== 'overview' && (
-        <nav className="d2-settings-breadcrumb" aria-label="设置路径">
-          {breadcrumbItems.map((item, index) => (
-            <span key={item.label}>
-              {index > 0 && <i aria-hidden="true"> / </i>}
-              {item.onClick ? (
-                <button type="button" data-testid={item.testId} onClick={item.onClick}>{item.label}</button>
-              ) : (
-                <em aria-current="page">{item.label}</em>
-              )}
-            </span>
-          ))}
-        </nav>
-      )}
-      {settingsView === 'overview' ? (
-        <div className="d2-settings-overview">
-          <p className="d2-settings-autosave">设置会自动保存</p>
-
-          <section className="d2-settings-size" aria-labelledby="settings-window-size">
-            <strong id="settings-window-size">窗口尺寸</strong>
-            <div className="window-size-options" role="group" aria-label="窗口尺寸">
-              {([['compact', '小号', '1152 × 720'], ['standard', '标准', '1280 × 800'], ['large', '大号', '1440 × 900']] as const).map(([preset, label, dimensions]) => (
-                <button className={(settings?.ui.windowSize ?? 'standard') === preset ? 'window-size-option active' : 'window-size-option'} type="button" key={preset} disabled={windowSizeBusy} onClick={() => { void updateWindowSize(preset) }}>
-                  {label}<small>{dimensions}</small>
-                </button>
-              ))}
-            </div>
-            <p className="window-size-note">窗口始终保持 16:10，切换后会自动居中。</p>
-          </section>
-
-          <div className="d2-settings-rows">
-            <div className="d2-settings-row">
-              <div className="d2-settings-row-main">
-                <span><strong>连续回声</strong></span>
+      <aside className="d2-settings-rail" aria-label="设置分区">
+        <div className="d2-rail-group">
+          <small>连 接 与 来 源</small>
+          <button type="button" data-testid="settings-rail-music" className={railActive('music')} onClick={() => openDetails('sync', 'music')}>音乐来源</button>
+          <button type="button" data-testid="settings-rail-llm" className={railActive('llm')} onClick={() => openDetails('sys', 'llm')}>AI 模型</button>
+          <button type="button" data-testid="settings-rail-voice" className={railActive('voice')} onClick={() => openDetails('pref', 'voice')}>天气与语音</button>
+        </div>
+        <div className="d2-rail-group">
+          <small>相 处 方 式</small>
+          <button type="button" data-testid="settings-rail-yinyi" className={railActive('yinyi')} onClick={() => openDetails('pref', 'yinyi')}>风信生成</button>
+          <button type="button" data-testid="settings-rail-chat" className={railActive('chat')} onClick={() => openDetails('pref', 'chat')}>絮语与启动</button>
+          <button type="button" data-testid="settings-rail-stage" className={railActive('stage')} onClick={() => openDetails('pref', 'stage')}>此刻的理解</button>
+          <button type="button" data-testid="settings-rail-learned" className={railActive('learned')} onClick={() => { void refreshLearnedCases(); openDetails('pref', 'learned') }}>
+            Echo 学到了什么{learnedCases.length > 0 ? <span className="d2-rail-cnt">{learnedCases.filter((item) => item.status === 'active').length}</span> : null}
+          </button>
+          <button type="button" data-testid="settings-rail-care" className={railActive('care')} onClick={() => openDetails('pref', 'care')}>主动关心</button>
+        </div>
+        <div className="d2-rail-group">
+          <small>系 统</small>
+          <button type="button" data-testid="settings-rail-tasks" className={railActive('tasks')} onClick={() => openDetails('sys', 'tasks')}>运行任务</button>
+          <button type="button" data-testid="settings-rail-window" className={railActive('window')} onClick={() => openDetails('sys', 'window')}>窗口与关闭</button>
+          <button type="button" data-testid="settings-rail-data" className={railActive('data')} onClick={() => openDetails('sys', 'data')}>本地数据</button>
+          <button type="button" data-testid="settings-rail-about" onClick={() => navigate('about')}>关于 Echo</button>
+        </div>
+        <button type="button" className="d2-rail-restart" onClick={onRestartOnboarding}>重新查看引导</button>
+      </aside>
+      <div className="d2-settings-main">
+      {detailTarget === 'tasks' ? (
+      <div className="d2-settings-subview" data-testid="settings-tasks-view">
+                <p className="d2-settings-autosave">任务在后台继续，不需要守着</p>
+                <section className="d2-settings-linear-section">
+                  <h3>运行任务</h3>
+                  {visibleRuntimeTasks.length > 0
+                    ? <RuntimeTaskList tasks={visibleRuntimeTasks} onCancel={(id) => { void cancelRuntimeTask(id) }} />
+                    : <p className="d2-settings-empty-line">现在没有正在运行的任务</p>}
+                </section>
+                <section className="d2-settings-linear-section">
+                  <header><h3>服务状态</h3><button type="button" onClick={checkAllHealth} disabled={healthChecking || anyRuntimeTaskRunning}>{healthChecking ? '检查中' : '检查全部'}</button></header>
+                  <div className="d2-service-lines">
+                    {visibleHealth.map((item) => (
+                      <div className="d2-service-line" key={item.service}>
+                        <span><strong>{serviceHealthLabel(item.service)}</strong><small>{item.message}</small></span>
+                        <em className={item.status === 'ok' ? 'is-ok' : /还没检查|尚未检查/.test(item.message) ? 'is-muted' : 'is-warn'}>{item.status === 'ok' ? '正常' : /还没检查|尚未检查/.test(item.message) ? '尚未检查' : '需处理'}</em>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+                <button className="d2-settings-danger-link" type="button" onClick={() => openDetails('sys', 'data')}>管理本地数据</button>
               </div>
-              <label className="switch"><input type="checkbox" checked={settings?.playback.autoPlayNext ?? true} onChange={(event) => { void updateOverviewSetting('playback.autoPlayNext', event.target.checked) }} /><span /></label>
-            </div>
-            <div className="d2-settings-row"><span><strong>说话密度</strong></span><span className="d2-settings-value">自适应</span></div>
-            <button type="button" data-testid="settings-yinyi" className="d2-settings-row" onClick={() => openDetails('pref', 'yinyi')}><span><strong>风信生成</strong></span><span className="d2-settings-value">{settings?.yinyi.generateAt ?? '22:00'} <ChevronRight size={14} /></span></button>
-            <button type="button" data-testid="settings-learned-entry" className="d2-settings-row" onClick={() => { void refreshLearnedCases(); openDetails('pref', 'learned') }}><span><strong>Echo 学到了什么</strong></span><span className="d2-settings-value">{learnedCases.filter((item) => item.status === 'active').length} 条在用 <ChevronRight size={14} /></span></button>
-            <button type="button" className="d2-settings-row" onClick={() => openDetails('pref', 'care')}><span><strong>主动关心</strong></span><span className="d2-settings-value">{settings?.carePings.enabled ? ({ gentle: '轻轻', normal: '适中', frequent: '常一些' }[settings.carePings.frequency]) : '关闭'} <ChevronRight size={14} /></span></button>
-            <button type="button" className="d2-settings-row" onClick={() => openDetails('sys', 'window')}><span><strong>关闭窗口</strong></span><span className="d2-settings-value">{{ ask: '询问', minimize: '最小化', quit: '退出' }[settings?.ui.closeBehavior ?? 'ask']} <ChevronRight size={14} /></span></button>
-          </div>
-
-          <nav className="d2-settings-links" aria-label="更多设置">
-            <button type="button" data-testid="settings-connections" onClick={() => setSettingsView('connections')}>连接与来源 <ChevronRight size={14} /></button>
-            <button type="button" data-testid="settings-tasks" onClick={() => setSettingsView('tasks')}>运行任务 <ChevronRight size={14} /></button>
-            <button type="button" onClick={() => openDetails('pref', 'chat')}>絮语与启动 <ChevronRight size={14} /></button>
-            <button type="button" onClick={() => openDetails('pref', 'stage')}>此刻的理解 <ChevronRight size={14} /></button>
-            <button type="button" onClick={() => navigate('about')}>关于 Echo <ChevronRight size={14} /></button>
-            <button type="button" onClick={onRestartOnboarding}>重新查看引导 <ChevronRight size={14} /></button>
-          </nav>
-          {windowSizeStatus && <div className="d2-settings-status" role="status">{windowSizeStatus}</div>}
-        </div>
-      ) : settingsView === 'connections' ? (
-        <div className="d2-settings-subview" data-testid="settings-connections-view">
-          <p className="d2-settings-autosave">连接与来源 · 密钥只保存在本机</p>
-          <div className="d2-connection-list">
-            <section className="d2-connection-field">
-              <header><strong>AI 模型</strong><span className={hasLlmConfig ? 'is-ok' : 'is-warn'}>{hasLlmConfig ? '连接已配置' : '等待连接'}</span></header>
-              <p>{hasLlmConfig ? `${providerPresets[provider]?.label ?? '自定义'} · ${model || '尚未选择模型'}` : '连接后 Echo 才能理解和回应你'}</p>
-              <button type="button" data-testid="settings-ai-edit" onClick={() => openDetails('sys', 'llm', 'connections')}>修改连接</button>
-            </section>
-            <section className="d2-connection-field">
-              <header><strong>网易云音乐</strong><span className={neteaseState.loggedIn ? 'is-ok' : 'is-muted'}>{neteaseState.loggedIn ? '已连接' : '未连接'}</span></header>
-              <p>{neteaseState.loggedIn ? `${neteaseState.nickname ?? '网易云账号'}${neteasePlaylists.length ? ` · ${neteasePlaylists.length} 个歌单` : ''}` : '登录后才能播放和导入网易云歌单'}</p>
-              <button type="button" data-testid="settings-music-edit" onClick={() => openDetails('sync', 'music', 'connections')}>{neteaseState.loggedIn ? '管理音乐来源' : '去连接'}</button>
-            </section>
-            <section className="d2-connection-field">
-              <header><strong>天气位置</strong><span className={city.trim() ? 'is-ok' : 'is-muted'}>{city.trim() ? '已设置' : '未设置'}</span></header>
-              <p>{city.trim() || '留空时 Echo 会跳过天气开场'}</p>
-              <button type="button" onClick={() => openDetails('pref', 'voice', 'connections')}>修改位置</button>
-            </section>
-            <section className="d2-connection-field">
-              <header><strong>回声语音</strong><span className="is-ok">可用</span></header>
-              <p>{ttsVoices.find(([value]) => value === ttsVoice)?.[1] ?? ttsVoice} · {ttsSpeed.toFixed(1)}×</p>
-              <button type="button" onClick={() => openDetails('pref', 'voice', 'connections')}>试听与修改</button>
-            </section>
-          </div>
-        </div>
-      ) : settingsView === 'tasks' ? (
-        <div className="d2-settings-subview" data-testid="settings-tasks-view">
-          <p className="d2-settings-autosave">任务在后台继续，不需要守着</p>
-          <section className="d2-settings-linear-section">
-            <h3>运行任务</h3>
-            {visibleRuntimeTasks.length > 0
-              ? <RuntimeTaskList tasks={visibleRuntimeTasks} onCancel={(id) => { void cancelRuntimeTask(id) }} />
-              : <p className="d2-settings-empty-line">现在没有正在运行的任务</p>}
-          </section>
-          <section className="d2-settings-linear-section">
-            <header><h3>服务状态</h3><button type="button" onClick={checkAllHealth} disabled={healthChecking || anyRuntimeTaskRunning}>{healthChecking ? '检查中' : '检查全部'}</button></header>
-            <div className="d2-service-lines">
-              {visibleHealth.map((item) => (
-                <div className="d2-service-line" key={item.service}>
-                  <span><strong>{serviceHealthLabel(item.service)}</strong><small>{item.message}</small></span>
-                  <em className={item.status === 'ok' ? 'is-ok' : /还没检查|尚未检查/.test(item.message) ? 'is-muted' : 'is-warn'}>{item.status === 'ok' ? '正常' : /还没检查|尚未检查/.test(item.message) ? '尚未检查' : '需处理'}</em>
-                </div>
-              ))}
-            </div>
-          </section>
-          <button className="d2-settings-danger-link" type="button" onClick={() => openDetails('sys', 'data')}>管理本地数据</button>
-        </div>
       ) : (
         <>
       <p className="d2-settings-detail-note">{{
@@ -2304,6 +2237,8 @@ export function SettingsPage({
       </div>
         </>
       )}
+
+      </div>
 
       {renderNeteaseDrawer && (
         <>
