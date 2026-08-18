@@ -14,7 +14,6 @@ import { DailyReconnect } from './renderer/components/DailyReconnect'
 import { QuickAskBar } from './renderer/shell/QuickAskBar'
 import { Player } from './renderer/components/Player'
 import { EchoShell } from './renderer/shell/EchoShell'
-import { ContextDrawer } from './renderer/shell/ContextDrawer'
 import { BoundaryState } from './renderer/components/BoundaryState'
 import { X } from 'lucide-react'
 import { WindowField, type WindowFieldMode } from './renderer/shell/WindowField'
@@ -703,14 +702,10 @@ function App() {
     }
     prevPageRef.current = page
   }, [page, listeningViewOpen, dispatch])
-  const drawerOpen = page === 'queue'
   const [dailyReconnectDone, setDailyReconnectDone] = useState(false)
   const offlineBoundary = boundaries.find((item) => item.code === 'offline')
   const modelInvalidBoundary = boundaries.find((item) => item.code === 'model_invalid')
-  const drawerTitle = '音乐与队列'
-
   const commonProps: AppPageProps = { navigate: setPage }
-  const closeDrawer = useCallback(() => setPage('chat'), [setPage])
 
   if (!bootReady) {
     const returningUser = Boolean(settings?.meta?.firstRunWelcomeCompletedAt)
@@ -761,7 +756,7 @@ function App() {
             避免每次切回去都重新 loadRecent / fetch history、闪一下空白。
             画像与关于页按需挂载。
           */}
-          <div className="shell-page d2-now-page" style={{ display: page === 'chat' || drawerOpen ? 'flex' : 'none' }}>
+          <div className="shell-page d2-now-page" style={{ display: page === 'chat' ? 'flex' : 'none' }}>
             <ChatPage
               {...commonProps}
               echo={echo}
@@ -850,21 +845,19 @@ function App() {
         <div className="shell-page" data-page="about" style={{ display: page === 'about' ? 'flex' : 'none' }}>
           <AboutEchoPage {...commonProps} />
         </div>
-        <ContextDrawer open={drawerOpen} title={drawerTitle} view={page} onClose={closeDrawer}>
-          <div className="d2-drawer-view" style={{ display: page === 'queue' ? 'flex' : 'none' }}>
-            <QueuePage
-              {...commonProps}
-              queue={queue}
-              echo={echo}
-              playbackState={playbackState}
-              setPlaybackState={setPlaybackState}
-              refreshQueue={refreshQueue}
-              autoPlayNext={settings?.playback.autoPlayNext ?? true}
-              boundary={boundaries.find((item) => item.code === 'queue_empty')}
-              updateAutoPlayNext={updateAutoPlayNext}
-            />
-          </div>
-        </ContextDrawer>
+        <div className="shell-page" data-page="queue" style={{ display: page === 'queue' ? 'flex' : 'none' }}>
+          <QueuePage
+            {...commonProps}
+            queue={queue}
+            echo={echo}
+            playbackState={playbackState}
+            setPlaybackState={setPlaybackState}
+            refreshQueue={refreshQueue}
+            autoPlayNext={settings?.playback.autoPlayNext ?? true}
+            boundary={boundaries.find((item) => item.code === 'queue_empty')}
+            updateAutoPlayNext={updateAutoPlayNext}
+          />
+        </div>
         {fieldMode === 'listening' && (
           <button className="d2-now-return" type="button" onClick={() => dispatch({ listeningViewOpen: false, listeningDismissed: true })}>
             ‹ 回到此刻
