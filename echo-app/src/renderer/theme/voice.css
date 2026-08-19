@@ -428,8 +428,4 @@
   .voice-letter {
     right: 7%;
   }
-  .voice-music-mark {
-    position: static;
-    margin: 0 0 10px 7%;
-  }
 }
