@@ -18,6 +18,8 @@ interface VoicePageProps extends AppPageProps {
   setVoiceContinuous: (value: boolean) => void
   /** 联动：点击音乐书签 → 打开一起听视图（连续回声不停） */
   onOpenListening?: () => void
+  /** 书写进度上报：落笔前 false（封面隐藏），文字开始逐步写出后 true（右侧淡入封面） */
+  onWritingChange?: (writing: boolean) => void
 }
 
 type VoiceStatus = 'idle' | 'generating' | 'speaking' | 'done' | 'text-only-done' | 'error'
@@ -99,6 +101,7 @@ export function VoicePage({
   voiceContinuous,
   setVoiceContinuous,
   onOpenListening,
+  onWritingChange,
 }: VoicePageProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
@@ -246,6 +249,10 @@ export function VoicePage({
   useEffect(() => {
     isActiveRef.current = isActive
   }, [isActive])
+
+  useEffect(() => {
+    onWritingChange?.(status !== 'idle' && status !== 'generating')
+  }, [status, onWritingChange])
 
   useEffect(() => {
     voiceContinuousRef.current = voiceContinuous

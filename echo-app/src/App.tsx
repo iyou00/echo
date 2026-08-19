@@ -703,6 +703,7 @@ function App() {
     prevPageRef.current = page
   }, [page, listeningViewOpen, dispatch])
   const [dailyReconnectDone, setDailyReconnectDone] = useState(false)
+  const [voiceWriting, setVoiceWriting] = useState(false)
   const offlineBoundary = boundaries.find((item) => item.code === 'offline')
   const modelInvalidBoundary = boundaries.find((item) => item.code === 'model_invalid')
   const commonProps: AppPageProps = { navigate: setPage }
@@ -804,6 +805,7 @@ function App() {
               voiceContinuous={voiceContinuous}
               setVoiceContinuous={setVoiceContinuous}
               onOpenListening={() => dispatch({ listeningViewOpen: true })}
+              onWritingChange={setVoiceWriting}
             />
           </div>
         </section>
@@ -871,7 +873,7 @@ function App() {
           onboardingOpen={onboardingOpen}
           closeDialogOpen={closeDialogOpen}
         />
-        <div className={`d2-player-layer player-${fieldMode} page-${page}`}>
+        <div className={`d2-player-layer player-${fieldMode} page-${page}${page === 'voice' && voiceWriting ? ' voice-writing' : ''}`}>
           <Player
             echo={echo}
             state={playbackState}
