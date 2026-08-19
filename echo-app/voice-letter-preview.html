@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>回声页 · 纸上信笺 方案预览</title>
+<style>
+  :root {
+    --paper: #f4f1e8;
+    --surface: #faf8f0;
+    --ink: #19201b;
+    --muted: #6e766f;
+    --line: #c8cec7;
+    --red: #e45036;
+    --forest: #184734;
+    --serif: Georgia, 'Songti SC', 'SimSun', serif;
+    --sans: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--sans);
+    background: #2a2d28;
+    display: grid;
+    place-items: center;
+    min-height: 100vh;
+    gap: 20px;
+    padding: 30px 0;
+  }
+  .frame {
+    width: 920px; height: 620px;
+    background: var(--paper);
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 24px 70px rgba(0,0,0,.5);
+  }
+  /* 灯下暖光 */
+  .frame::before {
+    content: ""; position: absolute; inset: 0;
+    background:
+      radial-gradient(ellipse 70% 46% at 50% 8%, rgba(228, 180, 110, 0.16), transparent 62%),
+      radial-gradient(circle at 1px 1px, rgba(25,32,27,0.045) 0.5px, transparent 0);
+    background-size: auto, 22px 22px;
+    pointer-events: none;
+  }
+  .kicker {
+    position: absolute; top: 44px; left: 7%;
+    color: var(--red); font: 700 11px/1 var(--sans);
+    letter-spacing: 3px; display: flex; align-items: center; gap: 10px;
+  }
+  .kicker::before { width: 30px; height: 1px; background: var(--red); content: ""; }
+  .status { color: var(--muted); letter-spacing: 2px; }
+
+  /* ——— 待机态 ——— */
+  .standby { position: absolute; inset: 0; display: grid; place-content: center; gap: 46px; text-align: center; }
+  .greet-primary { font: 500 30px/1.5 var(--serif); color: var(--ink); }
+  .greet-secondary { margin-top: 12px; font: 13px/1.9 var(--serif); color: var(--muted); }
+  .ink-btn {
+    justify-self: center; display: inline-flex; flex-direction: column; align-items: center; gap: 14px;
+    background: none; border: none; cursor: pointer;
+  }
+  .ink-dot {
+    width: 13px; height: 13px; border-radius: 50%;
+    background: radial-gradient(circle at 38% 34%, #2c342e, var(--ink) 62%);
+    position: relative; transition: transform .5s ease;
+  }
+  .ink-btn:hover .ink-dot { transform: scale(1.25); }
+  .ink-btn:hover .ink-dot::after {
+    content: ""; position: absolute; inset: -9px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(25,32,27,0.14), transparent 66%);
+    animation: bleed 1.6s ease-out infinite;
+  }
+  @keyframes bleed { from { transform: scale(.6); opacity: .9; } to { transform: scale(1.5); opacity: 0; } }
+  .ink-btn span { font: 13px/1 var(--serif); color: var(--ink); letter-spacing: 4px; }
+  .keep-writing {
+    justify-self: center; background: none; border: none; cursor: pointer;
+    margin-top: -26px;
+    color: var(--muted); font: 12px/1 var(--serif); letter-spacing: 1.5px;
+    border-bottom: 1px solid transparent; padding-bottom: 3px;
+    transition: color .3s, border-color .3s;
+  }
+  .keep-writing:hover { color: var(--forest); border-bottom-color: var(--forest); }
+
+  /* ——— 书写态 ——— */
+  .writing { position: absolute; left: 7%; right: 7%; top: 118px; bottom: 120px; display: none; overflow-y: auto; scrollbar-width: none; }
+  .writing::-webkit-scrollbar { display: none; }
+  .hand {
+    font: 400 24px/2.15 var(--serif); color: var(--ink);
+    max-width: 640px; min-height: 90px;
+  }
+  .para { font: 400 24px/2.15 var(--serif); color: var(--ink); max-width: 640px; margin: 0 0 30px; opacity: .78; }
+  .interlude {
+    display: flex; align-items: center; gap: 12px; margin: 6px 0 30px; max-width: 640px;
+    color: var(--forest); font: 12px/1 var(--serif); letter-spacing: 1px;
+  }
+  .interlude .rule { flex: 0 0 46px; height: 1px; background: var(--forest); }
+  .interlude.playing .rule { animation: rule-breathe 2.4s ease-in-out infinite; }
+  @keyframes rule-breathe { 50% { transform: scaleX(1.18); opacity: .55; } }
+  .stop-btn {
+    position: absolute; right: 7%; bottom: 46px; background: none; cursor: pointer;
+    border: 1px solid var(--line); color: var(--muted);
+    font: 11px/1 var(--serif); letter-spacing: 3px; padding: 9px 18px;
+  }
+  .stop-btn:hover { border-color: var(--red); color: var(--red); }
+  .ch { opacity: 0; display: inline-block; transform: translateY(3px) scale(.97); filter: blur(2.5px); }
+  .ch.written { opacity: 1; transform: none; filter: blur(0); transition: all .34s ease; }
+  .ch.wetting { opacity: .96; filter: blur(.4px); font-weight: 600; transition: all .2s ease; }
+  .caret {
+    display: inline-block; width: 2px; height: 22px; background: var(--red);
+    vertical-align: -4px; margin-left: 2px; animation: caret 1s steps(2) infinite;
+  }
+  @keyframes caret { 50% { opacity: 0; } }
+
+  /* 墨线声波 */
+  .ink-stroke { position: absolute; left: 7%; right: 7%; top: 378px; height: 44px; }
+  .ink-stroke svg { width: 100%; height: 44px; overflow: visible; }
+  .music-mark {
+    position: absolute; right: 7%; top: 132px; width: 190px;
+    border-left: 1px solid var(--forest); padding-left: 12px;
+  }
+  .music-mark small { display: block; color: var(--muted); font: 9px/1 var(--sans); letter-spacing: 2px; }
+  .music-mark b { display: block; margin-top: 6px; color: var(--forest); font: 500 13px/1.5 var(--serif); }
+
+  /* ——— 墨散：散句写完，文字淡出归零 ——— */
+  @keyframes ink-fade {
+    0% { opacity: 1; }
+    55% { opacity: 1; }
+    100% { opacity: 0; filter: blur(3px); }
+  }
+  .hand.fading { animation: ink-fade 2.6s ease forwards; }
+
+  /* 状态切换器（仅预览用） */
+  .switcher { display: flex; gap: 10px; }
+  .switcher button {
+    background: none; border: 1px solid #565b55; color: #b8bfb6;
+    font: 12px/1 var(--sans); padding: 8px 18px; cursor: pointer; letter-spacing: 2px;
+  }
+  .switcher button.on { border-color: #d8d2c2; color: #f4f1e8; }
+</style>
+</head>
+<body>
+  <div class="switcher">
+    <button id="sw-idle" class="on" onclick="setState('idle')">落笔前 · 待机</button>
+    <button id="sw-write" onclick="setState('writing')">正在书写</button>
+    <button id="sw-cont" onclick="setState('continuous')">笔未停 · 连续</button>
+  </div>
+
+  <div class="frame" id="frame">
+    <div class="kicker">E C H O · <span class="status" id="status">墨迹已干</span></div>
+
+    <div class="standby" id="standby">
+      <div>
+        <div class="greet-primary">灯我留着，你想听的时候说一声。</div>
+        <div class="greet-secondary">今天听过 6 首 · 最后一首是《汽笛》</div>
+      </div>
+      <button class="ink-btn">
+        <span class="ink-dot"></span>
+        <span>再 写 几 句</span>
+      </button>
+      <button class="keep-writing" onclick="setState('continuous')">或者，让它一直写下去</button>
+    </div>
+
+    <div class="writing" id="writing">
+      <div id="paras"></div>
+      <div class="hand" id="hand"><span class="caret"></span></div>
+      <div class="music-mark">
+        <small>背 景</small>
+        <b>汽笛 · 陈默之</b>
+      </div>
+    </div>
+
+    <div class="ink-stroke" id="stroke" style="display:none">
+      <svg viewBox="0 0 800 44" preserveAspectRatio="none">
+        <path id="inkpath" fill="none" stroke="#19201b" stroke-linecap="round"/>
+      </svg>
+    </div>
+
+    <button class="stop-btn" id="stopBtn" style="display:none" onclick="setState('writing')">收 笔</button>
+
+  </div>
+
+<script>
+  const SAMPLE = '今夜的长沙有点闷，我给你留了一首慢歌。就放在背景里，不吵你。'
+  const hand = document.getElementById('hand')
+  const caret = hand.querySelector('.caret')
+  let chars = [], timer = null
+
+  function buildSentence() {
+    hand.innerHTML = ''
+    chars = []
+    for (const ch of SAMPLE) {
+      const s = document.createElement('span')
+      s.className = 'ch'
+      s.textContent = ch
+      hand.appendChild(s)
+      chars.push(s)
+    }
+    hand.appendChild(caret)
+  }
+
+  const PARAS = [
+    '今夜的长沙有点闷，我给你留了一首慢歌。',
+    '这首你上个月单曲循环过，还记得吗。',
+    '要不要再听一首就睡？我先放在这儿。',
+  ]
+  let state = 'idle'
+  let contTimer = null
+  let ci = 0
+
+  function scrollFollow() {
+    const w = document.getElementById('writing')
+    w.scrollTop = w.scrollHeight
+  }
+
+  function settlePara(text) {
+    const p = document.createElement('p')
+    p.className = 'para'
+    p.textContent = text
+    document.getElementById('paras').appendChild(p)
+  }
+
+  function addInterlude(label) {
+    const d = document.createElement('div')
+    d.className = 'interlude playing'
+    d.innerHTML = '<span class="rule"></span><span>♪ ' + label + ' · 音乐接着走</span>'
+    document.getElementById('paras').appendChild(d)
+  }
+
+  function writePara(text, onDone) {
+    hand.innerHTML = ''
+    chars = []
+    for (const ch of text) {
+      const sp = document.createElement('span')
+      sp.className = 'ch'
+      sp.textContent = ch
+      hand.appendChild(sp)
+      chars.push(sp)
+    }
+    hand.appendChild(caret)
+    scrollFollow()
+    let i = 0
+    const tick = () => {
+      if (state === 'idle') return
+      if (i > 0) { chars[i-1].classList.remove('wetting'); chars[i-1].classList.add('written') }
+      if (i >= chars.length) {
+        setTimeout(() => {
+          if (state === 'continuous') { settlePara(text); hand.innerHTML = '' }
+          onDone && onDone()
+        }, 520)
+        return
+      }
+      chars[i].classList.add('wetting')
+      const pause = /[，。？！、]/.test(chars[i].textContent) ? 620 : 165
+      i++
+      setTimeout(tick, pause)
+    }
+    tick()
+  }
+
+  function run() {
+    writePara(SAMPLE, () => {
+      if (state !== 'writing') return
+      hand.classList.add('fading')
+      setTimeout(() => {
+        if (state === 'writing') setState('idle')
+      }, 2700)
+    })
+  }
+
+  function runContinuous() {
+    document.getElementById('paras').innerHTML = ''
+    ci = 0
+    const step = () => {
+      if (state !== 'continuous') return
+      writePara(PARAS[ci % PARAS.length], () => {
+        if (state !== 'continuous') return
+        addInterlude(['汽笛 · 陈默之', '冷夜 · 陈默之'][ci % 2])
+        scrollFollow()
+        ci += 1
+        contTimer = setTimeout(step, 3400)
+      })
+    }
+    step()
+  }
+
+  // 墨线：正弦呼吸 + 粗细起伏（模拟音量）
+  const path = document.getElementById('inkpath')
+  let t = 0
+  function drawStroke() {
+    const W = 800, H = 44, mid = H / 2
+    let d = ''
+    for (let x = 0; x <= W; x += 4) {
+      const env = Math.sin((x / W) * Math.PI) ** 1.5          // 两端细中间饱满
+      const wob = Math.sin(x * 0.028 + t) * 5.5 * env          // 游移
+      const thick = (2.2 + Math.sin(x * 0.05 - t * 1.7) * 1.4 + Math.sin(t * 2.3) * 0.9) * env
+      const y = mid + wob
+      if (x === 0) d += `M ${x} ${y - thick}`
+      else d += ` L ${x} ${y - thick}`
+    }
+    for (let x = W; x >= 0; x -= 4) {
+      const env = Math.sin((x / W) * Math.PI) ** 1.5
+      const wob = Math.sin(x * 0.028 + t) * 5.5 * env
+      const thick = (2.2 + Math.sin(x * 0.05 - t * 1.7) * 1.4 + Math.sin(t * 2.3) * 0.9) * env
+      d += ` L ${x} ${mid + wob + thick}`
+    }
+    path.setAttribute('d', d + ' Z')
+    t += 0.055
+    requestAnimationFrame(drawStroke)
+  }
+  drawStroke()
+
+  function setState(next) {
+    state = next
+    clearTimeout(contTimer)
+    document.getElementById('sw-idle').classList.toggle('on', next === 'idle')
+    document.getElementById('sw-write').classList.toggle('on', next === 'writing')
+    document.getElementById('sw-cont').classList.toggle('on', next === 'continuous')
+    document.getElementById('standby').style.display = next === 'idle' ? 'grid' : 'none'
+    document.getElementById('writing').style.display = next === 'idle' ? 'none' : 'block'
+    document.getElementById('stroke').style.display = next === 'idle' ? 'none' : 'block'
+    document.getElementById('stopBtn').style.display = next === 'continuous' ? 'block' : 'none'
+    document.getElementById('status').textContent = next === 'idle' ? '墨迹已干' : next === 'writing' ? '正在书写' : '笔未停'
+    document.getElementById('paras').innerHTML = ''
+    hand.className = 'hand'
+    hand.innerHTML = ''
+    if (next === 'writing') run()
+    if (next === 'continuous') runContinuous()
+  }
+</script>
+</body>
+</html>

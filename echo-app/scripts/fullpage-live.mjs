@@ -135,6 +135,17 @@ await shot('live-profile')
 await click('.d2-brand')
 await sleep(600)
 report.backToChat = await visible('.chat-page')
+report.topbarProbe = await evalJson(`(() => {
+  const bar = document.querySelector('.d2-topbar')
+  const btns = [...document.querySelectorAll('.d2-topbar .d2-nav-button')].map((b) => {
+    const cs = getComputedStyle(b)
+    return { text: b.textContent.trim(), color: cs.color, bg: cs.backgroundColor, visible: b.getBoundingClientRect().width > 0 }
+  })
+  const barCs = bar ? getComputedStyle(bar) : null
+  const shell = document.querySelector('.d2-shell')
+  return JSON.stringify({ shellClass: shell?.className ?? null, barBg: barCs?.backgroundColor ?? null, barColor: barCs?.color ?? null, fieldMode: shell?.className.match(/field-(\w+)/)?.[1] ?? null, btns })
+})()`)
+await shot('live-home')
 
 console.log(JSON.stringify(report, null, 2))
 app.kill()

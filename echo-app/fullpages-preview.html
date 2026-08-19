@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>整页设计稿 · 设置 / 品味 / 队列（终版）</title>
+<style>
+  :root {
+    --paper: #eef0eb; --surface: #f8f8f3; --ink: #19201b; --muted: #6e766f;
+    --line: #c8cec7; --red: #e45036; --forest: #184734; --blue: #315bd6;
+    --serif: Georgia, 'Songti SC', 'SimSun', serif;
+    --sans: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--sans); background: #23261f; color: var(--ink);
+    display: grid; place-items: center; gap: 18px; padding: 26px 0;
+  }
+  .switcher { display: flex; gap: 10px; }
+  .switcher button {
+    background: none; border: 1px solid #565b55; color: #b8bfb6;
+    font: 12px/1 var(--sans); padding: 8px 20px; cursor: pointer; letter-spacing: 3px;
+  }
+  .switcher button.on { border-color: #d8d2c2; color: #f4f1e8; }
+
+  .app {
+    width: 1280px; height: 800px; background: var(--paper);
+    display: flex; flex-direction: column;
+    box-shadow: 0 24px 70px rgba(0,0,0,.5); overflow: hidden;
+  }
+  .topbar {
+    height: 52px; flex: 0 0 52px; display: flex; align-items: center; gap: 22px;
+    padding: 0 28px; border-bottom: 1px solid var(--line); background: rgba(238,240,235,.94);
+  }
+  .brand { font: 600 17px/1 var(--serif); cursor: pointer; }
+  .ctx { flex: 1; font: 11px/1 var(--sans); color: var(--muted); }
+  .nav { display: flex; gap: 20px; }
+  .nav span { font: 12px/1 var(--sans); color: var(--muted); cursor: pointer; letter-spacing: 2px; }
+  .nav span.on { color: var(--ink); font-weight: 600; }
+
+  .page { flex: 1; display: none; min-height: 0; }
+  .page.on { display: grid; }
+  .settings-grid { grid-template-columns: 236px 1fr; }
+  .plain-grid { grid-template-columns: 1fr; }
+
+  .rail { border-right: 1px solid var(--line); padding: 40px 0 32px 32px; overflow-y: auto; }
+  .rail-group { margin-bottom: 30px; }
+  .rail-group > small {
+    display: block; margin-bottom: 12px; padding-left: 14px;
+    color: var(--muted); font: 700 10px/1 var(--sans); letter-spacing: 2.5px;
+  }
+  .rail-item {
+    display: block; width: 100%; text-align: left; padding: 9px 14px;
+    border: 0; background: none; cursor: pointer;
+    color: var(--muted); font: 13px/1.5 var(--sans); border-left: 2px solid transparent;
+    transition: color .2s, border-color .2s;
+  }
+  .rail-item:hover { color: var(--ink); }
+  .rail-item.on { color: var(--ink); font-weight: 600; border-left-color: var(--red); }
+  .rail-item .cnt { float: right; font-size: 10px; color: var(--muted); }
+
+  .content { overflow-y: auto; padding: 44px 64px 60px; }
+  .content::-webkit-scrollbar, .q-wrap::-webkit-scrollbar, .rail::-webkit-scrollbar { width: 4px; }
+  .content::-webkit-scrollbar-thumb, .q-wrap::-webkit-scrollbar-thumb, .rail::-webkit-scrollbar-thumb { background: var(--line); }
+
+  .kicker {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
+    color: var(--red); font: 700 10px/1 var(--sans); letter-spacing: 3px;
+  }
+  .kicker::before { width: 28px; height: 1px; background: var(--red); content: ""; }
+  h1.sec { font: 500 26px/1.4 var(--serif); margin-bottom: 8px; }
+  .sec-desc { color: var(--muted); font: 13px/1.8 var(--sans); margin-bottom: 34px; max-width: 640px; }
+
+  .frow {
+    display: grid; grid-template-columns: 200px 1fr auto; gap: 18px; align-items: center;
+    padding: 16px 0; border-bottom: 1px solid var(--line);
+  }
+  .frow label { font: 13px/1.6 var(--sans); }
+  .frow label small { display: block; color: var(--muted); font-size: 11.5px; margin-top: 3px; }
+  .u-input {
+    border: 0; border-bottom: 1px solid var(--line); background: none;
+    font: 14px/1.6 var(--sans); color: var(--ink); padding: 6px 2px; outline: none;
+  }
+  .u-input:focus { border-bottom-color: var(--red); }
+  .sq-btn {
+    border: 1px solid var(--forest); background: none; color: var(--forest);
+    font: 12px/1 var(--sans); padding: 9px 18px; cursor: pointer; letter-spacing: 1px;
+  }
+  .sq-btn:hover { background: var(--forest); color: #fff; }
+  .sq-btn.plain { border-color: var(--line); color: var(--muted); }
+  .sq-btn.plain:hover { border-color: var(--ink); color: var(--ink); background: none; }
+  .sq-btn.danger { border-color: var(--red); color: var(--red); }
+  .sq-btn.danger:hover { background: var(--red); color: #fff; }
+
+  .chip-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .chip { border: 1px solid var(--line); padding: 8px 16px; font: 12px/1 var(--sans); color: var(--muted); cursor: pointer; }
+  .chip.on { border-color: var(--forest); color: var(--forest); font-weight: 600; }
+
+  .status { display: inline-flex; align-items: center; gap: 8px; font: 12px/1 var(--sans); color: var(--muted); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--forest); }
+
+  .toggle { width: 40px; height: 22px; border: 1px solid var(--line); position: relative; cursor: pointer; background: none; }
+  .toggle::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; background: var(--muted); transition: all .2s; }
+  .toggle.on { border-color: var(--forest); }
+  .toggle.on::after { left: 21px; background: var(--forest); }
+  .toggle-lab { display: inline-flex; align-items: center; gap: 10px; font: 12px/1 var(--sans); color: var(--muted); }
+
+  .qr-box {
+    width: 148px; height: 148px; background: #fff; border: 1px solid var(--line);
+    padding: 12px; display: grid; place-items: center;
+    color: var(--muted); font: 11px/1.6 var(--sans); text-align: center;
+  }
+  .bar { height: 2px; background: var(--line); position: relative; margin: 10px 0 6px; }
+  .bar > i { position: absolute; inset: 0 auto 0 0; width: 62%; background: var(--red); }
+
+  .learned { display: grid; grid-template-columns: 76px 1fr auto; gap: 16px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--line); }
+  .kind { font: 700 10px/1.6 var(--sans); color: var(--forest); letter-spacing: 1.5px; }
+  .learned .say { font: 14px/1.7 var(--serif); }
+  .learned .say small { display: block; color: var(--muted); font: 11.5px/1.6 var(--sans); }
+
+  /* 空状态 */
+  body.demo-empty .has-data { display: none !important; }
+  body:not(.demo-empty) .no-data { display: none !important; }
+  .empty-hero { text-align: center; padding: 72px 0 30px; }
+  .empty-hero .ring {
+    width: 54px; height: 54px; margin: 0 auto 26px; border: 1px solid var(--line);
+    border-radius: 50%; display: grid; place-items: center;
+    color: var(--muted); font: 500 20px/1 var(--serif);
+  }
+  .empty-hero h2 { font: 500 22px/1.7 var(--serif); margin-bottom: 10px; }
+  .empty-hero p { color: var(--muted); font: 13px/1.9 var(--sans); max-width: 420px; margin: 0 auto 26px; }
+  .empty-cta { display: flex; gap: 14px; justify-content: center; }
+
+  /* 品味页 */
+  .hero { max-width: 760px; padding-top: 6px; }
+  .hero h1 { font: 500 30px/1.6 var(--serif); margin-bottom: 10px; }
+  .hero .meta { color: var(--muted); font: 11.5px/1.8 var(--sans); }
+  .dims { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); margin: 40px 0 48px; }
+  .dim { background: var(--paper); padding: 24px 26px 22px; }
+  .dim > small { color: var(--muted); font: 700 10px/1 var(--sans); letter-spacing: 2.5px; }
+  .dim h3 { font: 500 17px/1.6 var(--serif); margin: 10px 0 12px; }
+  .dim .tags { display: flex; gap: 8px; flex-wrap: wrap; }
+  .dim .tags i { font: 11.5px/1 var(--sans); font-style: normal; color: var(--forest); border: 1px solid var(--line); padding: 6px 10px; }
+  .dim .ev { margin-top: 14px; color: var(--muted); font: 11px/1 var(--sans); }
+
+  .sub-kicker { display: flex; align-items: center; gap: 10px; margin: 0 0 20px; color: var(--ink); font: 700 11px/1 var(--sans); letter-spacing: 2.5px; }
+  .sub-kicker::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .sub-kicker .n { color: var(--muted); font-weight: 400; letter-spacing: 1px; }
+
+  .ev-group { display: flex; align-items: center; gap: 12px; margin: 30px 0 6px; color: var(--muted); font: 700 10px/1 var(--sans); letter-spacing: 2.5px; }
+  .ev-group::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .ev-row { display: grid; grid-template-columns: 64px 1fr 120px 86px; gap: 16px; align-items: center; padding: 13px 0; border-bottom: 1px solid var(--line); }
+  .ev-row .tag { font: 700 10px/1.6 var(--sans); color: var(--blue); letter-spacing: 1.5px; }
+  .ev-row .tag.red { color: var(--red); }
+  .ev-row .tag.green { color: var(--forest); }
+  .ev-row .what { font: 14px/1.7 var(--serif); }
+  .meter { height: 2px; background: var(--line); position: relative; }
+  .meter > i { position: absolute; inset: 0 auto 0 0; background: var(--ink); }
+  .ev-row time { color: var(--muted); font: 10.5px/1 var(--sans); text-align: right; }
+
+  .corr { border-left: 2px solid var(--red); padding: 10px 0 10px 18px; margin: 12px 0; }
+  .corr q { font: 14.5px/1.8 var(--serif); quotes: '「' '」'; }
+  .corr small { display: block; margin-top: 6px; color: var(--muted); font: 11px/1.6 var(--sans); }
+  .cross-link { margin-top: 18px; color: var(--muted); font: 11.5px/1.8 var(--sans); }
+  .cross-link a { color: var(--forest); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+  .migrate-note { margin-top: 26px; padding: 16px 20px; border: 1px dashed var(--line); color: var(--muted); font: 12px/1.9 var(--sans); }
+
+  /* 队列页 */
+  .q-wrap { padding: 44px 64px 60px; overflow-y: auto; }
+  .q-titlebar { display: flex; align-items: baseline; gap: 22px; margin-bottom: 16px; }
+  .q-titlebar .tools { margin-left: auto; display: flex; align-items: center; gap: 18px; }
+
+  .np-strip {
+    display: grid; grid-template-columns: 40px 1fr auto auto; gap: 14px; align-items: center;
+    padding: 12px 0; border-bottom: 1px solid var(--ink); margin-bottom: 6px;
+  }
+  .np-cov { width: 40px; height: 40px; background: linear-gradient(135deg, #33413a, #1d2622); }
+  .np-t { font: 500 15px/1.5 var(--serif); display: inline; margin-right: 12px; }
+  .np-a { color: var(--muted); font: 11.5px/1.5 var(--sans); }
+  .np-bar { width: 180px; height: 2px; background: var(--line); position: relative; }
+  .np-bar > i { position: absolute; inset: 0 auto 0 0; width: 58%; background: var(--red); }
+  .np-time { color: var(--muted); font: 10.5px/1 var(--sans); letter-spacing: .5px; }
+
+  .tabs { display: flex; gap: 26px; border-bottom: 1px solid var(--line); margin: 18px 0 4px; }
+  .tab {
+    border: 0; background: none; cursor: pointer; padding: 10px 2px 12px;
+    color: var(--muted); font: 13px/1 var(--sans); letter-spacing: 2px;
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .tab i { font-style: normal; font-size: 10.5px; margin-left: 4px; }
+  .tab.on { color: var(--ink); font-weight: 600; border-bottom-color: var(--red); }
+
+  .q-row {
+    display: grid; grid-template-columns: auto 36px 1fr auto; gap: 14px; align-items: center;
+    padding: 11px 0; border-bottom: 1px solid var(--line);
+  }
+  .q-row .t { font: 14px/1.5 var(--serif); }
+  .q-row .a { color: var(--muted); font: 11.5px/1.5 var(--sans); }
+  .ops { display: flex; gap: 4px; align-items: center; opacity: .5; }
+  .q-row:hover .ops, .past-row:hover .ops { opacity: 1; }
+  .op-i {
+    border: 0; background: none; cursor: pointer; width: 26px; height: 26px;
+    display: grid; place-items: center; color: var(--muted); font: 13px/1 var(--sans);
+  }
+  .op-i:hover { color: var(--ink); }
+  .op-i.fav-on { color: var(--red); }
+  .drag { color: var(--line); cursor: grab; font-size: 13px; user-select: none; }
+  .q-row:hover .drag { color: var(--muted); }
+  .mini-cov {
+    width: 36px; height: 36px; background: #dfe2da; display: grid; place-items: center;
+    color: #9aa196; font: 9px/1 var(--sans); letter-spacing: 1px;
+  }
+
+  .past-row {
+    display: grid; grid-template-columns: 36px 1fr auto auto; gap: 16px; align-items: center;
+    padding: 11px 0; border-bottom: 1px solid var(--line); opacity: .66;
+  }
+  .past-row .t { font: 13.5px/1.6 var(--serif); }
+
+  .pager { display: flex; gap: 8px; justify-content: center; align-items: center; margin-top: 28px; }
+  .pager button { border: 1px solid var(--line); background: none; color: var(--muted); font: 11.5px/1 var(--sans); padding: 7px 13px; cursor: pointer; }
+  .pager button:hover { border-color: var(--ink); color: var(--ink); }
+  .pager button.cur { border-color: var(--red); color: var(--red); }
+  .pager span { color: var(--muted); font: 11px/1 var(--sans); letter-spacing: 1px; }
+
+  /* 稀疏队列的收尾区：一句文案 + 品牌曲线，零功能成本。
+     出现规则：列表底沿距视口底 ≥ 240px 时渲染（自动度量，窗口任意大小都成立）。 */
+  .queue-coda {
+    margin-top: 40px; padding: 44px 0 30px;
+    border-top: 1px solid var(--line);
+    display: grid; justify-items: center; gap: 22px;
+  }
+  .queue-coda .curve {
+    width: min(380px, 52%); height: 64px; position: relative;
+  }
+  .queue-coda .curve svg { width: 100%; height: 100%; opacity: .5; }
+  .queue-coda .line {
+    color: var(--muted); font: 500 17px/1.9 var(--serif);
+    text-align: center; max-width: 460px;
+  }
+  .queue-coda .cap {
+    color: var(--muted); font: 10.5px/1 var(--sans); letter-spacing: 2px; opacity: .8;
+  }
+
+  .fav-tools { display: flex; align-items: center; gap: 14px; margin: 4px 0 14px; }
+  .fav-tools input {
+    border: 0; border-bottom: 1px solid var(--line); background: none; outline: none;
+    font: 13px/1.6 var(--sans); color: var(--ink); padding: 5px 2px; width: 220px;
+  }
+  .fav-tools .chip { padding: 5px 12px; font-size: 11px; }
+</style>
+</head>
+<body>
+  <div class="switcher">
+    <button id="sw-settings" class="on" onclick="setPage('settings')">设 置</button>
+    <button id="sw-profile" onclick="setPage('profile')">品 味</button>
+    <button id="sw-queue" onclick="setPage('queue')">队 列 与 收 藏</button>
+    <button id="sw-empty" onclick="toggleEmpty()" data-on-label="恢 复 数 据 态" data-off-label="演 示 空 状 态">演 示 空 状 态</button>
+  </div>
+
+  <div class="app">
+    <div class="topbar">
+      <span class="brand">Echo</span>
+      <span class="ctx">8月18日 周一 · 14:32 · 长沙 31°</span>
+      <nav class="nav"><span>风信</span><span>回声</span><span>品味</span><span class="on">设置</span></nav>
+    </div>
+
+    <!-- ============ 设置 ============ -->
+    <div class="page settings-grid on" id="page-settings">
+      <aside class="rail">
+        <div class="rail-group">
+          <small>连 接 与 来 源</small>
+          <button class="rail-item on" data-sec="music" onclick="setSec('music')">音乐来源</button>
+          <button class="rail-item" data-sec="llm" onclick="setSec('llm')">AI 模型</button>
+          <button class="rail-item" data-sec="tts" onclick="setSec('tts')">天气与语音</button>
+        </div>
+        <div class="rail-group">
+          <small>相 处 方 式</small>
+          <button class="rail-item" data-sec="care" onclick="setSec('care')">主动关心</button>
+          <button class="rail-item" data-sec="dream" onclick="setSec('dream')">Echo 学到了什么 <span class="cnt">3</span></button>
+          <button class="rail-item" data-sec="stage" onclick="setSec('stage')">此刻的理解</button>
+        </div>
+        <div class="rail-group">
+          <small>系 统</small>
+          <button class="rail-item" data-sec="window" onclick="setSec('window')">窗口与关闭</button>
+          <button class="rail-item" data-sec="data" onclick="setSec('data')">本地数据</button>
+          <button class="rail-item" data-sec="about" onclick="setSec('about')">关于 Echo</button>
+        </div>
+      </aside>
+
+      <main class="content">
+        <section id="sec-music" class="sec-panel">
+          <div class="kicker">连 接 与 来 源</div>
+          <h1 class="sec">音乐来源</h1>
+          <p class="sec-desc">登录网易云音乐后，Echo 才能替你找歌、放歌。歌单也可以从文件导入。</p>
+          <div class="frow has-data" style="border-bottom:0; padding-bottom:0;">
+            <label>网易云账号</label>
+            <div class="status"><span class="dot"></span>已登录 · 阿汝</div>
+            <div style="display:flex; gap:10px;">
+              <button class="sq-btn plain">刷新状态</button>
+              <button class="sq-btn danger">退出</button>
+            </div>
+          </div>
+          <div class="no-data" style="border-bottom:0; padding-bottom:0;">
+            <div class="frow" style="border-bottom:0; padding-bottom:0;">
+              <label>网易云账号</label>
+              <div class="status"><span class="dot" style="background:var(--red);"></span>未登录</div>
+              <div class="status">登录后 Echo 才能替你找歌、放歌</div>
+            </div>
+          </div>
+          <div class="frow" style="grid-template-columns: 200px 1fr;">
+            <label>扫码登录<small>换账号或过期时重新扫码</small></label>
+            <div class="qr-box">二维码 148×148<br>（白底方角细线框）</div>
+          </div>
+          <div class="frow" style="grid-template-columns: 200px 1fr auto;">
+            <label>短信登录<small>扫码被风控时的备用入口</small></label>
+            <input class="u-input" placeholder="手机号" style="max-width:280px;">
+            <button class="sq-btn plain">发验证码</button>
+          </div>
+          <div class="frow" style="grid-template-columns: 200px 1fr;">
+            <label>歌单语义<small>导入后的可搜索程度</small></label>
+            <div>
+              <div class="status">已建立 214 首 · 可按情绪与场景找</div>
+              <div class="bar"><i></i></div>
+              <small style="color:var(--muted); font-size:11px;">正在解析《我喜欢的音乐》剩余 38 首</small>
+            </div>
+          </div>
+          <div class="frow" style="grid-template-columns: 200px 1fr auto; border-bottom:0;">
+            <label>从文件导入</label>
+            <div class="status">支持网易云导出的歌单 JSON</div>
+            <button class="sq-btn">选择文件</button>
+          </div>
+        </section>
+
+        <section id="sec-llm" class="sec-panel" style="display:none;">
+          <div class="kicker">连 接 与 来 源</div>
+          <h1 class="sec">AI 模型</h1>
+          <p class="sec-desc">任何 OpenAI 兼容的服务都可以。Echo 靠它说话、理解你、夜里复盘。</p>
+          <div class="frow" style="grid-template-columns: 200px 1fr;">
+            <label>常用服务</label>
+            <div class="chip-row">
+              <span class="chip on">DeepSeek</span><span class="chip">Kimi</span>
+              <span class="chip">智谱</span><span class="chip">OpenRouter</span><span class="chip">自定义</span>
+            </div>
+          </div>
+          <div class="frow"><label>服务地址</label><input class="u-input" value="https://api.deepseek.com/v1"></div>
+          <div class="frow"><label>API Key</label><input class="u-input" type="password" value="••••••••••••••••"></div>
+          <div class="frow"><label>模型名</label><input class="u-input" value="deepseek-v4-flash"></div>
+          <div class="frow" style="border-bottom:0;">
+            <label>连接状态</label>
+            <div class="status"><span class="dot"></span>模型连接正常 · 8月16日测过</div>
+            <button class="sq-btn">测试连接</button>
+          </div>
+        </section>
+
+        <section id="sec-dream" class="sec-panel" style="display:none;">
+          <div class="kicker">相 处 方 式</div>
+          <h1 class="sec">Echo 学到了什么</h1>
+          <p class="sec-desc">每天夜里 Echo 会复盘当天的对话，把被你纠正过的地方记下来。这里能看到每一条，随时可删。</p>
+          <div class="frow" style="grid-template-columns: 200px 1fr auto;">
+            <label>夜间复盘<small>默认 23:30，风信之后</small></label>
+            <div></div>
+            <button class="toggle on" onclick="this.classList.toggle('on')"></button>
+          </div>
+          <div class="frow" style="grid-template-columns: 200px 140px auto; border-bottom:0;">
+            <label>复盘时间</label>
+            <input class="u-input" value="23:30">
+            <div></div>
+          </div>
+          <div class="no-data" style="margin-top:20px; padding: 26px 0; text-align: center;">
+            <div style="color: var(--muted); font: 500 15px/1.9 var(--serif);">今天还没学到新东西。</div>
+            <div style="color: var(--muted); font: 11.5px/1.8 var(--sans); margin-top: 6px;">你纠正 Echo 的时候，它会记住。夜里它会自己复盘一遍。</div>
+          </div>
+          <div class="has-data" style="margin-top:20px;">
+            <div class="learned">
+              <span class="kind">实体纠正</span>
+              <div class="say">「不是这首，我要的是原唱版本」<small>该说法指《晴天（原唱版）》</small></div>
+              <button class="sq-btn plain">删除</button>
+            </div>
+            <div class="learned">
+              <span class="kind">歌手称呼</span>
+              <div class="say">「来点杰伦的」<small>杰伦 指的是 周杰伦</small></div>
+              <button class="sq-btn plain">删除</button>
+            </div>
+            <div class="learned" style="border-bottom:0;">
+              <span class="kind">措辞先例</span>
+              <div class="say">「随便来一首苏星婕的」<small>该说法应按歌手请求理解（待印证）</small></div>
+              <button class="sq-btn plain">删除</button>
+            </div>
+          </div>
+        </section>
+
+        <section id="sec-other" class="sec-panel" style="display:none;">
+          <div class="kicker">其 余 分 区</div>
+          <h1 class="sec">同结构迁移</h1>
+          <div class="migrate-note">
+            天气与语音 / 主动关心 / 此刻的理解 / 窗口与关闭 / 本地数据 / 关于 Echo：
+            内容与现有抽屉一致，迁入整页后字号统一上调（正文 14px、辅助 12px），
+            布局换成「左标签 + 右值 + 操作」的三栏行，不再挤压在 520px 窄列里。
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <!-- ============ 品味 ============ -->
+    <div class="page plain-grid" id="page-profile">
+      <main class="content">
+        <div class="no-data empty-hero">
+          <div class="ring">♪</div>
+          <h2>我还没听过你的歌。</h2>
+          <p>放几首，或者导入一份歌单——画像从这里开始长。听过的每一首、说过的每一句，我都会记成线索。</p>
+          <div class="empty-cta">
+            <button class="sq-btn">去导入歌单</button>
+            <button class="sq-btn plain">先去聊聊</button>
+          </div>
+        </div>
+        <div class="has-data">
+          <div class="hero">
+            <div class="kicker">E C H O 眼 里 的 你</div>
+            <h1>你最近在雨天听得多，偏慢歌。<br>歌词在意，人声要清楚。</h1>
+            <div class="meta">画像更新于 今天 17:00 · 基于最近 30 天的 217 次聆听与 12 句纠正</div>
+          </div>
+
+          <div class="dims">
+            <div class="dim">
+              <small>语 言</small>
+              <h3>华语为主，日语不设防</h3>
+              <div class="tags"><i>华语 68%</i><i>日语 21%</i><i>英语 11%</i></div>
+              <div class="ev">42 条聆听证据</div>
+            </div>
+            <div class="dim">
+              <small>情 绪 底 色</small>
+              <h3>治愈、陪伴，偶尔要一点燃</h3>
+              <div class="tags"><i>治愈</i><i>陪伴</i><i>深夜</i><i>City Pop</i></div>
+              <div class="ev">31 条聆听证据 · 3 句口头偏好</div>
+            </div>
+            <div class="dim">
+              <small>年 代 与 新 旧</small>
+              <h3>新歌旧歌都要，翻唱认原唱</h3>
+              <div class="tags"><i>2020s</i><i>2010s</i><i>原唱优先</i></div>
+              <div class="ev">28 条聆听证据 · 1 次版本纠正</div>
+            </div>
+            <div class="dim">
+              <small>常 去 场 景</small>
+              <h3>工作日下午，和睡前</h3>
+              <div class="tags"><i>工作</i><i>专注</i><i>睡前</i></div>
+              <div class="ev">19 次场景会话</div>
+            </div>
+          </div>
+
+          <div class="sub-kicker">它 记 下 的 证 据 <span class="n">· 近 30 天</span></div>
+          <div class="ev-group">本 周</div>
+          <div class="ev-row">
+            <span class="tag green">收 藏</span>
+            <span class="what">《汽笛》 · 陈默之</span>
+            <div class="meter"><i style="width:88%"></i></div>
+            <time>昨天 21:04</time>
+          </div>
+          <div class="ev-row">
+            <span class="tag">循 环</span>
+            <span class="what">《I Believe in Us》 · LÉON</span>
+            <div class="meter"><i style="width:72%"></i></div>
+            <time>昨天 20:40</time>
+          </div>
+          <div class="ev-row">
+            <span class="tag green">口 头</span>
+            <span class="what">"最近别推太吵的，晚上听"</span>
+            <div class="meter"><i style="width:64%"></i></div>
+            <time>前天 23:10</time>
+          </div>
+          <div class="ev-group">更 早</div>
+          <div class="ev-row">
+            <span class="tag green">收 藏</span>
+            <span class="what">《断弦的琴》 · 陈默之</span>
+            <div class="meter"><i style="width:58%"></i></div>
+            <time>8月12日</time>
+          </div>
+          <div class="ev-row" style="border-bottom:0;">
+            <span class="tag red">跳 过</span>
+            <span class="what">《DAY BY DAY》 · T-ara（连续两次）</span>
+            <div class="meter"><i style="width:40%; background:var(--red)"></i></div>
+            <time>8月10日</time>
+          </div>
+
+          <div class="sub-kicker" style="margin-top:44px;">你 纠 正 过 它</div>
+          <div class="corr"><q>不是这首，我要的是原唱版本</q><small>8月16日 · 已生效：同类请求按原唱优先</small></div>
+          <div class="corr" style="margin-bottom:10px;"><q>杰伦的歌多来点</q><small>8月15日 · 已学会：「杰伦」= 周杰伦</small></div>
+          <div class="cross-link">这些纠正沉淀在 <a>设置 · Echo 学到了什么</a>，可随时删除或停用夜间复盘。</div>
+          <div class="migrate-note">觉得哪里说得不对？不用找设置——直接对 Echo 说"你记错了，……"，它会当场改。</div>
+        </div>
+      </main>
+    </div>
+
+    <!-- ============ 队列与收藏 ============ -->
+    <div class="page plain-grid" id="page-queue">
+      <main class="q-wrap">
+        <div class="no-data empty-hero" style="padding-top: 96px;">
+          <div class="ring">♪</div>
+          <h2>队列还空着。</h2>
+          <p>想听什么，对 Echo 说一声，歌会到这里排队。收藏过的歌住在「收藏」页签里。</p>
+          <div class="empty-cta">
+            <button class="sq-btn">让 Echo 挑一首</button>
+            <button class="sq-btn plain">回到此刻</button>
+          </div>
+        </div>
+        <div class="has-data">
+          <div class="kicker">音 乐 与 队 列</div>
+          <div class="q-titlebar">
+            <h1 class="sec" style="margin-bottom:0;">队列与收藏</h1>
+            <div class="tools">
+              <span class="toggle-lab"><button class="toggle on" onclick="this.classList.toggle('on')"></button>自动连播</span>
+              <button class="sq-btn danger">清空队列</button>
+            </div>
+          </div>
+
+          <div class="np-strip">
+            <div class="np-cov"></div>
+            <div><span class="np-t">汽笛</span><span class="np-a">陈默之 · 你说雨停了换个节奏</span></div>
+            <div class="np-bar"><i></i></div>
+            <span class="np-time">2:14 / 3:41</span>
+          </div>
+
+          <div class="tabs">
+            <button class="tab on" onclick="setTab('queue')">队 列 <i>4</i></button>
+            <button class="tab" onclick="setTab('fav')">收 藏 <i>12</i></button>
+            <button class="tab" onclick="setTab('today')">今 天 <i>23</i></button>
+          </div>
+
+          <div id="tab-queue">
+            <div class="q-row">
+              <span class="drag">⠿</span><div class="mini-cov">封面</div>
+              <div><div class="t">冷夜</div><div class="a">陈默之</div></div>
+              <div class="ops"><button class="op-i" title="收藏">♥</button><button class="op-i" title="移除">×</button></div>
+            </div>
+            <div class="q-row">
+              <span class="drag">⠿</span><div class="mini-cov">封面</div>
+              <div><div class="t">I Believe in Us</div><div class="a">LÉON</div></div>
+              <div class="ops"><button class="op-i" title="收藏">♥</button><button class="op-i" title="移除">×</button></div>
+            </div>
+            <div class="q-row">
+              <span class="drag">⠿</span><div class="mini-cov">封面</div>
+              <div><div class="t">大鱼</div><div class="a">周深 · 大鱼</div></div>
+              <div class="ops"><button class="op-i fav-on" title="取消收藏">♥</button><button class="op-i" title="移除">×</button></div>
+            </div>
+            <div class="q-row">
+              <span class="drag">⠿</span><div class="mini-cov">封面</div>
+              <div><div class="t">Falling</div><div class="a">LÉON</div></div>
+              <div class="ops"><button class="op-i" title="收藏">♥</button><button class="op-i" title="移除">×</button></div>
+            </div>
+            <div class="queue-coda">
+              <div class="curve">
+                <svg viewBox="0 0 380 64" fill="none" preserveAspectRatio="none">
+                  <path d="M6 52 C 90 52, 120 14, 190 30 S 300 50, 374 12" stroke="#184734" stroke-width="1.4"/>
+                  <path d="M6 14 C 90 14, 120 52, 190 36 S 300 16, 374 54" stroke="#e45036" stroke-width="1.4"/>
+                </svg>
+              </div>
+              <div class="line">队列短，是因为今天才刚开始。</div>
+              <div class="cap">播完这几首，自动连播会接着挑 · ECHO</div>
+            </div>
+          </div>
+
+          <div id="tab-fav" style="display:none;">
+            <div class="fav-tools">
+              <input placeholder="搜歌名 / 歌手…">
+              <span class="chip">全部</span><span class="chip on">陈默之</span>
+              <span class="chip">周杰伦</span><span class="chip">LÉON</span><span class="chip">…</span>
+            </div>
+            <div class="q-row" style="grid-template-columns: 36px 1fr auto;">
+              <div class="mini-cov">封面</div>
+              <div><div class="t">晴天（原唱版）</div><div class="a">周杰伦 · 叶惠美 · 收藏于 8月2日</div></div>
+              <div class="ops"><button class="op-i" title="插到队列">＋</button><button class="op-i fav-on" title="取消收藏">♥</button></div>
+            </div>
+            <div class="q-row" style="grid-template-columns: 36px 1fr auto;">
+              <div class="mini-cov">封面</div>
+              <div><div class="t">汽笛</div><div class="a">陈默之 · 收藏于 8月16日</div></div>
+              <div class="ops"><button class="op-i" title="插到队列">＋</button><button class="op-i fav-on" title="取消收藏">♥</button></div>
+            </div>
+            <div class="q-row" style="grid-template-columns: 36px 1fr auto;">
+              <div class="mini-cov">封面</div>
+              <div><div class="t">I Believe in Us</div><div class="a">LÉON · 收藏于 8月17日</div></div>
+              <div class="ops"><button class="op-i" title="插到队列">＋</button><button class="op-i fav-on" title="取消收藏">♥</button></div>
+            </div>
+            <div class="pager">
+              <button>‹</button><button class="cur">1</button><button>2</button><button>3</button><button>›</button>
+              <span>共 12 首 · 每页 50</span>
+            </div>
+          </div>
+
+          <div id="tab-today" style="display:none;">
+            <div class="past-row">
+              <div class="mini-cov">封面</div>
+              <span class="t">《雨下的那一天》 · 陈默之</span>
+              <div class="ops"><button class="op-i" title="再听一次">↺</button><button class="op-i" title="收藏">♥</button></div>
+              <time style="color:var(--muted); font-size:10.5px;">14:02</time>
+            </div>
+            <div class="past-row">
+              <div class="mini-cov">封面</div>
+              <span class="t">《That's What I Like》 · Bruno Mars</span>
+              <div class="ops"><button class="op-i" title="再听一次">↺</button><button class="op-i" title="收藏">♥</button></div>
+              <time style="color:var(--muted); font-size:10.5px;">11:40</time>
+            </div>
+            <div class="past-row">
+              <div class="mini-cov">封面</div>
+              <span class="t">《把回忆拼好给你》 · 苏星婕</span>
+              <div class="ops"><button class="op-i" title="再听一次">↺</button><button class="op-i" title="收藏">♥</button></div>
+              <time style="color:var(--muted); font-size:10.5px;">10:15</time>
+            </div>
+            <div class="pager">
+              <button>‹</button><button class="cur">1</button><button>›</button>
+              <span>今天 23 首 · 按时间倒序</span>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+<script>
+  function setPage(name) {
+    document.querySelectorAll('.switcher button').forEach((b) => b.classList.toggle('on', b.id === 'sw-' + name))
+    document.querySelectorAll('.page').forEach((p) => p.classList.toggle('on', p.id === 'page-' + name))
+  }
+  function setTab(name) {
+    document.querySelectorAll('.tab').forEach((t, i) => t.classList.toggle('on', ['queue','fav','today'][i] === name))
+    document.getElementById('tab-queue').style.display = name === 'queue' ? 'block' : 'none'
+    document.getElementById('tab-fav').style.display = name === 'fav' ? 'block' : 'none'
+    document.getElementById('tab-today').style.display = name === 'today' ? 'block' : 'none'
+  }
+  function toggleEmpty() {
+    const on = document.body.classList.toggle('demo-empty')
+    const btn = document.getElementById('sw-empty')
+    btn.classList.toggle('on', on)
+    btn.textContent = on ? btn.dataset.onLabel : btn.dataset.offLabel
+  }
+  function setSec(name) {
+    document.querySelectorAll('.rail-item').forEach((b) => b.classList.toggle('on', b.dataset.sec === name))
+    const map = { music: 'sec-music', llm: 'sec-llm', dream: 'sec-dream' }
+    document.querySelectorAll('.sec-panel').forEach((p) => { p.style.display = 'none' })
+    document.getElementById(map[name] || 'sec-other').style.display = 'block'
+  }
+</script>
+</body>
+</html>
