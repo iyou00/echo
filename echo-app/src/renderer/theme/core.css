@@ -952,7 +952,7 @@
 .d2-now-page .composer-row > button:last-child { width: 48px; background: var(--d2-red); color: white; }
 
 .d2-player-layer { position: absolute; z-index: 7; inset: 0; overflow: hidden; pointer-events: none; }
-.d2-player-layer.page-yinyi .global-player, .d2-player-layer.page-settings .global-player, .d2-player-layer.page-profile .global-player, .d2-player-layer.page-about .global-player { opacity: 0; pointer-events: none; }
+.d2-player-layer.page-yinyi .global-player, .d2-player-layer.page-settings .global-player, .d2-player-layer.page-profile .global-player, .d2-player-layer.page-about .global-player, .d2-player-layer.page-queue .global-player { opacity: 0; pointer-events: none; }
 .d2-shell .global-player { position: absolute; z-index: 7; top: 172px; right: 5.4%; bottom: auto; left: auto; width: 270px; height: auto; padding: 0; border: 0; background: transparent; color: var(--d2-ink); pointer-events: auto; transition: top 420ms ease, right 420ms ease, left 420ms ease, width 420ms ease, color 240ms ease; }
 .d2-sound-object { width: 100%; margin: 0; outline: none; }
 .d2-sound-object:focus-visible .d2-sound-art { outline: 2px solid var(--d2-blue); outline-offset: 3px; }

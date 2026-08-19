@@ -446,6 +446,7 @@ export function QueuePage({
           </div>
 
           {tab === 'now' && (
+            <>
             <div ref={queueListRef}>
               {rest.map((track, index) => {
                 const playbackIndex = playbackQueueIndex(track)
@@ -508,19 +509,20 @@ export function QueuePage({
                   </div>
                 )
               })}
-              {codaVisible && (
-                <div className="queue-coda">
-                  <div className="curve">
-                    <svg viewBox="0 0 380 64" fill="none" preserveAspectRatio="none">
-                      <path d="M6 52 C 90 52, 120 14, 190 30 S 300 50, 374 12" stroke="#184734" strokeWidth="1.4" />
-                      <path d="M6 14 C 90 14, 120 52, 190 36 S 300 16, 374 54" stroke="#e45036" strokeWidth="1.4" />
-                    </svg>
-                  </div>
-                  <div className="line">队列短，是因为今天才刚开始。</div>
-                  <div className="cap">播完这几首，自动连播会接着挑 · ECHO</div>
-                </div>
-              )}
             </div>
+            {codaVisible && (
+              <div className="queue-coda">
+                <div className="curve">
+                  <svg viewBox="0 0 380 64" fill="none" preserveAspectRatio="none">
+                    <path d="M6 52 C 90 52, 120 14, 190 30 S 300 50, 374 12" stroke="#184734" strokeWidth="1.4" />
+                    <path d="M6 14 C 90 14, 120 52, 190 36 S 300 16, 374 54" stroke="#e45036" strokeWidth="1.4" />
+                  </svg>
+                </div>
+                <div className="line">队列短，是因为今天才刚开始。</div>
+                <div className="cap">播完这几首，自动连播会接着挑 · ECHO</div>
+              </div>
+            )}
+            </>
           )}
 
           {tab === 'favorites' && (
