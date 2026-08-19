@@ -110,6 +110,7 @@ export function VoicePage({
   const rafRef = useRef<number | null>(null)
   const musicTimerRef = useRef<number | null>(null)
   const failureRetryTimerRef = useRef<number | null>(null)
+  const ttsWatchdogRef = useRef<number | null>(null)
   const restoreVolumeRef = useRef(100)
   const volumeRestoreArmedRef = useRef(false)
   const musicStartedRef = useRef(false)
@@ -375,6 +376,8 @@ export function VoicePage({
     }
   }, [echo, isActive])
 
+  useEffect(() => () => disarmTtsWatchdog(), [])
+
   useEffect(() => {
     if (fadeVolumeRef.current) return
     const current = playbackState.current
@@ -510,9 +513,46 @@ export function VoicePage({
     }, 800)
   }
 
+  // TTS 看门狗：音频处于"播放中"却长时间不前进（坏流/无声停滞，不触发 error 也不
+  // 触发 ended）时主动恢复——文字保留、音乐接上，连续回声继续下一段，不再整页卡死。
+  function disarmTtsWatchdog() {
+    if (ttsWatchdogRef.current != null) {
+      window.clearInterval(ttsWatchdogRef.current)
+      ttsWatchdogRef.current = null
+    }
+  }
+
+  function armTtsWatchdog() {
+    disarmTtsWatchdog()
+    let lastTime = -1
+    let stalledSince = 0
+    ttsWatchdogRef.current = window.setInterval(() => {
+      if (statusRef.current !== 'speaking') {
+        disarmTtsWatchdog()
+        return
+      }
+      const audio = audioRef.current
+      if (!audio || audio.paused) return
+      if (audio.currentTime > lastTime + 0.05) {
+        lastTime = audio.currentTime
+        stalledSince = 0
+        return
+      }
+      if (!stalledSince) {
+        stalledSince = performance.now()
+        return
+      }
+      if (performance.now() - stalledSince >= 6000) {
+        disarmTtsWatchdog()
+        void recoverFromTtsPlaybackFailure()
+      }
+    }, 1500)
+  }
+
   async function recoverFromTtsPlaybackFailure(): Promise<void> {
     if (recoveringTtsRef.current) return
     recoveringTtsRef.current = true
+    disarmTtsWatchdog()
     try {
       if (musicTimerRef.current) {
         window.clearTimeout(musicTimerRef.current)
@@ -550,6 +590,7 @@ export function VoicePage({
 
   async function finishSpeaking() {
     const runId = fadeRunRef.current
+    disarmTtsWatchdog()
     stopTtsWave()
     setProgress(1)
     if (backgroundPlaybackFailedRef.current) {
@@ -583,6 +624,7 @@ export function VoicePage({
       }
       if (!automatic) autoFailureCountRef.current = 0
       fadeRunRef.current += 1
+      disarmTtsWatchdog()
       if (musicTimerRef.current) window.clearTimeout(musicTimerRef.current)
       stopTtsWave(true)
       audioRef.current?.pause()
@@ -642,6 +684,7 @@ export function VoicePage({
       }
       setCurrentAudioUrl(segment.audioUrl)
       setStatus('speaking')
+      armTtsWatchdog()
       window.setTimeout(() => audioRef.current?.play().catch(() => {
         void recoverFromTtsPlaybackFailure()
       }), 80)
