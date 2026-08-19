@@ -48,6 +48,17 @@ function strokeCurve(
 export function WindowField({ mode }: { mode: WindowFieldMode }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const audioEnergyRef = useRef(0)
+  // 形态切换的交叉淡化：记录上一次绘制的形态与切换时刻，避免线条硬切跳变。
+  const drawnModeRef = useRef<WindowFieldMode>(mode)
+  const crossFromRef = useRef<WindowFieldMode | null>(null)
+  const crossStartedAtRef = useRef(0)
+
+  useEffect(() => {
+    if (drawnModeRef.current === mode) return
+    crossFromRef.current = drawnModeRef.current
+    crossStartedAtRef.current = performance.now()
+    drawnModeRef.current = mode
+  }, [mode])
 
   useEffect(() => {
     const updateEnergy = (event: Event) => {
@@ -68,7 +79,6 @@ export function WindowField({ mode }: { mode: WindowFieldMode }) {
     let width = 0
     let height = 0
     let animationFrame = 0
-    const startedAt = performance.now()
 
     function resize() {
       const bounds = canvasElement.getBoundingClientRect()
@@ -182,11 +192,8 @@ export function WindowField({ mode }: { mode: WindowFieldMode }) {
       ], WHITE, 1)
     }
 
-    function draw(now: number) {
-      if (width === 0 || height === 0) resize()
-      const tt = reducedMotion ? 0 : (now - startedAt) / 1000
-      ctx.clearRect(0, 0, width, height)
-      switch (mode) {
+    function drawFrame(target: WindowFieldMode, tt: number) {
+      switch (target) {
         case 'idle':
         case 'quiet':
           drawIdle(tt)
@@ -213,7 +220,31 @@ export function WindowField({ mode }: { mode: WindowFieldMode }) {
           drawChatFamily(tt, 'error')
           break
       }
-      if (!reducedMotion) animationFrame = window.requestAnimationFrame(draw)
+    }
+
+    const easeInOut = (p: number) => (p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2)
+
+    function draw(now: number) {
+      if (width === 0 || height === 0) resize()
+      // 全局连续时钟：形态切换时波动相位不跳变。
+      const tt = reducedMotion ? 0 : now / 1000
+      ctx.clearRect(0, 0, width, height)
+      const crossFrom = crossFromRef.current
+      const progress = crossFrom ? Math.min(1, (now - crossStartedAtRef.current) / 520) : 1
+      if (progress < 1) {
+        const eased = easeInOut(progress)
+        ctx.globalAlpha = 1 - eased
+        drawFrame(crossFrom as WindowFieldMode, tt)
+        ctx.globalAlpha = eased
+        drawFrame(mode, tt)
+        ctx.globalAlpha = 1
+        if (progress >= 1) crossFromRef.current = null
+      } else {
+        crossFromRef.current = null
+        drawFrame(mode, tt)
+      }
+      // reduced-motion 下形态过渡仍走完（一次性渐变，无持续运动），结束后停帧。
+      if (!reducedMotion || progress < 1) animationFrame = window.requestAnimationFrame(draw)
     }
 
     const resizeObserver = new ResizeObserver(() => {
@@ -222,7 +253,7 @@ export function WindowField({ mode }: { mode: WindowFieldMode }) {
     })
     resizeObserver.observe(canvasElement)
     resize()
-    draw(startedAt)
+    draw(performance.now())
 
     return () => {
       resizeObserver.disconnect()

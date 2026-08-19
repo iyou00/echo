@@ -1202,6 +1202,32 @@
   display: grid;
   place-items: center;
   background: rgba(15, 18, 15, 0.24);
+  animation: onboarding-layer-in 0.32s ease;
+}
+
+@keyframes onboarding-layer-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.d2-onboarding-layer.leaving {
+  animation: onboarding-layer-out 0.38s ease forwards;
+}
+
+.d2-onboarding-layer.leaving .d2-onboarding {
+  transform: translateY(8px) scale(0.985);
+  transition: transform 0.38s ease;
+}
+
+@keyframes onboarding-layer-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .d2-onboarding-layer { animation-duration: 0.2s; }
+  .d2-onboarding-layer.leaving { animation-duration: 0.24s; }
+  .d2-onboarding-layer.leaving .d2-onboarding { transform: none; transition: none; }
 }
 
 .d2-onboarding {

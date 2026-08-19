@@ -515,6 +515,18 @@ function App() {
     }
   }
 
+  // 引导结束不硬切：层先淡出，落位（进设置或回首页）在淡出完成后发生。
+  function closeOnboardingSmoothly(commit: () => void) {
+    if (onboardingLeavingRef.current) return
+    onboardingLeavingRef.current = true
+    setOnboardingLeaving(true)
+    window.setTimeout(() => {
+      onboardingLeavingRef.current = false
+      setOnboardingLeaving(false)
+      commit()
+    }, 380)
+  }
+
   async function startOnboardingApi() {
     onboardingDeferredForSessionRef.current = true
     try {
@@ -525,7 +537,7 @@ function App() {
     } catch (error) {
       logAppAsyncError('mark onboarding api step', error)
     } finally {
-      dispatch((current) => ({ onboardingOpen: false, page: 'settings', settingsApiFocusToken: current.settingsApiFocusToken + 1 }))
+      closeOnboardingSmoothly(() => dispatch((current) => ({ onboardingOpen: false, page: 'settings', settingsApiFocusToken: current.settingsApiFocusToken + 1 })))
     }
   }
 
@@ -539,7 +551,7 @@ function App() {
     } catch (error) {
       logAppAsyncError('mark onboarding playlist step', error)
     } finally {
-      dispatch((current) => ({ onboardingOpen: false, page: 'settings', settingsImportFocusToken: current.settingsImportFocusToken + 1 }))
+      closeOnboardingSmoothly(() => dispatch((current) => ({ onboardingOpen: false, page: 'settings', settingsImportFocusToken: current.settingsImportFocusToken + 1 })))
     }
   }
 
@@ -551,13 +563,13 @@ function App() {
       : await echo.settings.updateBatch(patches)
     setSettings(next)
     onboardingDeferredForSessionRef.current = true
-    dispatch((current) => profile
+    closeOnboardingSmoothly(() => dispatch((current) => profile
       ? { onboardingOpen: false }
       : {
           onboardingOpen: false,
           page: 'settings',
           settingsImportFocusToken: current.settingsImportFocusToken + 1,
-        })
+        }))
   }
 
   async function skipOnboarding() {
@@ -567,7 +579,7 @@ function App() {
         { path: 'meta.onboardingCompletedAt', value: new Date().toISOString() },
       ])
       setSettings(next)
-      dispatch({ onboardingOpen: false })
+      closeOnboardingSmoothly(() => dispatch({ onboardingOpen: false }))
     } catch (error) { logAppAsyncError('skipOnboarding', error) }
   }
 
@@ -704,6 +716,8 @@ function App() {
   }, [page, listeningViewOpen, dispatch])
   const [dailyReconnectDone, setDailyReconnectDone] = useState(false)
   const [voiceWriting, setVoiceWriting] = useState(false)
+  const [onboardingLeaving, setOnboardingLeaving] = useState(false)
+  const onboardingLeavingRef = useRef(false)
   const offlineBoundary = boundaries.find((item) => item.code === 'offline')
   const modelInvalidBoundary = boundaries.find((item) => item.code === 'model_invalid')
   const commonProps: AppPageProps = { navigate: setPage }
@@ -940,7 +954,7 @@ function App() {
           </div>
         )}
         {onboardingOpen && (
-          <div className="d2-onboarding-layer" role="presentation">
+          <div className={onboardingLeaving ? 'd2-onboarding-layer leaving' : 'd2-onboarding-layer'} role="presentation">
             <section className="d2-onboarding" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
               <div className="d2-onboarding-kicker">ECHO · FIRST</div>
               {!hasLlmConfig ? (
