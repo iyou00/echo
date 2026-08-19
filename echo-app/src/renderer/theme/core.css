@@ -575,6 +575,26 @@
   opacity: 0.16;
 }
 
+/* boot splash 作为覆盖层淡出（bootReady 后主界面已在底下就位，无换树闪烁） */
+.echo-shell.boot-shell.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  background: var(--d2-paper);
+}
+
+.echo-shell.boot-shell.overlay.leaving {
+  animation: boot-splash-out 0.38s ease forwards;
+}
+
+@keyframes boot-splash-out {
+  to { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .echo-shell.boot-shell.overlay.leaving { animation-duration: 0.2s; }
+}
+
 .boot-shell .boot-splash {
   position: relative;
   z-index: 2;

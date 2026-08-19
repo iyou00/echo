@@ -717,10 +717,36 @@ function App() {
   const [dailyReconnectDone, setDailyReconnectDone] = useState(false)
   const [voiceWriting, setVoiceWriting] = useState(false)
   const [onboardingLeaving, setOnboardingLeaving] = useState(false)
+
+  const [bootGone, setBootGone] = useState(false)
+  const [bootLeaving, setBootLeaving] = useState(false)
+
+  // 启动 splash 不换树硬切：bootReady 后主界面在底下就位，splash 覆盖层淡出后卸载。
+  useEffect(() => {
+    if (!bootReady || bootGone) return
+    setBootLeaving(true)
+    const timer = window.setTimeout(() => setBootGone(true), 420)
+    return () => window.clearTimeout(timer)
+  }, [bootReady, bootGone])
   const onboardingLeavingRef = useRef(false)
   const offlineBoundary = boundaries.find((item) => item.code === 'offline')
   const modelInvalidBoundary = boundaries.find((item) => item.code === 'model_invalid')
   const commonProps: AppPageProps = { navigate: setPage }
+
+  const bootSplash = (
+    <div
+      className={`echo-shell boot-shell${bootReady ? ' overlay' : ''}${bootReady && bootLeaving ? ' leaving' : ''}`}
+      aria-hidden={bootReady}
+    >
+      <WindowField mode="quiet" />
+      <main className="app-frame has-global-player">
+        <div className="boot-splash" role="status" aria-live="polite">
+          <div className="boot-splash-mark">E C H O</div>
+          <div className="boot-splash-tip">正在重新接上</div>
+        </div>
+      </main>
+    </div>
+  )
 
   if (!bootReady) {
     const returningUser = Boolean(settings?.meta?.firstRunWelcomeCompletedAt)
@@ -734,20 +760,11 @@ function App() {
         </div>
       )
     }
-    return (
-      <div className="echo-shell boot-shell">
-        <WindowField mode="quiet" />
-        <main className="app-frame has-global-player">
-          <div className="boot-splash" role="status" aria-live="polite">
-            <div className="boot-splash-mark">E C H O</div>
-            <div className="boot-splash-tip">正在重新接上</div>
-          </div>
-        </main>
-      </div>
-    )
+    return bootSplash
   }
 
   return (
+    <>
     <EchoShell
       page={page}
       fieldMode={fieldMode}
@@ -988,6 +1005,8 @@ function App() {
           </div>
         )}
     </EchoShell>
+    {!bootGone && bootSplash}
+    </>
   )
 }
 
