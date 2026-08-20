@@ -7,6 +7,9 @@
 .shell-page[data-page='settings'] .settings-page {
   position: absolute;
   inset: 0;
+  /* phone-surface 带来的 height:100vh 会把内容区撑破顶栏高度（compact 窗口下
+     rail 底部按钮被截）；absolute inset 已锁高，这里显式归零。 */
+  height: auto;
   display: grid;
   grid-template-columns: 236px 1fr;
   background: var(--d2-paper);
