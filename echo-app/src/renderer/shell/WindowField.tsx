@@ -224,7 +224,10 @@ export function WindowField({ mode }: { mode: WindowFieldMode }) {
       // 音乐能量（絮语回复是文字流，无语音可接），笔端一枚呼吸的笔锋；
       // searching 同律生长绿线（找歌）。
       if (isStreaming || isSearching) {
-        const growth = reducedMotion ? 1 : Math.min(1, enteredAgo / 12000)
+        // 生长前段加速：头 1.9s 冲到 42%，其余 10s 补完——避免 searching
+        // 换形态后出现数秒的"视觉空窗"（旧线已淡出、新线还没长出来）。
+        const p = Math.min(1, enteredAgo / 12000)
+        const growth = reducedMotion ? 1 : p < 0.16 ? (p / 0.16) * 0.42 : 0.42 + ((p - 0.16) / 0.84) * 0.58
         if (isStreaming) {
           const redAmp = 3.5 + 13 * (reducedMotion ? 0 : smoothedEnergy)
           const redFull = sampleLine((x) => 0.5 + 0.075 * Math.sin(x * 3.4 + 0.5) + 0.03 * Math.sin(x * 8) - converge(x) * 0.7, tt, redAmp, 1.05, 11.8)
@@ -237,7 +240,7 @@ export function WindowField({ mode }: { mode: WindowFieldMode }) {
           const len = Math.hypot(dx, dy) || 1
           drawBrushTip(tip[0] * width, tip[1] * height, dx / len, dy / len, RED, tt, 7)
         } else {
-          const greenAmp = 3 + 8 * (reducedMotion ? 0 : smoothedEnergy)
+          const greenAmp = 5.5 + 9 * (reducedMotion ? 0 : smoothedEnergy)
           const greenFull = sampleLine((x) => 0.44 + 0.09 * Math.sin(x * 2.9 + 2.1) - converge(x) * 0.6, tt, greenAmp, 0.9, 15.4)
           const green = clipToGrowth(greenFull, growth)
           strokeBrush(green, FOREST, 1.6)
