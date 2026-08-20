@@ -1095,6 +1095,12 @@
   flex-shrink: 0;
 }
 
+/* 一起听视图只保留一处波形：场域画布的能量波形（底部横贯），
+   面板内的波条与之重复，隐藏。 */
+.d2-player-layer.player-listening .d2-listening-panel .wave-bars {
+  display: none;
+}
+
 .d2-object-feedback { display: flex; gap: 12px; margin-top: 9px; opacity: 0; transition: opacity 160ms ease; }
 .d2-sound-object:hover .d2-object-feedback, .d2-sound-object:focus-within .d2-object-feedback { opacity: 1; }
 .d2-object-feedback button { display: grid; width: 20px; height: 20px; padding: 0; place-items: center; border: 0; border-bottom: 1px solid transparent; border-radius: 0; background: transparent; color: var(--d2-muted); }

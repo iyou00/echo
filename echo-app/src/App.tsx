@@ -730,6 +730,10 @@ function App() {
   const onboardingLeavingRef = useRef(false)
   const offlineBoundary = boundaries.find((item) => item.code === 'offline')
   const modelInvalidBoundary = boundaries.find((item) => item.code === 'model_invalid')
+  // 一起听覆盖层永远以絮语页为底：从回声页点封面进入时也切换到 chat 底座，
+  // 输入框与对话上下文保持在场；「回到此刻」再回回声页，连续不停。
+  const listeningOverlay = listeningViewOpen && Boolean(playbackState.current)
+
   const commonProps: AppPageProps = { navigate: setPage }
 
   const bootSplash = (
@@ -787,7 +791,7 @@ function App() {
             避免每次切回去都重新 loadRecent / fetch history、闪一下空白。
             画像与关于页按需挂载。
           */}
-          <div className="shell-page d2-now-page" style={{ display: page === 'chat' ? 'flex' : 'none' }}>
+          <div className="shell-page d2-now-page" style={{ display: page === 'chat' || (page === 'voice' && listeningOverlay) ? 'flex' : 'none' }}>
             <ChatPage
               {...commonProps}
               echo={echo}
@@ -823,7 +827,7 @@ function App() {
               boundary={boundaries.find((item) => item.code === 'yinyi_empty')}
             />
           </div>
-          <div className="shell-page" style={{ display: page === 'voice' ? 'flex' : 'none' }}>
+          <div className="shell-page" style={{ display: page === 'voice' && !listeningOverlay ? 'flex' : 'none' }}>
             <VoicePage
               {...commonProps}
               echo={echo}
