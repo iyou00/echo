@@ -620,6 +620,7 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
   const artwork = current?.artworkUrl || companionArtwork
 
   return (
+    <>
     <footer className={`mini-player global-player ${current ? 'has-track' : 'empty-track'}${localPlaying ? '' : ' is-paused'}`}>
       <audio
         ref={audioRef}
@@ -738,6 +739,7 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
         </figcaption>
       </figure>
 
+    </footer>
       <section className="d2-listening-panel" aria-live="polite">
         <span className="d2-listening-kicker">ECHO · 一起听</span>
         <h2 key={currentKey || 'none'}>
@@ -806,6 +808,6 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
         </div>
         <WaveBars active={localPlaying} levels={audioLevels} />
       </section>
-    </footer>
+  </>
   )
 }

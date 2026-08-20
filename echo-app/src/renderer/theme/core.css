@@ -1009,7 +1009,6 @@
 .d2-player-layer.player-listening .d2-sound-object figcaption { background: var(--d2-night); }
 .d2-player-layer.player-listening .player-artist { color: #aeb6ad; }
 
-.d2-player-layer.player-listening .d2-listening-panel { position: fixed; top: 150px; bottom: 118px; left: 48.7%; display: flex; flex-direction: column; width: 43.5%; color: #f5f5ec; }
 .d2-player-layer.player-listening .d2-sound-tools,
 .d2-player-layer.player-voice .d2-sound-tools { display: none; }
 .d2-player-layer.player-listening .global-player.is-paused .d2-sound-art img,
@@ -1069,19 +1068,25 @@
 .d2-now-page .stage-boundary .d2-quiet-mark { opacity: 0; pointer-events: none; }
 .d2-now-page .stage-boundary .d2-now-presence h1 { max-width: 520px; font-size: 39px; }
 .d2-player-layer.player-listening .d2-listening-panel {
-  position: absolute;
+  /* 相对视口锚定，高度天然有界（top/bottom 夹住），不再依赖祖先定位链 */
+  position: fixed;
   top: 56px;
+  bottom: 118px;
   left: 43.2vw;
   width: 43.5vw;
+  display: flex;
+  flex-direction: column;
+  color: #f5f5ec;
   overflow: hidden;
 }
 
-/* 推荐语过长时限行：面板高度有界，控件永远不被挤出面板压到输入框 */
+/* 推荐语过长时按高度预算截断并向下渐隐（墨迹收尾），控件永远留在面板内 */
 .d2-player-layer.player-listening .d2-listening-panel h2 {
-  display: -webkit-box;
-  -webkit-line-clamp: 8;
-  -webkit-box-orient: vertical;
+  display: block;
+  max-height: 46%;
   overflow: hidden;
+  mask-image: linear-gradient(180deg, #000 78%, transparent);
+  -webkit-mask-image: linear-gradient(180deg, #000 78%, transparent);
 }
 .d2-player-layer.player-listening .d2-listening-panel .d2-listen-controls {
   flex-shrink: 0;
