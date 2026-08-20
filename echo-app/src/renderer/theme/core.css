@@ -1073,6 +1073,18 @@
   top: 56px;
   left: 43.2vw;
   width: 43.5vw;
+  overflow: hidden;
+}
+
+/* 推荐语过长时限行：面板高度有界，控件永远不被挤出面板压到输入框 */
+.d2-player-layer.player-listening .d2-listening-panel h2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 8;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.d2-player-layer.player-listening .d2-listening-panel .d2-listen-controls {
+  flex-shrink: 0;
 }
 
 .d2-object-feedback { display: flex; gap: 12px; margin-top: 9px; opacity: 0; transition: opacity 160ms ease; }
@@ -1537,6 +1549,7 @@
 
 .d2-shell.field-listening .d2-now-return {
   color: #f5f5ec;
+  text-shadow: 0 0 8px rgba(15, 19, 15, 0.85), 0 1px 3px rgba(15, 19, 15, 0.95);
 }
 
 @media (max-width: 1190px) {
