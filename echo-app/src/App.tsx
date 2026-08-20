@@ -681,7 +681,6 @@ function App() {
 
   const fieldMode: WindowFieldMode = deriveWindowFieldMode({
     page,
-    voiceContinuous,
     currentScene: Boolean(currentScene),
     hasCurrentTrack: Boolean(playbackState.current),
     listeningViewOpen,

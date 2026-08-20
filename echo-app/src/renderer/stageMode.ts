@@ -25,22 +25,22 @@ export function deriveChatStageMode({
 
 export function deriveWindowFieldMode({
   page,
-  voiceContinuous,
   currentScene,
   hasCurrentTrack,
   listeningViewOpen,
   chatStageMode,
 }: {
   page: PageKey
-  voiceContinuous: boolean
   currentScene: boolean
   hasCurrentTrack: boolean
   listeningViewOpen: boolean
   chatStageMode: ChatStageMode
 }): WindowFieldMode {
   if (page === 'settings' || page === 'about') return 'quiet'
-  if (page === 'voice' || voiceContinuous) {
+  if (page === 'voice') {
     // 回声页里用户点音乐书签/迷你封面显式打开一起听时，一起听优先；回声连续不停。
+    // 连续回声只是回声页内部的行为开关——离开回声页后 field 跟随页面，
+    // 否则首页/设置页会整页停留在回声场景（波形、配色、卡片位全错）。
     if (listeningViewOpen && hasCurrentTrack) return 'listening'
     return 'voice'
   }

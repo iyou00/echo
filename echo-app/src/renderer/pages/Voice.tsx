@@ -249,7 +249,9 @@ export function VoicePage({
 
   useEffect(() => {
     isActiveRef.current = isActive
-  }, [isActive])
+    // 离开回声页时收起封面：回来是阅读态，封面等下一段真正开始书写再淡入
+    if (!isActive) onWritingChange?.(false)
+  }, [isActive, onWritingChange])
 
   useEffect(() => {
     onWritingChange?.(status !== 'idle' && status !== 'generating')

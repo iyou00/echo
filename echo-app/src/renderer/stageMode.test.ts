@@ -4,48 +4,59 @@ import { deriveChatStageMode, deriveWindowFieldMode } from './stageMode'
 describe('stage mode', () => {
   it('shows the listening stage while the view is open with a track', () => {
     expect(deriveWindowFieldMode({
-      page: 'chat', voiceContinuous: false, currentScene: true,
+      page: 'chat', currentScene: true,
       hasCurrentTrack: true, listeningViewOpen: true, chatStageMode: 'chat',
     })).toBe('listening')
   })
 
   it('keeps the listening stage open while paused (decoupled from transport)', () => {
     expect(deriveWindowFieldMode({
-      page: 'chat', voiceContinuous: false, currentScene: false,
+      page: 'chat', currentScene: false,
       hasCurrentTrack: true, listeningViewOpen: true, chatStageMode: 'chat',
     })).toBe('listening')
   })
 
   it('returns to the scene stage after the listening view closes', () => {
     expect(deriveWindowFieldMode({
-      page: 'chat', voiceContinuous: false, currentScene: true,
+      page: 'chat', currentScene: true,
       hasCurrentTrack: true, listeningViewOpen: false, chatStageMode: 'chat',
     })).toBe('scene')
   })
 
   it('falls back to the chat stage after the listening view closes', () => {
     expect(deriveWindowFieldMode({
-      page: 'chat', voiceContinuous: false, currentScene: false,
+      page: 'chat', currentScene: false,
       hasCurrentTrack: true, listeningViewOpen: false, chatStageMode: 'chat',
     })).toBe('chat')
   })
 
   it('ignores the view flag when no track is present', () => {
     expect(deriveWindowFieldMode({
-      page: 'chat', voiceContinuous: false, currentScene: false,
+      page: 'chat', currentScene: false,
       hasCurrentTrack: false, listeningViewOpen: true, chatStageMode: 'idle',
     })).toBe('idle')
   })
 
   it('lets the listening view win inside the voice page when a track plays', () => {
     expect(deriveWindowFieldMode({
-      page: 'voice', voiceContinuous: true, currentScene: false,
+      page: 'voice', currentScene: false,
       hasCurrentTrack: true, listeningViewOpen: true, chatStageMode: 'idle',
     })).toBe('listening')
     expect(deriveWindowFieldMode({
-      page: 'voice', voiceContinuous: true, currentScene: false,
+      page: 'voice', currentScene: false,
       hasCurrentTrack: true, listeningViewOpen: false, chatStageMode: 'idle',
     })).toBe('voice')
+  })
+
+  it('keeps the field on the page even while continuous echo is on', () => {
+    expect(deriveWindowFieldMode({
+      page: 'chat', currentScene: false,
+      hasCurrentTrack: true, listeningViewOpen: false, chatStageMode: 'chat',
+    })).toBe('chat')
+    expect(deriveWindowFieldMode({
+      page: 'settings', currentScene: false,
+      hasCurrentTrack: true, listeningViewOpen: false, chatStageMode: 'idle',
+    })).toBe('quiet')
   })
 
   it.each([

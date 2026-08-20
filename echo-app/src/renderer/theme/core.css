@@ -1068,9 +1068,11 @@
 .d2-now-page .stage-boundary .d2-quiet-mark { opacity: 0; pointer-events: none; }
 .d2-now-page .stage-boundary .d2-now-presence h1 { max-width: 520px; font-size: 39px; }
 .d2-player-layer.player-listening .d2-listening-panel {
-  /* 相对视口锚定，高度天然有界（top/bottom 夹住），不再依赖祖先定位链 */
+  /* 相对视口锚定：回到原视觉位置（与大卡顶部协调），高度有界，
+     并且必须自己开启 pointer-events——播放层整体是点击穿透的，
+     面板原先靠卡片内的重新开启，移出卡片后在此自启。 */
   position: fixed;
-  top: 56px;
+  top: 160px;
   bottom: 118px;
   left: 43.2vw;
   width: 43.5vw;
@@ -1078,6 +1080,7 @@
   flex-direction: column;
   color: #f5f5ec;
   overflow: hidden;
+  pointer-events: auto;
 }
 
 /* 推荐语过长时按高度预算截断并向下渐隐（墨迹收尾），控件永远留在面板内 */
