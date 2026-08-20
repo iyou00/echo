@@ -53,11 +53,15 @@ export function WindowField({ mode }: { mode: WindowFieldMode }) {
   const crossFromRef = useRef<WindowFieldMode | null>(null)
   const crossStartedAtRef = useRef(0)
   const modeEnteredAtRef = useRef(performance.now())
+  // 交叉淡化期间，旧形态的 growth/pluck 必须用「它自己进入时」的时间戳，
+  // 否则切走瞬间旧红线会缩回起点、蓝线被重新拨动一下。
+  const prevModeEnteredAtRef = useRef(performance.now())
 
   useEffect(() => {
     if (drawnModeRef.current === mode) return
     crossFromRef.current = drawnModeRef.current
     crossStartedAtRef.current = performance.now()
+    prevModeEnteredAtRef.current = modeEnteredAtRef.current
     modeEnteredAtRef.current = performance.now()
     drawnModeRef.current = mode
   }, [mode])
@@ -156,12 +160,10 @@ export function WindowField({ mode }: { mode: WindowFieldMode }) {
       strokeCurve(ctx, width, height, sampleLine((x) => 0.64 - 0.12 * x + 0.04 * Math.sin(x * 5.4), tt, 3.5, 0.58, 5.2), RED, 2)
     }
 
-    function drawChatFamily(nowMs: number, state: 'chat' | 'streaming' | 'searching' | 'error') {
-      const tt = reducedMotion ? 0 : nowMs / 1000
+    function drawChatFamily(tt: number, enteredAgo: number, state: 'chat' | 'streaming' | 'searching' | 'error') {
       const isStreaming = state === 'streaming'
       const isSearching = state === 'searching'
       const isError = state === 'error'
-      const enteredAgo = nowMs - modeEnteredAtRef.current
 
       // 提问的扰动：进入 streaming 后 1.4s 内蓝线被拨动一下再平息
       const pluck = state === 'streaming' ? Math.max(0, 1 - enteredAgo / 1400) : 0
@@ -172,8 +174,9 @@ export function WindowField({ mode }: { mode: WindowFieldMode }) {
         isError ? GREY_BLUE : BLUE, 1.4, isError ? [5, 7] : undefined,
       )
 
-      // 红线（Echo 的回应）：streaming 时从左往右生长，振幅接 TTS 能量，
-      // 笔端一颗洇开的墨点；searching 同律生长绿线（找歌）。
+      // 红线（Echo 的回应）：streaming 时从左往右生长，振幅接正在播放的
+      // 音乐能量（絮语回复是文字流，无语音可接），笔端一颗洇开的墨点；
+      // searching 同律生长绿线（找歌）。
       if (isStreaming || isSearching) {
         const growth = reducedMotion ? 1 : Math.min(1, enteredAgo / 12000)
         if (isStreaming) {
@@ -242,17 +245,13 @@ export function WindowField({ mode }: { mode: WindowFieldMode }) {
           drawWaveform(tt, 1.15 + 0.28 * Math.sin(tt * 2.8))
           break
         case 'chat':
-          drawChatFamily(nowMs, 'chat')
-          break
         case 'streaming':
-          drawChatFamily(nowMs, 'streaming')
-          break
         case 'searching':
-          drawChatFamily(nowMs, 'searching')
+        case 'error': {
+          const enteredAgo = nowMs - (target === mode ? modeEnteredAtRef.current : prevModeEnteredAtRef.current)
+          drawChatFamily(tt, enteredAgo, target as 'chat' | 'streaming' | 'searching' | 'error')
           break
-        case 'error':
-          drawChatFamily(nowMs, 'error')
-          break
+        }
       }
     }
 
