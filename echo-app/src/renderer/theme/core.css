@@ -1080,6 +1080,10 @@
   flex-direction: column;
   color: #f5f5ec;
   overflow: hidden;
+  /* 面板盒穿过点击（下半部与输入区重叠），只由实际内容接管 */
+  pointer-events: none;
+}
+.d2-player-layer.player-listening .d2-listening-panel > * {
   pointer-events: auto;
 }
 
