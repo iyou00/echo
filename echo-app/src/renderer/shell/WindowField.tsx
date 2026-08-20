@@ -98,42 +98,84 @@ export function WindowField({ mode }: { mode: WindowFieldMode }) {
     }
 
     // 行波采样管线：所有曲线共用。
-    // y = 走向(base) + 多频行波(相位随时间平移，波沿线条前进) x 端点包络
+    // y = 走向(base) + 行波(相位随时间平移) × 有机包络 + 可选拨弦驻波。
+    // 有机感来自三层时间尺度：快波行进、慢包络漂移(波峰位置在动)、
+    // 周期性涌动波包(约 16s 一拨能量扫过，其余时间留白低振幅)。
     function sampleLine(
       base: (x: number) => number,
       t: number,
       ampPx: number,
       speed: number,
       seed: number,
+      pluck?: { ampPx: number; sinceSec: number },
     ): Pt[] {
       const points: Pt[] = []
+      const surgeX = (t * 0.062 + seed * 0.77) % 1
       for (let index = 0; index <= 56; index += 1) {
         const x = index / 56
-        const env = Math.sin(Math.PI * x)
+        // 钝端点：靠近端点运动更迟缓（惯性），中段活跃
+        const env = Math.pow(Math.sin(Math.PI * x), 0.72)
+        // 慢包络漂移：波峰位置本身在走，避免均匀摆动的机械感
+        const envDrift = 0.62 + 0.38 * Math.sin(x * 2.3 - t * speed * 0.28 + seed * 1.9)
+        // 涌动波包
+        const surge = Math.exp(-Math.pow((x - surgeX) * 4.6, 2)) * 1.5
         const wave =
           Math.sin(x * 9.4 - t * speed + seed) * 0.62 +
           Math.sin(x * 17.2 - t * speed * 1.6 + seed * 2.1) * 0.28 +
           Math.sin(x * 4.6 - t * speed * 0.7 + seed * 3.7) * 0.35
-        points.push([x, base(x) + (wave * env * ampPx) / height])
+        let y = base(x) + (wave * env * envDrift * (1 + surge * 0.85) * ampPx) / height
+        // 拨弦：驻波基频震荡 + 指数衰减——弦被拨动的物理感
+        if (pluck && pluck.sinceSec < 3.2) {
+          y += (pluck.ampPx * Math.sin(Math.PI * x) * Math.cos(pluck.sinceSec * 13.8) * Math.exp(-pluck.sinceSec * 2.4)) / height
+        }
+        points.push([x, y])
       }
       return points
     }
 
-    // 墨点：中心实心 + 径向洇开
-    function drawInkDot(xPx: number, yPx: number, color: string, bloom = 7) {
+    // 笔触渲染：洇影打底（宣纸墨晕）+ 分段变宽（起收笔细、中段厚）+ 墨色渐干（尾部淡）
+    function strokeBrush(points: Pt[], color: string, baseWidth: number, dryTail = true) {
       const alpha = ctx.globalAlpha
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+      ctx.strokeStyle = color
+      ctx.globalAlpha = alpha * 0.05
+      ctx.lineWidth = baseWidth * 3.4
+      smoothPath(ctx, width, height, points)
+      for (let index = 1; index < points.length; index += 1) {
+        const xMid = (points[index - 1][0] + points[index][0]) / 2
+        const env = Math.pow(Math.sin(Math.PI * Math.min(1, Math.max(0, xMid))), 0.72)
+        const dryness = dryTail ? Math.min(1, Math.max(0, (xMid - 0.72) / 0.28)) : 0
+        ctx.globalAlpha = alpha * (1 - dryness * 0.45)
+        ctx.lineWidth = baseWidth * (0.48 + 0.82 * env)
+        ctx.beginPath()
+        ctx.moveTo(points[index - 1][0] * width, points[index - 1][1] * height)
+        ctx.lineTo(points[index][0] * width, points[index][1] * height)
+        ctx.stroke()
+      }
+      ctx.globalAlpha = alpha
+    }
+
+    // 笔锋墨点：呼吸胀缩 + 沿行笔方向的拖尾 + 洇晕
+    function drawBrushTip(xPx: number, yPx: number, dirX: number, dirY: number, color: string, t: number, bloom = 7) {
+      const alpha = ctx.globalAlpha
+      const breathe = 1 + 0.16 * Math.sin(t * 2.2)
       const gradient = ctx.createRadialGradient(xPx, yPx, 0, xPx, yPx, bloom)
       gradient.addColorStop(0, color)
       gradient.addColorStop(1, 'rgba(0,0,0,0)')
-      ctx.globalAlpha = alpha * 0.35
       ctx.fillStyle = gradient
+      ctx.globalAlpha = alpha * 0.32
       ctx.beginPath()
       ctx.arc(xPx, yPx, bloom, 0, Math.PI * 2)
       ctx.fill()
-      ctx.globalAlpha = alpha
       ctx.fillStyle = color
+      ctx.globalAlpha = alpha * 0.28
       ctx.beginPath()
-      ctx.arc(xPx, yPx, 2.2, 0, Math.PI * 2)
+      ctx.ellipse(xPx - dirX * 5, yPx - dirY * 5, 5.5, 2.1, Math.atan2(dirY, dirX), 0, Math.PI * 2)
+      ctx.fill()
+      ctx.globalAlpha = alpha
+      ctx.beginPath()
+      ctx.arc(xPx, yPx, 2.4 * breathe, 0, Math.PI * 2)
       ctx.fill()
     }
 
@@ -151,13 +193,13 @@ export function WindowField({ mode }: { mode: WindowFieldMode }) {
     }
 
     function drawIdle(tt: number) {
-      strokeCurve(ctx, width, height, sampleLine((x) => 0.72 - 0.27 * x * x - 0.02 * Math.sin(x * 5), tt, 5, 0.55, 1.7), FOREST, 1.5)
-      strokeCurve(ctx, width, height, sampleLine((x) => 0.53 - 0.09 * x + 0.045 * Math.sin(x * 6.2), tt, 4, 0.62, 4.1), RED, 2)
+      strokeBrush(sampleLine((x) => 0.72 - 0.27 * x * x - 0.02 * Math.sin(x * 5), tt, 5, 0.55, 1.7), FOREST, 1.6)
+      strokeBrush(sampleLine((x) => 0.53 - 0.09 * x + 0.045 * Math.sin(x * 6.2), tt, 4, 0.62, 4.1), RED, 2.1)
     }
 
     function drawScene(tt: number) {
-      strokeCurve(ctx, width, height, sampleLine((x) => 0.73 - 0.2 * x * x, tt, 4, 0.5, 2.3), FOREST, 1.5)
-      strokeCurve(ctx, width, height, sampleLine((x) => 0.64 - 0.12 * x + 0.04 * Math.sin(x * 5.4), tt, 3.5, 0.58, 5.2), RED, 2)
+      strokeBrush(sampleLine((x) => 0.73 - 0.2 * x * x, tt, 4, 0.5, 2.3), FOREST, 1.6)
+      strokeBrush(sampleLine((x) => 0.64 - 0.12 * x + 0.04 * Math.sin(x * 5.4), tt, 3.5, 0.58, 5.2), RED, 2.1)
     }
 
     function drawChatFamily(tt: number, enteredAgo: number, state: 'chat' | 'streaming' | 'searching' | 'error') {
@@ -165,43 +207,56 @@ export function WindowField({ mode }: { mode: WindowFieldMode }) {
       const isSearching = state === 'searching'
       const isError = state === 'error'
 
-      // 提问的扰动：进入 streaming 后 1.4s 内蓝线被拨动一下再平息
-      const pluck = state === 'streaming' ? Math.max(0, 1 - enteredAgo / 1400) : 0
-      const blueAmp = 4 + 12 * pluck
-      strokeCurve(
-        ctx, width, height,
-        sampleLine((x) => 0.58 - 0.16 * x + 0.05 * Math.sin(x * 4.2 + 0.6), tt, blueAmp, 0.85, 7.3),
-        isError ? GREY_BLUE : BLUE, 1.4, isError ? [5, 7] : undefined,
-      )
+      // 构图：两线在中段彼此靠近又分开——提问与回应之间的呼应
+      const converge = (x: number) => 0.05 * Math.exp(-Math.pow((x - 0.5) / 0.22, 2))
+
+      // 提问 = 拨弦：驻波基频震荡 + 衰减（进入 streaming 后约 2.5s 平息）
+      const pluckT = state === 'streaming' ? enteredAgo / 1000 : 99
+      const pluck = pluckT < 3.2 ? { ampPx: 15, sinceSec: pluckT } : undefined
+      const bluePoints = sampleLine((x) => 0.585 - 0.17 * x + 0.05 * Math.sin(x * 4.2 + 0.6) + converge(x), tt, 4.5, 0.85, 7.3, pluck)
+      if (isError) {
+        strokeCurve(ctx, width, height, bluePoints, GREY_BLUE, 1.4, [5, 7])
+      } else {
+        strokeBrush(bluePoints, BLUE, 1.5)
+      }
 
       // 红线（Echo 的回应）：streaming 时从左往右生长，振幅接正在播放的
-      // 音乐能量（絮语回复是文字流，无语音可接），笔端一颗洇开的墨点；
+      // 音乐能量（絮语回复是文字流，无语音可接），笔端一枚呼吸的笔锋；
       // searching 同律生长绿线（找歌）。
       if (isStreaming || isSearching) {
         const growth = reducedMotion ? 1 : Math.min(1, enteredAgo / 12000)
         if (isStreaming) {
           const redAmp = 3.5 + 13 * (reducedMotion ? 0 : smoothedEnergy)
-          const redFull = sampleLine((x) => 0.5 + 0.075 * Math.sin(x * 3.4 + 0.5) + 0.03 * Math.sin(x * 8), tt, redAmp, 1.05, 11.8)
+          const redFull = sampleLine((x) => 0.5 + 0.075 * Math.sin(x * 3.4 + 0.5) + 0.03 * Math.sin(x * 8) - converge(x) * 0.7, tt, redAmp, 1.05, 11.8)
           const red = clipToGrowth(redFull, growth)
-          strokeCurve(ctx, width, height, red, RED, 2)
+          strokeBrush(red, RED, 2.2)
           const tip = red[red.length - 1]
-          drawInkDot(tip[0] * width, tip[1] * height, RED, 7)
+          const prev = red[red.length - 2] ?? tip
+          const dx = tip[0] - prev[0]
+          const dy = tip[1] - prev[1]
+          const len = Math.hypot(dx, dy) || 1
+          drawBrushTip(tip[0] * width, tip[1] * height, dx / len, dy / len, RED, tt, 7)
         } else {
           const greenAmp = 3 + 8 * (reducedMotion ? 0 : smoothedEnergy)
-          const greenFull = sampleLine((x) => 0.44 + 0.09 * Math.sin(x * 2.9 + 2.1), tt, greenAmp, 0.9, 15.4)
+          const greenFull = sampleLine((x) => 0.44 + 0.09 * Math.sin(x * 2.9 + 2.1) - converge(x) * 0.6, tt, greenAmp, 0.9, 15.4)
           const green = clipToGrowth(greenFull, growth)
-          strokeCurve(ctx, width, height, green, FOREST, 1.5)
+          strokeBrush(green, FOREST, 1.6)
           const tip = green[green.length - 1]
-          drawInkDot(tip[0] * width, tip[1] * height, FOREST, 5)
+          const prev = green[green.length - 2] ?? tip
+          const dx = tip[0] - prev[0]
+          const dy = tip[1] - prev[1]
+          const len = Math.hypot(dx, dy) || 1
+          drawBrushTip(tip[0] * width, tip[1] * height, dx / len, dy / len, FOREST, tt, 5)
         }
         return
       }
 
-      strokeCurve(
-        ctx, width, height,
-        sampleLine((x) => 0.5 + 0.075 * Math.sin(x * 3.4 + 0.5) + 0.03 * Math.sin(x * 8), tt, 4, 0.7, 9.9),
-        isError ? GREY_RED : RED, 2, isError ? [3, 8] : undefined,
-      )
+      const redIdle = sampleLine((x) => 0.5 + 0.075 * Math.sin(x * 3.4 + 0.5) + 0.03 * Math.sin(x * 8) - converge(x) * 0.7, tt, 4, 0.7, 9.9)
+      if (isError) {
+        strokeCurve(ctx, width, height, redIdle, GREY_RED, 2, [3, 8])
+      } else {
+        strokeBrush(redIdle, RED, 2.2)
+      }
     }
 
     function drawWaveform(tt: number, voiceBoost: number) {
