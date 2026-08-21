@@ -301,7 +301,7 @@ export function VoicePage({
       if (failureRetryTimerRef.current) window.clearTimeout(failureRetryTimerRef.current)
       failureRetryTimerRef.current = window.setTimeout(() => {
         failureRetryTimerRef.current = null
-        if (!isActiveRef.current || !voiceContinuousRef.current || statusRef.current !== 'done') return
+        if (!voiceContinuousRef.current || statusRef.current !== 'done') return
         triggerContinuousSegment()
       }, 2000)
       return
@@ -329,34 +329,18 @@ export function VoicePage({
 
   useEffect(() => {
     if (isActive) return
-    if (failureRetryTimerRef.current) {
-      window.clearTimeout(failureRetryTimerRef.current)
-      failureRetryTimerRef.current = null
-    }
-    // 经导航离开（无显式退出按钮）：停 TTS 与墨线、恢复闪避音量、纸面回到落笔前。
-    if (statusRef.current !== 'idle') {
-      fadeRunRef.current += 1
-      if (musicTimerRef.current) {
-        window.clearTimeout(musicTimerRef.current)
-        musicTimerRef.current = null
-      }
-      stopTtsWave(true)
-      audioRef.current?.pause()
-      clearCurrentAudioUrl(false)
-      setProgress(0)
-      setNotice('')
-      setText('')
-      setStatus('idle')
-      restorePlaybackVolume().catch((error) => console.warn('[Voice] restore volume failed (leave page)', error))
-    }
-    if (sessionIdRef.current > 0) void endCurrentListeningSession().catch(() => undefined)
-  }, [endCurrentListeningSession, isActive, restorePlaybackVolume])
+    // 经导航离开：不重置纸面、不停 TTS——信在后台继续写（与连续音乐同一语义），
+    // 回到页面看到的就是进行中的界面。正式收尾只由纸面自己的「离开」按钮触发。
+  }, [isActive])
 
   useEffect(() => {
     if (!isActive) return
-    setEntering(true)
-    const timer = window.setTimeout(() => setEntering(false), 900)
-    return () => window.clearTimeout(timer)
+    // 写作进行中回来时不重放入场铺展动画——纸面已在场
+    if (statusRef.current === 'idle') {
+      setEntering(true)
+      const timer = window.setTimeout(() => setEntering(false), 900)
+      return () => window.clearTimeout(timer)
+    }
   }, [isActive])
 
   useEffect(() => {
@@ -385,7 +369,7 @@ export function VoicePage({
     const current = playbackState.current
 
     // 连续回声：检测背景音乐播完（track 变了或变成 null）→ 触发下一段（仅回声页面）
-    if (isActive && voiceContinuous && (statusRef.current === 'done' || statusRef.current === 'text-only-done') && musicStartedRef.current) {
+    if (voiceContinuous && (statusRef.current === 'done' || statusRef.current === 'text-only-done') && musicStartedRef.current) {
       if (shouldTriggerNextVoiceSegment({
         isActive,
         voiceContinuous,
@@ -643,7 +627,7 @@ export function VoicePage({
 
       const segment = await echo.listening.generateSegment({ continuation: automatic || continuation, automatic })
       sessionIdRef.current = segment.sessionId
-      if (!isActiveRef.current || (automatic && !voiceContinuousRef.current)) {
+      if (automatic && !voiceContinuousRef.current) {
         await endCurrentListeningSession().catch(() => undefined)
         setStatus('idle')
         return

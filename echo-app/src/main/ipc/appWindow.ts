@@ -8,20 +8,20 @@ export function registerAppWindowIpc(): void {
     await shell.openExternal(FEEDBACK_URL)
     return { ok: true }
   })
-  ipcMain.handle('app:minimizeToTray', () => {
-    BrowserWindow.getFocusedWindow()?.hide()
+  ipcMain.handle('app:minimizeToTray', (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.hide()
     return { ok: true }
   })
   ipcMain.handle('app:quit', () => {
     app.quit()
     return { ok: true }
   })
-  ipcMain.handle('window:minimize', () => {
-    BrowserWindow.getFocusedWindow()?.minimize()
+  ipcMain.handle('window:minimize', (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.minimize()
     return { ok: true }
   })
-  ipcMain.handle('window:setSizePreset', (_event, preset: unknown) => {
-    const target = BrowserWindow.getFocusedWindow()
+  ipcMain.handle('window:setSizePreset', (event, preset: unknown) => {
+    const target = BrowserWindow.fromWebContents(event.sender)
     if (!target) throw new Error('当前没有可调整的 Echo 窗口')
     if (!isWindowSizePreset(preset)) throw new Error('窗口尺寸档位无效')
     const size = windowSizeForPreset(preset)
@@ -33,8 +33,8 @@ export function registerAppWindowIpc(): void {
     target.setResizable(false)
     return { ok: true, preset, ...size }
   })
-  ipcMain.handle('window:close', () => {
-    BrowserWindow.getFocusedWindow()?.close()
+  ipcMain.handle('window:close', (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.close()
     return { ok: true }
   })
 }
