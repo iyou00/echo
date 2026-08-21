@@ -263,14 +263,16 @@ export function WindowField({ mode }: { mode: WindowFieldMode }) {
     }
 
     function drawWaveform(tt: number, voiceBoost: number) {
-      const center = height * 0.84
+      // 波形贴近底部（0.90），并与絮语输入区保持净空——
+      // 0.84 时能量峰值距输入框下沿只剩约 8px，某些窗口尺寸下会叠上。
+      const center = height * 0.9
       const barCount = 72
       const startX = width * 0.49
       const available = width - startX
       const energy = Math.min(1, Math.max(0.18, audioEnergyRef.current))
       for (let index = 0; index < barCount; index += 1) {
         const x = startX + (available * index) / (barCount - 1)
-        const amplitude = (7 + 18 * Math.abs(Math.sin(index * 0.43 + tt * 2.1))) * energy * voiceBoost
+        const amplitude = (6 + 14 * Math.abs(Math.sin(index * 0.43 + tt * 2.1))) * energy * voiceBoost
         const isAccent = index % 9 === 0
         ctx.strokeStyle = isAccent ? RED : MINT
         ctx.lineWidth = isAccent ? 3 : 2
@@ -280,10 +282,10 @@ export function WindowField({ mode }: { mode: WindowFieldMode }) {
         ctx.stroke()
       }
       strokeCurve(ctx, width, height, [
-        [0.48, 0.84],
-        [0.64, 0.84 - 14 / height],
-        [0.79, 0.84 + 11 / height],
-        [1, 0.84 - 7 / height],
+        [0.48, 0.9],
+        [0.64, 0.9 - 14 / height],
+        [0.79, 0.9 + 11 / height],
+        [1, 0.9 - 7 / height],
       ], WHITE, 1)
     }
 
