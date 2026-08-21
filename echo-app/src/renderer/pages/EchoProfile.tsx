@@ -72,11 +72,11 @@ function auditTimeLabel(value?: string) {
   return date.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })
 }
 
-function renderAuditEvent(item: MemoryAuditItem) {
+function renderAuditEvent(item: MemoryAuditItem, older = false) {
   const meterWidth = Math.round(Math.min(Math.max(item.weight ?? 0.4, 0.05), 1) * 100)
   const negative = item.kind === 'skip' || item.kind === 'explicit_miss'
   return (
-    <div className="ev-row" key={item.id}>
+    <div className={older ? 'ev-row older' : 'ev-row'} key={item.id}>
       <span className={`tag ${AUDIT_TAG_TONE[item.kind]}`}>{item.label || AUDIT_TAG_TEXT[item.kind]}</span>
       <span className="what">
         {item.title}
@@ -593,7 +593,7 @@ export function EchoProfilePage({ echo, navigate, profile, playbackState, setPla
             {status !== 'idle' && <div className={`d2-profile-status ${status}`}>{statusMessage}</div>}
 
             <div className="pf-hero-meta">
-              <span>{portraitUpdatedAt ? `画像更新于 ${displayDateTime(portraitUpdatedAt)}` : '画像 · 尚未生成'}</span>
+              <span className="pf-updated">{portraitUpdatedAt ? `画像更新于 ${displayDateTime(portraitUpdatedAt)}` : '画像 · 尚未生成'}</span>
               <div className="pf-hero-tools">
                 <button type="button" onClick={regenerate} disabled={profileBusy}>{profileBusy ? '正在重写…' : '更新理解'}</button>
                 <button type="button" onClick={() => navigate('settings')}>设置</button>
@@ -749,13 +749,13 @@ export function EchoProfilePage({ echo, navigate, profile, playbackState, setPla
           {memoryLoadState === 'loaded' && auditThisWeek.length > 0 && (
             <>
               <div className="ev-group">本 周</div>
-              {auditThisWeek.map(renderAuditEvent)}
+              {auditThisWeek.map((item) => renderAuditEvent(item, false))}
             </>
           )}
           {memoryLoadState === 'loaded' && auditEarlier.length > 0 && (
             <>
               <div className="ev-group">更 早</div>
-              {auditEarlier.map(renderAuditEvent)}
+              {auditEarlier.map((item) => renderAuditEvent(item, true))}
             </>
           )}
           {memoryLoadState === 'loaded' && profileVersions && profileVersions.length > 0 && (
@@ -820,6 +820,7 @@ export function EchoProfilePage({ echo, navigate, profile, playbackState, setPla
           <div className="sub-kicker pf-gap">你 纠 正 过 它</div>
           {auditCorrections.length > 0 ? auditCorrections.map((item) => (
             <div className="corr" key={item.id}>
+              <span className="corr-seal" aria-hidden="true">已改正</span>
               <q>{item.title}</q>
               <small>{[auditTimeLabel(item.createdAt), item.detail].filter(Boolean).join(' · ')}</small>
             </div>

@@ -11,6 +11,16 @@
   animation: profile-page-in 0.5s cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 
+/* 宣纸肌理：极淡的噪点让纸面有「料」，不再是一块平涂色 */
+.shell-page[data-page='profile'] .d2-profile::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
 @keyframes profile-page-in {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: none; }
@@ -53,6 +63,11 @@
   font: 11.5px/1.8 var(--d2-sans);
 }
 
+.pf-updated {
+  font: italic 500 12.5px/1.6 var(--d2-serif);
+  color: #455048;
+}
+
 .pf-hero-tools { margin-left: auto; display: flex; gap: 12px; }
 
 .pf-hero-tools button {
@@ -73,13 +88,25 @@
 .pf-dims {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 1px;
-  background: var(--d2-line);
-  border: 1px solid var(--d2-line);
+  gap: 14px;
   margin: 40px 0 48px;
 }
 
-.dim { background: var(--d2-paper); padding: 24px 26px 22px; }
+.dim {
+  background: #f7f9f3;
+  border: 1px solid var(--d2-line);
+  box-shadow: 0 1px 0 rgba(25, 32, 27, 0.04), 0 10px 24px -20px rgba(25, 32, 27, 0.35);
+  padding: 22px 26px 20px;
+  position: relative;
+}
+
+/* 首格是画像的主论断：标题升一档、首个标签实底——一眼分主次 */
+.dim:first-child h3 { font-size: 20px; }
+.dim:first-child .tags i:first-child {
+  background: var(--d2-forest);
+  border-color: var(--d2-forest);
+  color: #f5f5ec;
+}
 
 .dim > small {
   color: var(--d2-muted);
@@ -200,6 +227,10 @@
   text-align: right;
 }
 
+/* 更早的证据退后一层：时间纵深 */
+.ev-row.older { opacity: 0.55; }
+.ev-row.older .what { font-size: 13px; }
+
 /* —— 纠正区 —— */
 .corr {
   border-left: 2px solid var(--d2-red);
@@ -215,6 +246,21 @@
   color: var(--d2-muted);
   font: 11px/1.6 var(--d2-sans);
 }
+
+/* 手盖章：纠正记录右上一枚小红印，D1.3 的红在纸面第二次落点 */
+.corr-seal {
+  position: absolute;
+  top: 10px;
+  right: 2px;
+  padding: 3px 7px;
+  border: 1px solid rgba(228, 80, 54, 0.75);
+  color: rgba(228, 80, 54, 0.9);
+  font: 700 9px/1 var(--d2-sans);
+  letter-spacing: 2px;
+  transform: rotate(-4deg);
+  opacity: 0.85;
+}
+.corr { position: relative; padding-right: 76px; }
 
 .cross-link { margin-top: 18px; color: var(--d2-muted); font: 11.5px/1.8 var(--d2-sans); }
 
@@ -390,6 +436,15 @@
 }
 
 .d2-profile-row.current strong { color: var(--d2-red); }
+
+/* 代表曲目首行强调：画像最硬的证据升半档，其余保持行式节奏 */
+.d2-profile-row:first-of-type strong { font-size: 15.5px; }
+.d2-profile-row:first-of-type small::after {
+  content: " · 最能说明";
+  color: var(--d2-forest);
+  font-size: 10px;
+  letter-spacing: 1px;
+}
 
 .d2-profile-row-label {
   flex-shrink: 0;
