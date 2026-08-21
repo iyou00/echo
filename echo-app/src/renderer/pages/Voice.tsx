@@ -249,8 +249,15 @@ export function VoicePage({
 
   useEffect(() => {
     isActiveRef.current = isActive
-    // 离开回声页时收起封面：回来是阅读态，封面等下一段真正开始书写再淡入
-    if (!isActive) onWritingChange?.(false)
+    if (!isActive) {
+      // 离开收起封面（其他页不该挂着它）
+      onWritingChange?.(false)
+      return
+    }
+    // 回到正在书写/写完的纸面：封面重新亮起——状态跨页保留后不会自己触发
+    if (statusRef.current === 'speaking' || statusRef.current === 'done' || statusRef.current === 'text-only-done') {
+      onWritingChange?.(true)
+    }
   }, [isActive, onWritingChange])
 
   useEffect(() => {
