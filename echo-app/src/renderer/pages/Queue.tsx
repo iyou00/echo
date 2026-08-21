@@ -71,7 +71,7 @@ export function QueuePage({
   updateAutoPlayNext,
   boundary,
 }: QueuePageProps) {
-  const [tab, setTab] = useState<'now' | 'favorites' | 'past'>('now')
+  const [tab, setTab] = useState<'favorites' | 'past'>('favorites')
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [autoPlaySaving, setAutoPlaySaving] = useState(false)
   const [history, setHistory] = useState<QueueHistoryDay[]>([])
@@ -81,8 +81,8 @@ export function QueuePage({
   const [favoritesLoading, setFavoritesLoading] = useState(false)
   const [favoritePage, setFavoritePage] = useState(1)
   const [openDays, setOpenDays] = useState<Set<string>>(new Set())
-  const [historySelectMode, setHistorySelectMode] = useState(false)
-  const [selectedHistoryDates, setSelectedHistoryDates] = useState<Set<string>>(new Set())
+  const [libSearch, setLibSearch] = useState('')
+  const [searchPool, setSearchPool] = useState<Track[] | null>(null)
   const [notice, setNotice] = useState('')
   const noticeTimerRef = useRef<number | null>(null)
   const favoritesRef = useRef<Track[]>([])
@@ -134,12 +134,13 @@ export function QueuePage({
   }, [])
 
   useEffect(() => {
-    if (tab !== 'past') return
     let alive = true
     const timer = window.setTimeout(() => {
       echo.queue.history(7)
         .then((items) => {
-          if (alive) setHistory(items)
+          if (!alive) return
+          setHistory(items)
+          setOpenDays((current) => (current.size ? current : new Set(items[0]?.date ? [items[0].date] : [])))
         })
         .catch(() => {
           if (alive) setHistory([])
@@ -149,7 +150,25 @@ export function QueuePage({
       alive = false
       window.clearTimeout(timer)
     }
-  }, [echo, playbackHistoryKey, tab])
+  }, [echo, playbackHistoryKey])
+
+  useEffect(() => {
+    const q = libSearch.trim().toLowerCase()
+    if (!q) {
+      setSearchPool(null)
+      return
+    }
+    let alive = true
+    const timer = window.setTimeout(() => {
+      echo.favorites.list({ limit: 200, offset: 0 })
+        .then((items) => { if (alive) setSearchPool(items) })
+        .catch(() => { if (alive) setSearchPool([]) })
+    }, 250)
+    return () => {
+      alive = false
+      window.clearTimeout(timer)
+    }
+  }, [libSearch, echo])
 
   const refreshFavorites = useCallback(async (page?: number) => {
     const target = Math.max(1, page ?? favoritePageRef.current)
@@ -321,39 +340,21 @@ export function QueuePage({
     await refreshQueue()
   }
 
-  function toggleHistoryDate(date: string) {
-    setSelectedHistoryDates((items) => {
-      const next = new Set(items)
-      if (next.has(date)) next.delete(date)
-      else next.add(date)
-      return next
-    })
-  }
-
-  async function clearSelectedHistory() {
-    const dates = Array.from(selectedHistoryDates)
-    if (dates.length === 0) return
-    const nextHistory = await echo.queue.clearHistoryDates(dates)
+  async function clearOneDay(date: string) {
+    const nextHistory = await echo.queue.clearHistoryDates([date])
     setHistory(nextHistory)
-    setSelectedHistoryDates(new Set())
-    setHistorySelectMode(false)
     setOpenDays((items) => {
       const next = new Set(items)
-      for (const date of dates) next.delete(date)
+      next.delete(date)
       return next
     })
-  }
-
-  function cancelHistorySelect() {
-    setSelectedHistoryDates(new Set())
-    setHistorySelectMode(false)
   }
 
   const queueListRef = useRef<HTMLDivElement>(null)
   const [codaVisible, setCodaVisible] = useState(false)
 
   useEffect(() => {
-    if (tab !== 'now' || rest.length === 0) {
+    if (rest.length === 0) {
       setCodaVisible(false)
       return
     }
@@ -370,13 +371,17 @@ export function QueuePage({
       observer.disconnect()
       window.removeEventListener('resize', measure)
     }
-  }, [tab, rest.length])
+  }, [rest.length])
 
-  const queueCount = rest.length + (playing ? 1 : 0)
   const pastTotal = history.reduce((sum, day) => sum + day.tracks.length, 0)
   const queueEmpty = !playing && rest.length === 0 && favoriteTotal === 0
   const npProgress = playbackState.duration > 0 ? Math.min(100, (playbackState.position / playbackState.duration) * 100) : 0
   const favoriteTotalPages = Math.max(1, Math.ceil(favoriteTotal / FAVORITE_PAGE_SIZE))
+
+  const searchQuery = libSearch.trim().toLowerCase()
+  const searchHits = searchPool && searchQuery
+    ? searchPool.filter((track) => track.title.toLowerCase().includes(searchQuery) || track.artist.toLowerCase().includes(searchQuery))
+    : null
 
   return (
     <div className="d2-queue">
@@ -387,7 +392,7 @@ export function QueuePage({
             <div className="qf-empty">
               <div className="ring" aria-hidden="true">♪</div>
               <h2>{pageLabels.queue}还空着。</h2>
-              <p>想听什么，对 Echo 说一声，歌会到这里排队。收藏过的歌住在「收藏」页签里。</p>
+              <p>想听什么，对 Echo 说一声，歌会到这里排队。收藏过的歌住在「我的曲库」里。</p>
               <div className="qf-empty-cta">
                 <button className="qf-btn" type="button" onClick={() => runQueueAction(async () => { await echo.chat.send('随便来一首'); navigate('chat') }, '这会儿没能起歌，稍后再试试')}>让 Echo 挑一首</button>
                 <button className="qf-btn plain" type="button" onClick={() => navigate('chat')}>回到此刻</button>
@@ -396,331 +401,242 @@ export function QueuePage({
           )
       ) : (
         <>
-          <div className="qf-kicker">音 乐 与 队 列</div>
-          <div className="q-titlebar">
-            <h1>队列与收藏</h1>
-            <div className="tools">
-              <button
-                className={autoPlayNext ? 'd2-toggle on' : 'd2-toggle'}
-                type="button"
-                role="switch"
-                aria-checked={autoPlayNext}
-                onClick={() => runQueueAction(toggleAutoPlayNext, '自动连播设置失败')}
-                disabled={autoPlaySaving}
-                title={autoPlayNext ? '当前歌播完后自动接着下一首' : '当前歌播完后停住，手动点下一首仍可播放'}
-              >
-                <span>自动连播</span>
-                <i aria-hidden="true" />
-              </button>
-              {rest.length > 0 && (
+          <div className="qf-kicker">音 乐</div>
+
+          <section className="session-card">
+            <div className="session-head">
+              <h1>正在排的</h1>
+              <span className="session-meta">{rest.length > 0 ? `接下来 ${rest.length} 首 · 播完的自动进「听过」` : '没有排着的了'}</span>
+              <div className="session-actions">
                 <button
-                  className="qf-btn danger"
+                  className={autoPlayNext ? 'd2-toggle on' : 'd2-toggle'}
                   type="button"
-                  onClick={() => runQueueAction(clearQueue, '清空队列失败')}
-                  title="清空排在后面的歌，正在播放的不动"
+                  role="switch"
+                  aria-checked={autoPlayNext}
+                  onClick={() => runQueueAction(toggleAutoPlayNext, '自动连播设置失败')}
+                  disabled={autoPlaySaving}
+                  title={autoPlayNext ? '当前歌播完后自动接着下一首' : '当前歌播完后停住，手动点下一首仍可播放'}
                 >
-                  清空队列
+                  <span>自动连播</span>
+                  <i aria-hidden="true" />
                 </button>
-              )}
-            </div>
-          </div>
-
-          {playing && (
-            <div className="np-strip">
-              <div className="np-cov">{playing.artworkUrl ? <img src={playing.artworkUrl} alt="" /> : null}</div>
-              <div className="np-info">
-                <span className="np-t">{playing.title}</span>
-                <span className="np-a">{playing.artist}{playing.sceneLabel ? ` · ${playing.sceneLabel}` : ''}</span>
-              </div>
-              <div className="np-bar" aria-hidden="true"><i style={{ width: `${npProgress}%` }} /></div>
-              <span className="np-time">{formatClock(playbackState.position)} / {formatClock(playbackState.duration)}</span>
-            </div>
-          )}
-
-          {notice && <div className="d2-queue-notice" role="alert">{notice}</div>}
-
-          <div className="q-tabs" role="tablist" aria-label="队列视图">
-            <button type="button" role="tab" aria-selected={tab === 'now'} className={tab === 'now' ? 'on' : ''} onClick={() => setTab('now')}>队 列 <i>{queueCount}</i></button>
-            <button type="button" role="tab" aria-selected={tab === 'favorites'} className={tab === 'favorites' ? 'on' : ''} onClick={() => setTab('favorites')}>收 藏 <i>{favoriteTotal}</i></button>
-            <button type="button" role="tab" aria-selected={tab === 'past'} className={tab === 'past' ? 'on' : ''} onClick={() => setTab('past')}>听 过 <i>{pastTotal}</i></button>
-          </div>
-
-          {tab === 'now' && (
-            <>
-            <div ref={queueListRef}>
-              {rest.map((track, index) => {
-                const playbackIndex = playbackQueueIndex(track)
-                const canReorderPlaybackQueue = playbackIndex >= 0
-                const favorited = favoriteKeys.has(trackKey(track))
-                return (
-                  <div
-                    className={`q-row clickable${dragIndex === index ? ' dragging' : ''}`}
-                    draggable={canReorderPlaybackQueue}
-                    key={`${track.title}-${index}`}
-                    role="button"
-                    tabIndex={0}
-                    aria-label={`播放 ${track.title}`}
-                    onClick={() => runQueueAction(() => playNowTrack(track), '播放失败')}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault()
-                        runQueueAction(() => playNowTrack(track), '播放失败')
-                      }
-                    }}
-                    onDragStart={() => {
-                      if (canReorderPlaybackQueue) setDragIndex(index)
-                    }}
-                    onDragOver={(event) => {
-                      if (canReorderPlaybackQueue) event.preventDefault()
-                    }}
-                    onDrop={() => {
-                      if (dragIndex !== null && canReorderPlaybackQueue) {
-                        const fromIndex = dragIndex
-                        void runQueueAction(() => reorder(fromIndex, index), '队列排序失败')
-                      }
-                      setDragIndex(null)
-                    }}
-                    onDragEnd={() => setDragIndex(null)}
+                {rest.length > 0 && (
+                  <button
+                    className="qf-btn danger"
+                    type="button"
+                    onClick={() => runQueueAction(clearQueue, '清空待播失败')}
+                    title="清掉排着的歌，正在放的不动"
                   >
-                    <span className="drag" aria-hidden="true" onClick={(event) => event.stopPropagation()}>⠿</span>
-                    <div className="mini-cov">{track.artworkUrl ? <img src={track.artworkUrl} alt="" /> : '封面'}</div>
-                    <div className="q-meta">
-                      <div className="t">{track.title}</div>
-                      <div className="a">{track.artist}{track.year ? ` · ${track.year}` : ''}{track.sceneLabel ? ` · ${track.sceneLabel}` : ''}{!track.playUrl ? ' · 播不出来' : ''}</div>
-                    </div>
-                    <div className="ops" onClick={(event) => event.stopPropagation()}>
-                      <button
-                        className={favorited ? 'op-i fav-on' : 'op-i'}
-                        type="button"
-                        title={favorited ? '取消收藏' : '收藏'}
-                        onClick={() => runQueueAction(() => toggleFavorite(track), '收藏状态更新失败')}
-                      >
-                        ♥
-                      </button>
-                      <button
-                        className="op-i"
-                        type="button"
-                        title="移除"
-                        onClick={() => runQueueAction(() => removeTrack(track), '移除失败')}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  </div>
-                )
-              })}
+                    清空待播
+                  </button>
+                )}
+              </div>
             </div>
-            {codaVisible && (
-              <div className="queue-coda">
-                <div className="curve">
-                  <svg viewBox="0 0 380 64" fill="none" preserveAspectRatio="none">
-                    <path d="M6 52 C 90 52, 120 14, 190 30 S 300 50, 374 12" stroke="#184734" strokeWidth="1.4" />
-                    <path d="M6 14 C 90 14, 120 52, 190 36 S 300 16, 374 54" stroke="#e45036" strokeWidth="1.4" />
-                  </svg>
+
+            {playing && (
+              <div className="np-strip">
+                <div className="np-cov">{playing.artworkUrl ? <img src={playing.artworkUrl} alt="" /> : null}</div>
+                <div className="np-info">
+                  <span className="np-t">{playing.title}</span>
+                  <span className="np-a">{playing.artist}{playing.sceneLabel ? ` · ${playing.sceneLabel}` : ''}</span>
                 </div>
-                <div className="line">队列短，是因为今天才刚开始。</div>
-                <div className="cap">播完这几首，自动连播会接着挑 · ECHO</div>
+                <div className="np-bar" aria-hidden="true"><i style={{ width: `${npProgress}%` }} /></div>
+                <span className="np-time">{formatClock(playbackState.position)} / {formatClock(playbackState.duration)}</span>
               </div>
             )}
-            </>
+
+            {notice && <div className="d2-queue-notice" role="alert">{notice}</div>}
+
+            <div ref={queueListRef}>
+              {rest.length === 0 ? (
+                <div className="queue-zone-empty">排着的都放完了。<br />想听什么，对 Echo 说一声，或去下面曲库里挑一首。</div>
+              ) : (
+                rest.map((track, index) => {
+                  const playbackIndex = playbackQueueIndex(track)
+                  const canReorderPlaybackQueue = playbackIndex >= 0
+                  const favorited = favoriteKeys.has(trackKey(track))
+                  return (
+                    <div
+                      className={`q-row clickable${dragIndex === index ? ' dragging' : ''}`}
+                      draggable={canReorderPlaybackQueue}
+                      key={`${track.title}-${index}`}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`播放 ${track.title}`}
+                      onClick={() => runQueueAction(() => playNowTrack(track), '播放失败')}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault()
+                          runQueueAction(() => playNowTrack(track), '播放失败')
+                        }
+                      }}
+                      onDragStart={() => {
+                        if (canReorderPlaybackQueue) setDragIndex(index)
+                      }}
+                      onDragOver={(event) => {
+                        if (canReorderPlaybackQueue) event.preventDefault()
+                      }}
+                      onDrop={() => {
+                        if (dragIndex !== null && canReorderPlaybackQueue) {
+                          const fromIndex = dragIndex
+                          void runQueueAction(() => reorder(fromIndex, index), '队列排序失败')
+                        }
+                        setDragIndex(null)
+                      }}
+                      onDragEnd={() => setDragIndex(null)}
+                    >
+                      <span className="drag" aria-hidden="true" onClick={(event) => event.stopPropagation()}>⠿</span>
+                      <div className="mini-cov">{track.artworkUrl ? <img src={track.artworkUrl} alt="" /> : '封面'}</div>
+                      <div className="q-meta">
+                        <div className="t">{track.title}</div>
+                        <div className="a">{track.artist}{track.year ? ` · ${track.year}` : ''}{track.sceneLabel ? ` · ${track.sceneLabel}` : ''}{!track.playUrl ? ' · 播不出来' : ''}</div>
+                      </div>
+                      <div className="ops" onClick={(event) => event.stopPropagation()}>
+                        <button
+                          className={favorited ? 'op-i fav-on' : 'op-i'}
+                          type="button"
+                          title={favorited ? '取消收藏' : '收藏'}
+                          onClick={() => runQueueAction(() => toggleFavorite(track), '收藏状态更新失败')}
+                        >
+                          ♥
+                        </button>
+                        <button
+                          className="op-i"
+                          type="button"
+                          title="移除"
+                          onClick={() => runQueueAction(() => removeTrack(track), '移除失败')}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </section>
+
+          {codaVisible && (
+            <div className="queue-coda">
+              <div className="curve">
+                <svg viewBox="0 0 380 64" fill="none" preserveAspectRatio="none">
+                  <path d="M6 52 C 90 52, 120 14, 190 30 S 300 50, 374 12" stroke="#184734" strokeWidth="1.4" />
+                  <path d="M6 14 C 90 14, 120 52, 190 36 S 300 16, 374 54" stroke="#e45036" strokeWidth="1.4" />
+                </svg>
+              </div>
+              <div className="line">队列短，是因为今天才刚开始。</div>
+              <div className="cap">播完这几首，自动连播会接着挑 · ECHO</div>
+            </div>
           )}
 
+          <div className="sub-kicker">我 的 曲 库<span className="n">· 收藏与听过</span></div>
+          <div className="lib-tools">
+            <div className="lib-search">
+              <span aria-hidden="true">⌕</span>
+              <input value={libSearch} onChange={(event) => setLibSearch(event.target.value)} placeholder={tab === 'favorites' ? '搜歌名 / 歌手…' : '搜索在「收 藏」页签里'} disabled={tab !== 'favorites'} maxLength={40} />
+            </div>
+            <div className="lib-tabs" role="tablist" aria-label="曲库视图">
+              <button type="button" role="tab" aria-selected={tab === 'favorites'} className={tab === 'favorites' ? 'lib-tab on' : 'lib-tab'} onClick={() => setTab('favorites')}>收 藏 <i>{favoriteTotal}</i></button>
+              <button type="button" role="tab" aria-selected={tab === 'past'} className={tab === 'past' ? 'lib-tab on' : 'lib-tab'} onClick={() => setTab('past')}>听 过 <i>{pastTotal}</i></button>
+            </div>
+          </div>
+
           {tab === 'favorites' && (
-            favorites.length === 0 && !favoritesLoading ? (
-              <p className="qf-muted">还没收藏过歌呢。在{pageLabels.chat}里听到喜欢的，点歌曲卡片右上的 ♡，我帮你留着。</p>
+            searchHits ? (
+              searchHits.length === 0 ? (
+                <p className="qf-muted">曲库里没有「{libSearch.trim()}」。换个别的方式叫它试试。</p>
+              ) : (
+                <>
+                  <p className="qf-muted">匹配到 {searchHits.length} 首</p>
+                  {searchHits.slice(0, 100).map((track, index) => (
+                    <div className="q-row clickable no-drag" key={`${trackKey(track)}-s-${index}`} role="button" tabIndex={0} aria-label={`播放 ${track.title}`} onClick={() => runQueueAction(() => playFavorite(track), '播放失败')}
+                      onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); runQueueAction(() => playFavorite(track), '播放失败') } }}>
+                      <div className="mini-cov">{track.artworkUrl ? <img src={track.artworkUrl} alt="" /> : '封面'}</div>
+                      <div className="q-meta">
+                        <div className="t">{track.title}</div>
+                        <div className="a">{track.artist}{track.album ? ` · ${track.album}` : track.year ? ` · ${track.year}` : ''}</div>
+                      </div>
+                      <div className="ops" onClick={(event) => event.stopPropagation()}>
+                        <button className="op-i" type="button" title="插到队列" onClick={() => runQueueAction(async () => { setPlaybackState(await echo.playback.enqueue(asFreshPlaybackTrack(track, 'favorite'))); await refreshQueue() }, '加入队列失败')}>＋</button>
+                        <button className="op-i fav-on" type="button" title="取消收藏" onClick={() => runQueueAction(() => toggleFavorite(track), '收藏状态更新失败')}>♥</button>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )
             ) : (
-              <>
-                {favoritesLoading && favorites.length === 0 && <p className="qf-muted" role="status">正在读取收藏…</p>}
-                {favorites.map((track, index) => (
-                  <div
-                    className="q-row clickable no-drag"
-                    key={`${trackKey(track)}-${index}`}
-                    role="button"
-                    tabIndex={0}
-                    aria-label={`播放 ${track.title}`}
-                    onClick={() => runQueueAction(() => playFavorite(track), '播放失败')}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault()
-                        runQueueAction(() => playFavorite(track), '播放失败')
-                      }
-                    }}
-                  >
-                    <div className="mini-cov">{track.artworkUrl ? <img src={track.artworkUrl} alt="" /> : '封面'}</div>
-                    <div className="q-meta">
-                      <div className="t">{track.title}</div>
-                      <div className="a">{track.artist}{track.album ? ` · ${track.album}` : track.year ? ` · ${track.year}` : ''}{track.sceneLabel ? ` · ${track.sceneLabel}` : ''}</div>
+              favorites.length === 0 && !favoritesLoading ? (
+                <p className="qf-muted">还没收藏过歌呢。在{pageLabels.chat}里听到喜欢的，点歌曲卡片右上的 ♡，我帮你留着。</p>
+              ) : (
+                <>
+                  {favoritesLoading && favorites.length === 0 && <p className="qf-muted" role="status">正在读取收藏…</p>}
+                  {favorites.map((track, index) => (
+                    <div className="q-row clickable no-drag" key={`${trackKey(track)}-${index}`} role="button" tabIndex={0} aria-label={`播放 ${track.title}`} onClick={() => runQueueAction(() => playFavorite(track), '播放失败')}
+                      onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); runQueueAction(() => playFavorite(track), '播放失败') } }}>
+                      <div className="mini-cov">{track.artworkUrl ? <img src={track.artworkUrl} alt="" /> : '封面'}</div>
+                      <div className="q-meta">
+                        <div className="t">{track.title}</div>
+                        <div className="a">{track.artist}{track.album ? ` · ${track.album}` : track.year ? ` · ${track.year}` : ''}{track.sceneLabel ? ` · ${track.sceneLabel}` : ''}</div>
+                      </div>
+                      <div className="ops" onClick={(event) => event.stopPropagation()}>
+                        <button className="op-i" type="button" title="插到队列" onClick={() => runQueueAction(async () => { setPlaybackState(await echo.playback.enqueue(asFreshPlaybackTrack(track, 'favorite'))); await refreshQueue() }, '加入队列失败')}>＋</button>
+                        <button className="op-i fav-on" type="button" title="取消收藏" onClick={() => runQueueAction(() => toggleFavorite(track), '收藏状态更新失败')}>♥</button>
+                      </div>
                     </div>
-                    <div className="ops" onClick={(event) => event.stopPropagation()}>
-                      <button
-                        className="op-i"
-                        type="button"
-                        title="插到队列"
-                        onClick={() => runQueueAction(async () => {
-                          setPlaybackState(await echo.playback.enqueue(asFreshPlaybackTrack(track, 'favorite')))
-                          await refreshQueue()
-                        }, '加入队列失败')}
-                      >
-                        ＋
-                      </button>
-                      <button
-                        className="op-i fav-on"
-                        type="button"
-                        title="取消收藏"
-                        onClick={() => runQueueAction(() => toggleFavorite(track), '收藏状态更新失败')}
-                      >
-                        ♥
-                      </button>
+                  ))}
+                  {favoriteTotalPages > 1 && (
+                    <div className="pager">
+                      <button type="button" disabled={favoritePage <= 1 || favoritesLoading} onClick={() => runQueueAction(() => refreshFavorites(favoritePage - 1), '收藏加载失败')} aria-label="上一页">‹</button>
+                      {pageList(favoritePage, favoriteTotalPages).map((item, itemIndex) => (
+                        typeof item === 'number' ? (
+                          <button key={item} className={item === favoritePage ? 'cur' : ''} type="button" disabled={favoritesLoading} onClick={() => runQueueAction(() => refreshFavorites(item), '收藏加载失败')}>{item}</button>
+                        ) : <span key={`gap-${itemIndex}`}>…</span>
+                      ))}
+                      <button type="button" disabled={favoritePage >= favoriteTotalPages || favoritesLoading} onClick={() => runQueueAction(() => refreshFavorites(favoritePage + 1), '收藏加载失败')} aria-label="下一页">›</button>
+                      <span>共 {favoriteTotal} 首 · 每页 {FAVORITE_PAGE_SIZE}</span>
                     </div>
-                  </div>
-                ))}
-                {favoriteTotalPages > 1 && (
-                  <div className="pager">
-                    <button
-                      type="button"
-                      disabled={favoritePage <= 1 || favoritesLoading}
-                      onClick={() => runQueueAction(() => refreshFavorites(favoritePage - 1), '收藏加载失败')}
-                      aria-label="上一页"
-                    >‹</button>
-                    {pageList(favoritePage, favoriteTotalPages).map((item, itemIndex) => (
-                      typeof item === 'number' ? (
-                        <button
-                          key={item}
-                          className={item === favoritePage ? 'cur' : ''}
-                          type="button"
-                          disabled={favoritesLoading}
-                          onClick={() => runQueueAction(() => refreshFavorites(item), '收藏加载失败')}
-                        >{item}</button>
-                      ) : <span key={`gap-${itemIndex}`}>…</span>
-                    ))}
-                    <button
-                      type="button"
-                      disabled={favoritePage >= favoriteTotalPages || favoritesLoading}
-                      onClick={() => runQueueAction(() => refreshFavorites(favoritePage + 1), '收藏加载失败')}
-                      aria-label="下一页"
-                    >›</button>
-                    <span>共 {favoriteTotal} 首 · 每页 {FAVORITE_PAGE_SIZE}</span>
-                  </div>
-                )}
-              </>
+                  )}
+                </>
+              )
             )
           )}
 
           {tab === 'past' && (
             history.length === 0 ? (
-              <p className="qf-muted">过往还空着。Echo 推荐过的歌曲会按日期收在这里，等你多听几次就会有了。</p>
+              <p className="qf-muted">最近还没有留下听过的歌。Echo 推过的会按日期收在这里。</p>
             ) : (
-              <>
-                <div className="past-tools">
-                  {!historySelectMode ? (
-                    <button
-                      className="past-tool-link"
-                      type="button"
-                      onClick={() => setHistorySelectMode(true)}
-                      title={`按日期清空过往${pageLabels.queue}显示`}
-                    >
-                      按日期清除
-                    </button>
-                  ) : (
-                    <>
-                      <button
-                        className="past-tool-link"
-                        type="button"
-                        onClick={() => runQueueAction(clearSelectedHistory, '清空过往失败')}
-                        disabled={selectedHistoryDates.size === 0}
-                        title="只清空过往页显示，不影响画像和标签"
-                      >
-                        清空 {selectedHistoryDates.size || ''} 天
+              history.map((day) => {
+                const open = openDays.has(day.date)
+                return (
+                  <div className="qf-day" key={day.date}>
+                    <div className="ev-group qf-day-head">
+                      <button className="qf-day-toggle" type="button" onClick={() => { const next = new Set(openDays); if (next.has(day.date)) next.delete(day.date); else next.add(day.date); setOpenDays(next) }}>
+                        <span>{day.date} · {day.tracks.length} 首</span>
+                        <small>{open ? '收起' : '展开'}</small>
                       </button>
-                      <button className="past-tool-link" type="button" onClick={cancelHistorySelect} title="取消选择">取消</button>
-                    </>
-                  )}
-                </div>
-                {history.map((day) => {
-                  const open = openDays.has(day.date)
-                  const selected = selectedHistoryDates.has(day.date)
-                  return (
-                    <div className="qf-day" key={day.date}>
-                      <div className={selected ? 'ev-group qf-day-head selected' : 'ev-group qf-day-head'}>
-                        {historySelectMode && (
-                          <button
-                            className={selected ? 'd2-queue-check selected' : 'd2-queue-check'}
-                            type="button"
-                            onClick={() => toggleHistoryDate(day.date)}
-                            title={selected ? '取消选择' : '选择这个日期'}
-                            aria-pressed={selected}
-                          >
-                            {selected ? '✓' : ''}
-                          </button>
-                        )}
-                        <button
-                          className="qf-day-toggle"
-                          type="button"
-                          onClick={() => {
-                            if (historySelectMode) {
-                              toggleHistoryDate(day.date)
-                              return
-                            }
-                            const next = new Set(openDays)
-                            if (next.has(day.date)) next.delete(day.date)
-                            else next.add(day.date)
-                            setOpenDays(next)
-                          }}
-                        >
-                          <span>{day.date} · {day.tracks.length} 首</span>
-                          <small>{historySelectMode ? (selected ? '已选择' : '选择') : open ? '收起' : '展开'}</small>
-                        </button>
-                      </div>
-                      {open && day.tracks.map((track, index) => {
-                        const status = historyStatus(track)
-                        const favorited = favoriteKeys.has(trackKey(track))
-                        return (
-                          <div
-                            className={`past-row clickable ${status.className}`}
-                            key={`${day.date}-${track.title}-${index}`}
-                            role="button"
-                            tabIndex={0}
-                            aria-label={`再听一次 ${track.title}`}
-                            onClick={() => runQueueAction(() => playHistoryTrack(track, day.tracks), '播放失败')}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter' || event.key === ' ') {
-                                event.preventDefault()
-                                runQueueAction(() => playHistoryTrack(track, day.tracks), '播放失败')
-                              }
-                            }}
-                          >
-                            <div className="mini-cov">{track.artworkUrl ? <img src={track.artworkUrl} alt="" /> : '封面'}</div>
-                            <span className="t">{track.title} · {track.artist}</span>
-                            <div className="ops" onClick={(event) => event.stopPropagation()}>
-                              <button
-                                className="op-i"
-                                type="button"
-                                title="再听一次"
-                                onClick={() => runQueueAction(() => playHistoryTrack(track, day.tracks), '播放失败')}
-                              >
-                                ↺
-                              </button>
-                              <button
-                                className={favorited ? 'op-i fav-on' : 'op-i'}
-                                type="button"
-                                title={favorited ? '取消收藏' : '收藏'}
-                                onClick={() => runQueueAction(() => toggleFavorite(track), '收藏状态更新失败')}
-                              >
-                                ♥
-                              </button>
-                            </div>
-                            {(track.queueStatusAt ?? track.recommendedAt) ? <time>{formatClockOfDay(track.queueStatusAt ?? track.recommendedAt)}</time> : null}
-                          </div>
-                        )
-                      })}
+                      <button className="clear-day" type="button" onClick={() => runQueueAction(() => clearOneDay(day.date), '清除失败')} title="只清掉这天的过往记录，不影响画像">清除这天</button>
                     </div>
-                  )
-                })}
-              </>
+                    {open && day.tracks.map((track, index) => {
+                      const status = historyStatus(track)
+                      const favorited = favoriteKeys.has(trackKey(track))
+                      return (
+                        <div className={`past-row clickable ${status.className}`} key={`${day.date}-${track.title}-${index}`} role="button" tabIndex={0} aria-label={`再听一次 ${track.title}`} onClick={() => runQueueAction(() => playHistoryTrack(track, day.tracks), '播放失败')}
+                          onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); runQueueAction(() => playHistoryTrack(track, day.tracks), '播放失败') } }}>
+                          <div className="mini-cov">{track.artworkUrl ? <img src={track.artworkUrl} alt="" /> : '封面'}</div>
+                          <span className="t">{track.title} · {track.artist}</span>
+                          <div className="ops" onClick={(event) => event.stopPropagation()}>
+                            <button className="op-i" type="button" title="再听一次" onClick={() => runQueueAction(() => playHistoryTrack(track, day.tracks), '播放失败')}>↺</button>
+                            <button className={favorited ? 'op-i fav-on' : 'op-i'} type="button" title={favorited ? '取消收藏' : '收藏'} onClick={() => runQueueAction(() => toggleFavorite(track), '收藏状态更新失败')}>♥</button>
+                          </div>
+                          {(track.queueStatusAt ?? track.recommendedAt) ? <time>{formatClockOfDay(track.queueStatusAt ?? track.recommendedAt)}</time> : null}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })
             )
           )}
-
-          <footer className="d2-queue-foot">共 {tab === 'past' ? pastTotal : tab === 'favorites' ? favoriteTotal : queueCount} 首 · 由 Echo 编排</footer>
         </>
       )}
     </div>

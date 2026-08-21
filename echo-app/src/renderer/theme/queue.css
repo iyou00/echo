@@ -23,33 +23,44 @@
 .shell-page[data-page='queue'] .d2-queue::-webkit-scrollbar { width: 4px; }
 .shell-page[data-page='queue'] .d2-queue::-webkit-scrollbar-thumb { background: var(--d2-line); }
 
-.qf-kicker {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 14px;
-  color: var(--d2-red);
-  font: 700 10px/1 var(--d2-sans);
-  letter-spacing: 3px;
+/* —— 会话卡：正在排的（微亮卡面 + 轻影，同品味页层次语言） —— */
+.session-card {
+  background: #f7f9f3;
+  border: 1px solid var(--d2-line);
+  box-shadow: 0 1px 0 rgba(25, 32, 27, 0.04), 0 10px 24px -20px rgba(25, 32, 27, 0.35);
+  padding: 20px 26px 8px;
 }
 
-.qf-kicker::before { width: 28px; height: 1px; background: var(--d2-red); content: ""; }
-
-/* —— 标题栏工具 —— */
-.q-titlebar {
+.session-head {
   display: flex;
   align-items: baseline;
-  gap: 22px;
-  margin-bottom: 16px;
+  gap: 14px;
 }
 
-.q-titlebar h1 {
+.session-head h1 {
   margin: 0;
   color: var(--d2-ink);
-  font: 500 26px/1.4 var(--d2-serif);
+  font: 500 24px/1.4 var(--d2-serif);
 }
 
-.q-titlebar .tools { margin-left: auto; display: flex; align-items: center; gap: 18px; }
+.session-meta {
+  color: var(--d2-muted);
+  font: 12px/1.8 var(--d2-sans);
+}
+
+.session-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.queue-zone-empty {
+  padding: 26px 0 28px;
+  text-align: center;
+  color: var(--d2-muted);
+  font: 13px/1.9 var(--d2-sans);
+}
 
 .d2-toggle {
   display: inline-flex;
@@ -154,19 +165,60 @@
   font: 11px/1.6 var(--d2-sans);
 }
 
-/* —— 三页签 —— */
-.q-tabs {
+/* —— 曲库：搜索 + 二级页签 —— */
+.sub-kicker {
   display: flex;
-  gap: 26px;
-  border-bottom: 1px solid var(--d2-line);
-  margin: 18px 0 4px;
+  align-items: center;
+  gap: 10px;
+  margin: 40px 0 18px;
+  color: var(--d2-ink);
+  font: 700 11px/1 var(--d2-sans);
+  letter-spacing: 2.5px;
 }
 
-.q-tabs button {
-  padding: 10px 2px 12px;
+.sub-kicker::after { content: ""; flex: 1; height: 1px; background: var(--d2-line); }
+.sub-kicker .n { color: var(--d2-muted); font-weight: 400; letter-spacing: 1px; }
+
+.lib-tools {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 6px;
+}
+
+.lib-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 260px;
+  border-bottom: 1px solid var(--d2-line);
+  padding: 6px 2px;
+  color: var(--d2-muted);
+  font: 13px/1.6 var(--d2-sans);
+}
+
+.lib-search input {
+  border: 0;
+  background: none;
+  outline: none;
+  font: inherit;
+  color: var(--d2-ink);
+  flex: 1;
+}
+
+.lib-search input:disabled { opacity: 0.5; }
+
+.lib-tabs {
+  display: flex;
+  gap: 22px;
+  margin-left: auto;
+}
+
+.lib-tab {
   border: 0;
   background: none;
   cursor: pointer;
+  padding: 10px 2px 12px;
   color: var(--d2-muted);
   font: 13px/1 var(--d2-sans);
   letter-spacing: 2px;
@@ -174,14 +226,9 @@
   margin-bottom: -1px;
 }
 
-.q-tabs button i {
-  font-style: normal;
-  font-size: 10.5px;
-  margin-left: 4px;
-  letter-spacing: 0;
-}
+.lib-tab i { font-style: normal; font-size: 10.5px; margin-left: 4px; letter-spacing: 0; }
 
-.q-tabs button.on {
+.lib-tab.on {
   color: var(--d2-ink);
   font-weight: 600;
   border-bottom-color: var(--d2-red);
@@ -271,31 +318,17 @@
 .op-i.fav-on { color: var(--d2-red); }
 
 /* —— 听过（按日分组） —— */
-.past-tools {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin: 4px 0 14px;
-}
-
-.past-tool-link {
-  padding: 0 0 2px;
+.clear-day {
   border: 0;
-  border-bottom: 1px solid var(--d2-line);
-  background: transparent;
+  background: none;
   color: var(--d2-muted);
-  font: 11px/1.4 var(--d2-sans);
+  font: 10px/1 var(--d2-sans);
   letter-spacing: 1px;
   cursor: pointer;
-  transition: color 0.15s ease, border-color 0.15s ease;
+  border-bottom: 1px solid transparent;
 }
 
-.past-tool-link:hover:not(:disabled) {
-  border-bottom-color: var(--d2-red);
-  color: var(--d2-red);
-}
-
-.past-tool-link:disabled { opacity: 0.45; cursor: default; }
+.clear-day:hover { color: var(--d2-red); border-bottom-color: var(--d2-red); }
 
 .qf-day-head { margin-bottom: 2px; }
 

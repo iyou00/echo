@@ -194,7 +194,7 @@ step('home restored after reply', await evalJson('(() => { const c = document.qu
 // —— 4.5 顶栏队列入口：播放中也必须可达，进入后播放卡收起、页签在 ——
 const queueViaNav = await click('.d2-nav-button[aria-label="队列"]')
 await sleep(1000)
-const queueNavChecks = await checkVisible('queue-nav', ['.shell-page[data-page="queue"] .d2-queue', '.q-tabs'])
+const queueNavChecks = await checkVisible('queue-nav', ['.shell-page[data-page="queue"] .d2-queue', '.session-card'])
 const playerHidden = await evalJson(`(() => { const p = document.querySelector('.global-player'); if (!p) return true; const cs = getComputedStyle(p); return cs.opacity === '0' || cs.display === 'none' })()`)
 step('queue via top nav (music playing)', queueViaNav && queueNavChecks.length === 0, queueNavChecks.join(','))
 step('player card hidden on queue page', playerHidden)
@@ -208,12 +208,22 @@ const qOpened = await click('[aria-label="打开队列"]')
 await sleep(1100)
 step('queue: opened from player', qOpened)
 if (qOpened) {
-  for (const [label, idx] of [['queue', 1], ['favorites', 2], ['past', 3], ['queue-back', 1]]) {
-    await click(`.q-tabs button:nth-child(${idx})`)
+  // 曲库区在页面下方，需滚动——只断言存在且有尺寸
+  const sessionOk = await evalJson(`(() => {
+    const misses = []
+    for (const sel of ['.session-card', '.session-head h1', '.lib-tools', '.lib-tab']) {
+      const el = document.querySelector(sel)
+      if (!el || el.getBoundingClientRect().width === 0) misses.push(sel)
+    }
+    return misses
+  })()`)
+  step('queue: session card + library tools', sessionOk.length === 0, sessionOk.join(','))
+  for (const label of ['favorites', 'past', 'favorites']) {
+    await click(label === 'favorites' ? '.lib-tab:nth-child(1)' : '.lib-tab:nth-child(2)')
     await sleep(450)
   }
-  const qChecks = await checkVisible('queue', ['.q-tabs'])
-  step('queue: tabs cycle', qChecks.length === 0, qChecks.join(','))
+  const libOk = await evalJson(`(() => { const el = document.querySelector('.lib-tab.on'); return el && el.getBoundingClientRect().width > 0 })()`)
+  step('queue: library tabs cycle', libOk === true)
   await click('.d2-brand')
   await sleep(800)
 }
