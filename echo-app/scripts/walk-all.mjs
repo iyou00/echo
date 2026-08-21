@@ -191,6 +191,16 @@ const replyArrived = await evalJson(`window.echo.chat.loadRecent(2).then((msgs) 
 step('ask: assistant reply arrived', Boolean(replyArrived), asked)
 step('home restored after reply', await evalJson('(() => { const c = document.querySelector(\'.chat-page\'); if (!c) return false; const r = c.getBoundingClientRect(); return r.width > 0 })()'))
 
+// —— 4.5 顶栏队列入口：播放中也必须可达，进入后播放卡收起、页签在 ——
+const queueViaNav = await click('.d2-nav-button[aria-label="队列"]')
+await sleep(1000)
+const queueNavChecks = await checkVisible('queue-nav', ['.shell-page[data-page="queue"] .d2-queue', '.q-tabs'])
+const playerHidden = await evalJson(`(() => { const p = document.querySelector('.global-player'); if (!p) return true; const cs = getComputedStyle(p); return cs.opacity === '0' || cs.display === 'none' })()`)
+step('queue via top nav (music playing)', queueViaNav && queueNavChecks.length === 0, queueNavChecks.join(','))
+step('player card hidden on queue page', playerHidden)
+await click('.d2-brand')
+await sleep(800)
+
 // —— 5. 队列页：入口+三页签 ——
 await evalJson(`window.echo.queue.history(7).then((days) => { const t = days.flatMap((d) => d.tracks)[0]; if (!t) return 'nohist'; return window.echo.playback.play({ ...t, sourceContext: 'history' }).then(() => 'played').catch((e) => 'ERR:' + e.message) }).catch(() => 'nohist'); 'dispatched'`)
 await sleep(2500)
@@ -218,8 +228,8 @@ const resize = async (w, h) => {
 }
 for (const [name, w, h] of [['compact', 1152, 720], ['standard', 1280, 800], ['large', 1440, 900]]) {
   await resize(w, h)
-  const nav = await evalJson(`(() => { const btns = [...document.querySelectorAll('.d2-nav-button')]; return btns.filter((b) => { const r = b.getBoundingClientRect(); return r.width > 0 }).length })()`)
-  step(`window ${name}: 4 nav buttons laid out`, nav === 4, 'count=' + nav)
+  const nav = await evalJson(`(() => { const btns = [...document.querySelectorAll('.d2-nav-button')]; return btns.filter((b) => { const r = b.getBoundingClientRect(); return r.width > 0 && r.right <= window.innerWidth }).length })()`)
+  step(`window ${name}: 5 nav buttons laid out`, nav === 5, 'count=' + nav)
 }
 await resize(1280, 800)
 

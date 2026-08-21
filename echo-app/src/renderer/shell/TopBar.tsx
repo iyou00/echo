@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { MessageCircle, Mic2, Settings, UserRound } from 'lucide-react'
+import { ListMusic, MessageCircle, Mic2, Settings, UserRound } from 'lucide-react'
 import type { PageKey } from '../appState'
 import { WindowControls } from '../components'
 import { getEchoApi } from '../api'
@@ -12,6 +12,7 @@ const mainDestinations: Array<{ key: PageKey; label: string; icon: typeof Messag
   { key: 'yinyi', label: '风信', icon: MessageCircle },
   { key: 'voice', label: '回声', icon: Mic2 },
   { key: 'profile', label: '品味', icon: UserRound },
+  { key: 'queue', label: '队列', icon: ListMusic },
   { key: 'settings', label: '设置', icon: Settings },
 ]
 
