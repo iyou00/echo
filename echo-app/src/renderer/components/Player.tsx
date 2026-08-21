@@ -788,23 +788,23 @@ export function Player({ echo, state, setState, refreshQueue, autoPlayNext, curr
             </div>
             <div className="d2-progress-time"><span>{formatClock(currentTime)}</span><span>{formatClock(displayDuration)}</span></div>
           </div>
-        </div>
-        <div className="d2-listening-status">
-          <span>{voiceContinuous ? '连续回声 · 正在继续' : '安静陪伴'}</span>
-          <label className="d2-volume-control d2-listen-volume" title={`音量 ${state.volume}%`}>
-            <Volume2 size={13} aria-hidden="true" />
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={state.volume}
-              aria-label="播放音量"
-              onChange={(event) => {
-                void echo.playback.setVolume(Number(event.target.value)).then(setState).catch(() => undefined)
-              }}
-            />
-          </label>
-          <strong>{canPlayNext ? '下一首已经接好' : '听完这一首再决定'}</strong>
+          <div className="d2-listen-status-line">
+            <span>{voiceContinuous ? '连续回声 · 正在继续' : '安静陪伴'}</span>
+            <label className="d2-volume-control d2-listen-volume" title={`音量 ${state.volume}%`}>
+              <Volume2 size={13} aria-hidden="true" />
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={state.volume}
+                aria-label="播放音量"
+                onChange={(event) => {
+                  void echo.playback.setVolume(Number(event.target.value)).then(setState).catch(() => undefined)
+                }}
+              />
+            </label>
+            <strong>{canPlayNext ? '下一首已经接好' : '听完这一首再决定'}</strong>
+          </div>
         </div>
         <WaveBars active={localPlaying} levels={audioLevels} />
       </section>

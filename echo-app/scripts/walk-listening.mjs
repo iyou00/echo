@@ -82,6 +82,8 @@ for (const [win, expectW, expectH] of [['compact', 1152, 720], ['standard', 1280
     main: '.d2-listen-controls > button.main',
     next: '.d2-listen-controls > button:nth-child(3)',
     progress: '.d2-listen-controls .seg-track',
+    statusLine: '.d2-listen-status-line',
+    volume: '.d2-listen-volume input',
     composer: '.composer.scene-composer',
     returnBtn: '.d2-now-return',
     topbar: '.d2-topbar',
@@ -89,6 +91,8 @@ for (const [win, expectW, expectH] of [['compact', 1152, 720], ['standard', 1280
   const vw = await evalJson('window.innerWidth'), vh = await evalJson('window.innerHeight')
   for (const k of Object.keys(g)) step(`${win}: ${k} in viewport`, inViewport(g[k], vw, vh), g[k] ? JSON.stringify(g[k]) : 'missing')
   step(`${win}: controls not over composer`, !overlap(g.controls, g.composer))
+  step(`${win}: status line not over composer`, !overlap(g.statusLine, g.composer))
+  step(`${win}: volume not over composer`, !overlap(g.volume, g.composer))
   step(`${win}: card not over composer`, !overlap(g.card, g.composer))
   step(`${win}: return btn sits in card top zone`, Boolean(g.returnBtn) && g.returnBtn.t >= (g.card?.t ?? 0) && g.returnBtn.b <= (g.card?.t ?? 0) + 80)
 }
