@@ -23,6 +23,19 @@
 .shell-page[data-page='queue'] .d2-queue::-webkit-scrollbar { width: 4px; }
 .shell-page[data-page='queue'] .d2-queue::-webkit-scrollbar-thumb { background: var(--d2-line); }
 
+/* —— 红色眉标（与其他页面的 E C H O ××× kicker 同语言） —— */
+.qf-kicker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  color: var(--d2-red);
+  font: 700 10px/1 var(--d2-sans);
+  letter-spacing: 3px;
+}
+
+.qf-kicker::before { width: 28px; height: 1px; background: var(--d2-red); content: ""; }
+
 /* —— 会话卡：正在排的（微亮卡面 + 轻影，同品味页层次语言） —— */
 .session-card {
   background: #f7f9f3;
