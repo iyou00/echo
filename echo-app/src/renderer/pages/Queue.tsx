@@ -350,28 +350,7 @@ export function QueuePage({
     })
   }
 
-  const queueListRef = useRef<HTMLDivElement>(null)
-  const [codaVisible, setCodaVisible] = useState(false)
 
-  useEffect(() => {
-    if (rest.length === 0) {
-      setCodaVisible(false)
-      return
-    }
-    const el = queueListRef.current
-    if (!el || typeof ResizeObserver === 'undefined') return
-    const measure = () => {
-      setCodaVisible(window.innerHeight - el.getBoundingClientRect().bottom >= 240)
-    }
-    measure()
-    const observer = new ResizeObserver(measure)
-    observer.observe(el)
-    window.addEventListener('resize', measure)
-    return () => {
-      observer.disconnect()
-      window.removeEventListener('resize', measure)
-    }
-  }, [rest.length])
 
   const pastTotal = history.reduce((sum, day) => sum + day.tracks.length, 0)
   const queueEmpty = !playing && rest.length === 0 && favoriteTotal === 0
@@ -447,7 +426,7 @@ export function QueuePage({
 
             {notice && <div className="d2-queue-notice" role="alert">{notice}</div>}
 
-            <div ref={queueListRef}>
+            <div>
               {rest.length === 0 ? (
                 <div className="queue-zone-empty">排着的都放完了。<br />想听什么，对 Echo 说一声，或去下面曲库里挑一首。</div>
               ) : (
@@ -516,24 +495,11 @@ export function QueuePage({
             </div>
           </section>
 
-          {codaVisible && (
-            <div className="queue-coda">
-              <div className="curve">
-                <svg viewBox="0 0 380 64" fill="none" preserveAspectRatio="none">
-                  <path d="M6 52 C 90 52, 120 14, 190 30 S 300 50, 374 12" stroke="#184734" strokeWidth="1.4" />
-                  <path d="M6 14 C 90 14, 120 52, 190 36 S 300 16, 374 54" stroke="#e45036" strokeWidth="1.4" />
-                </svg>
-              </div>
-              <div className="line">队列短，是因为今天才刚开始。</div>
-              <div className="cap">播完这几首，自动连播会接着挑 · ECHO</div>
-            </div>
-          )}
-
           <div className="sub-kicker">我 的 曲 库<span className="n">· 收藏与听过</span></div>
           <div className="lib-tools">
             <div className="lib-search">
               <span aria-hidden="true">⌕</span>
-              <input value={libSearch} onChange={(event) => setLibSearch(event.target.value)} placeholder={tab === 'favorites' ? '搜歌名 / 歌手…' : '搜索在「收 藏」页签里'} disabled={tab !== 'favorites'} maxLength={40} />
+              <input value={libSearch} onChange={(event) => { setLibSearch(event.target.value); if (event.target.value.trim()) setTab('favorites') }} placeholder="搜歌名 / 歌手…" maxLength={40} />
             </div>
             <div className="lib-tabs" role="tablist" aria-label="曲库视图">
               <button type="button" role="tab" aria-selected={tab === 'favorites'} className={tab === 'favorites' ? 'lib-tab on' : 'lib-tab'} onClick={() => setTab('favorites')}>收 藏 <i>{favoriteTotal}</i></button>
@@ -612,7 +578,6 @@ export function QueuePage({
                     <div className="ev-group qf-day-head">
                       <button className="qf-day-toggle" type="button" onClick={() => { const next = new Set(openDays); if (next.has(day.date)) next.delete(day.date); else next.add(day.date); setOpenDays(next) }}>
                         <span>{day.date} · {day.tracks.length} 首</span>
-                        <small>{open ? '收起' : '展开'}</small>
                       </button>
                       <button className="clear-day" type="button" onClick={() => runQueueAction(() => clearOneDay(day.date), '清除失败')} title="只清掉这天的过往记录，不影响画像">清除这天</button>
                     </div>

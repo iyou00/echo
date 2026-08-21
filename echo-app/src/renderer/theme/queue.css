@@ -330,49 +330,23 @@
 
 .clear-day:hover { color: var(--d2-red); border-bottom-color: var(--d2-red); }
 
-.qf-day-head { margin-bottom: 2px; }
-
-.qf-day-head.selected .qf-day-toggle span { color: var(--d2-forest); }
-
-.d2-queue-check {
-  display: grid;
-  place-items: center;
-  width: 14px;
-  height: 14px;
-  border: 1px solid var(--d2-muted);
-  border-radius: 0;
-  background: transparent;
-  color: var(--d2-ink);
-  font: 10px/1 var(--d2-sans);
-  cursor: pointer;
-}
-
-.d2-queue-check.selected {
-  border-color: var(--d2-forest);
-  background: var(--d2-forest);
-  color: #f5f5ec;
+/* 组头：日期在细线上，清除这天靠右（按原型） */
+.qf-day-head {
+  margin-bottom: 2px;
 }
 
 .qf-day-toggle {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 12px;
-  padding: 6px 0 2px;
   border: 0;
-  background: transparent;
+  background: none;
+  padding: 0;
   color: var(--d2-muted);
   font: 700 10px/1.4 var(--d2-sans);
-  letter-spacing: 2px;
+  letter-spacing: 2.5px;
   cursor: pointer;
   text-align: left;
 }
 
-.qf-day-toggle small {
-  color: var(--d2-muted);
-  font: 10px/1.4 var(--d2-sans);
-  letter-spacing: 0.5px;
-}
+.qf-day-toggle:hover { color: var(--d2-ink); }
 
 .past-row {
   display: grid;
@@ -425,39 +399,6 @@
 .pager button:disabled { opacity: 0.45; cursor: default; }
 
 .pager > span { color: var(--d2-muted); font: 11px/1 var(--d2-sans); letter-spacing: 1px; }
-
-/* —— 稀疏收尾区：一句文案 + 品牌曲线，零功能。
-   出现规则：列表底沿距视口底 ≥ 240px（组件内 ResizeObserver 度量）。 —— */
-.queue-coda {
-  margin-top: 40px;
-  padding: 44px 0 30px;
-  border-top: 1px solid var(--d2-line);
-  display: grid;
-  justify-items: center;
-  gap: 22px;
-}
-
-.queue-coda .curve {
-  width: min(380px, 52%);
-  height: 64px;
-  position: relative;
-}
-
-.queue-coda .curve svg { width: 100%; height: 100%; opacity: 0.5; }
-
-.queue-coda .line {
-  color: var(--d2-muted);
-  font: 500 17px/1.9 var(--d2-serif);
-  text-align: center;
-  max-width: 460px;
-}
-
-.queue-coda .cap {
-  color: var(--d2-muted);
-  font: 10.5px/1 var(--d2-sans);
-  letter-spacing: 2px;
-  opacity: 0.8;
-}
 
 /* —— 空态与零散件 —— */
 .qf-muted { margin: 16px 0; color: var(--d2-muted); font: 12.5px/1.8 var(--d2-serif); }
