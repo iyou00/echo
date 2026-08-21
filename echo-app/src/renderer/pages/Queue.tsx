@@ -380,7 +380,7 @@ export function QueuePage({
           )
       ) : (
         <>
-          <div className="qf-kicker">音 乐</div>
+          <div className="qf-kicker">E C H O 的 音 乐</div>
 
           <section className="session-card">
             <div className="session-head">
