@@ -50,6 +50,18 @@ describe('taste portrait boundaries', () => {
     expect(profile.profile_meta?.portraitRefreshOutcome).toBeUndefined()
   })
 
+
+  it('rejects truncated JSON remnants instead of publishing them as portraits', () => {
+    const truncated = '{"portrait":"你像是在试着把自己往有劲的方向带，但落下来的时候，还是愿意停在偏静一点的歌里。欧美流行走得勤，偶尔也会冒出几句韩语，看起来你并不打算只守一个口味。我拿不准这是想找新鲜，还是真想换个状态。你也挺清楚自己要什么，不对的歌'
+    expect(tasteTestHelpers.parsePortraitResponse(truncated)).toBeNull()
+  })
+
+  it('still accepts a genuine plain-text portrait without JSON scaffolding', () => {
+    const plain = '你最近像是在给自己找一点往前走的声音。前面偏安静，后来开始要更有劲、更亮一点的歌。熟悉的旋律对你还有用，但你最近也愿意让新歌进来一点。我还想看清，你是在找陪伴，还是想换个更有精神的自己。'
+    const parsed = tasteTestHelpers.parsePortraitResponse(plain)
+    expect(parsed?.portrait).toBe(plain)
+  })
+
   it('maps portrait LLM failures to stable product errors', () => {
     expect(tasteTestHelpers.portraitRegenerationErrorFor(new LlmError('LLM 配置还没填完整', 'config')).message)
       .toBe('模型配置还没准备好，画像文案没有刷新。')

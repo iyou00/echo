@@ -1758,7 +1758,10 @@ function parsePortraitResponse(text: string): PortraitResponse | null {
 
   const plain = stripLlmScaffolding(text)
   const compactLength = Array.from(plain.replace(/\s+/g, '')).length
-  if (/你/.test(plain) && compactLength >= 70 && compactLength <= 180) {
+  // 结构性拒收：截断的 JSON 残骸（裸 { 开头、悬空引号/冒号结尾、残留 JSON 键）
+  // 不能当作画像正文发布——宁可走保留旧画像/本地兜底。
+  const looksLikeJsonRemnant = plain.startsWith('{') || plain.endsWith('"') || plain.endsWith(',') || /":\s/.test(plain)
+  if (!looksLikeJsonRemnant && /你/.test(plain) && compactLength >= 70 && compactLength <= 180) {
     return {
       portrait: plain,
       summary: plain.slice(0, 150),
@@ -2422,6 +2425,7 @@ function portraitRegenerationResult(profile: TasteProfile, outcome: 'published' 
 }
 
 export const tasteTestHelpers = {
+  parsePortraitResponse,
   effectiveProfilePlayCount,
   profileTrackAgencyFactor,
   shouldKeepPublishedPortrait,
@@ -2620,7 +2624,7 @@ export async function regeneratePortrait(options: RegeneratePortraitOptions = {}
       { role: 'system', content: `${buildSoulPolicyPrompt('portrait')}\n\n${prompt}` },
       { role: 'user', content: userPrompt },
     ]
-    const response = await completeChat(settings, messages, { temperature: 0.9, signal: options.signal, maxTokens: 800 })
+    const response = await completeChat(settings, messages, { temperature: 0.9, signal: options.signal, maxTokens: 1400 })
     assertPortraitActive(options.signal)
     let parsed = parsePortraitResponse(response)
     const issues = parsed?.portrait ? portraitV2Issues(parsed.portrait, profile, portraitEvidence) : ['没有返回 portrait']
@@ -2637,7 +2641,7 @@ export async function regeneratePortrait(options: RegeneratePortraitOptions = {}
           content: `上一版没有通过画像 checklist: ${issues.join('；')}${artistHint}
 请重写一次。只输出一个 JSON 对象,不要 Markdown,不要解释。字段只包含 portrait、summary、suggested_questions。`,
         },
-      ], { temperature: 0.9, signal: options.signal, maxTokens: 800 })
+      ], { temperature: 0.9, signal: options.signal, maxTokens: 1400 })
       assertPortraitActive(options.signal)
       const retryParsed = parsePortraitResponse(retryResponse)
       if (retryParsed?.portrait) {
