@@ -59,6 +59,7 @@ export interface LearnedCaseView {
   confidence: number
   status: 'pending' | 'active' | 'retired'
   corroborations: number
+  hitCount: number
   sourceDate: string
   updatedAt: string
 }

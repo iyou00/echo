@@ -29,6 +29,15 @@ export interface DreamEventDraft {
 export const DREAM_AUTO_ACTIVATE_CONFIDENCE = 0.85
 
 const KINDS = new Set<DreamEventDraft['kind']>(['entity_correction', 'phrasing_precedent', 'artist_alias', 'companion_adjustment', 'noise'])
+
+/** 路由器合法类型词表——phrasing_precedent 的 expectedKind 必须从中选择 */
+export const ROUTER_KIND_VOCAB = new Set([
+  'music_search', 'artist_request', 'direct_song', 'mood_request',
+  'weather', 'identity', 'pending_reply', 'casual_chat', 'clarification_needed',
+])
+
+/** 路由参数的合法键 */
+export const ROUTE_PARAM_KEYS = new Set(['mood', 'energy', 'tempo', 'artistQuery', 'seedTitle', 'targetCount'])
 const STORED_KINDS = new Set<string>(['entity_correction', 'phrasing_precedent', 'artist_alias'])
 
 function isStoredKind(kind: DreamEventDraft['kind']): kind is LearnedCaseKind {
@@ -64,6 +73,11 @@ export function parseDreamEvents(value: unknown): DreamEventDraft[] {
       ? record.learned as Record<string, unknown>
       : {}
     if (Object.keys(learned).length === 0) continue
+    // phrasing_precedent 的 expectedKind 必须在路由词表内，否则丢弃（防止 LLM 自造词）
+    if (kind === 'phrasing_precedent') {
+      const ek = typeof learned.expectedKind === 'string' ? learned.expectedKind : ''
+      if (!ROUTER_KIND_VOCAB.has(ek)) continue
+    }
     const quotes = Array.isArray(record.evidence_quotes)
       ? record.evidence_quotes.filter((quote): quote is string => typeof quote === 'string' && quote.trim().length > 0)
       : []
@@ -164,7 +178,24 @@ const REVIEW_SYSTEM_PROMPT = `你是 Echo 的夜间复盘器。Echo 是一个音
 kind 可选:
 - entity_correction: 用户纠正了歌手/歌名/版本，如"不是这首，是原唱"。learned 填 expectArtistQuery 或 expectSeedTitle（纠正后用户想要的实体）。
 - artist_alias: 用户用某个称呼指代一位歌手，如"杰伦的歌"指周杰伦。learned 填 {alias:"杰伦", expectArtistQuery:"周杰伦"}。
-- phrasing_precedent: 用户某种说法被 Echo 理解错过一次（Echo 道歉/重新问过），如"随便来一首X的"曾没被理解。learned 填 {triggerPattern:"那句话的关键部分", expectedKind:"artist_request"}。
+- phrasing_precedent: 用户某种说法被 Echo 理解错过一次（Echo 道歉/重新问过），如"随便来一首X的"曾没被理解。learned 填 {triggerPattern:"那句话的关键部分", expectedKind:"<路由类型>", routeParams:{...}}。
+
+路由类型词表（expectedKind 只能从中选择，不能自造）:
+  music_search / artist_request / direct_song / mood_request / weather / identity / pending_reply / casual_chat / clarification_needed
+
+routeParams 可选参数（只填和该说法相关的，不相关的不要填）:
+  mood: 描述情绪的词（如"轻柔"、"安静"、"热烈"）
+  energy: "low" / "medium" / "high"
+  tempo: "slow" / "medium" / "fast"
+  artistQuery: 歌手名（如用户纠正了歌手理解）
+  seedTitle: 歌名（如用户纠正了歌的理解）
+  targetCount: 数字（如用户说"来5首"）
+
+示例:
+  用户说"轻一点"被理解为减小音量，但实际是指节奏感不要太强:
+  learned: {triggerPattern:"轻一点", expectedKind:"mood_request", routeParams:{mood:"轻柔", energy:"low", tempo:"slow"}}
+  用户说"杰伦的歌"被理解失败:
+  learned: {triggerPattern:"杰伦", expectedKind:"artist_request", routeParams:{artistQuery:"周杰伦"}}
 - companion_adjustment: 用户明确要求改变相处方式（少说点/别损我）。只提取，不判断。
 - noise: 看起来像纠正但其实不是（用户在聊歌词、引用歌名、开玩笑）。
 

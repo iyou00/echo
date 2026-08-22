@@ -33,6 +33,8 @@ import type {
 } from '../../services/chat/companionTypes'
 import type { CompanionResponseBrief } from '../../services/chat/companionResponse'
 import { learnedCorrectionsPromptValue } from '../../services/chat/learnedCasesContext'
+import { matchLearnedPrecedent } from '../../services/chat/learnedPrecedentMatcher'
+import { incrementLearnedCaseHit } from '../../db/learnedCases'
 import { detectMusicLanguage, MUSIC_LANGUAGE_VALUES } from '../../services/recommendation/language'
 
 export type ChatIntentKind =
@@ -1178,6 +1180,29 @@ export async function routeChatIntentWithLlm(
   const startedAt = Date.now()
   const grounding = await groundRouterEntities(text, signal)
   const learnedCorrections = learnedCorrectionsPromptValue()
+
+  // 确定性先例匹配：LLM 之前先查表——同样的纠正不再犯第二次。
+  // 命中时从 createLlmRouteBaseIntent 组装（与 LLM 路由同构的基础 intent），按 kind 填参数。
+  const precedent = matchLearnedPrecedent(text)
+  if (precedent && isMusicExecutionKind(precedent.expectedKind as ChatIntentKind)) {
+    incrementLearnedCaseHit(precedent.caseId)
+    const intent = createLlmRouteBaseIntent(text)
+    intent.kind = precedent.expectedKind as ChatIntentKind
+    intent.wantsMusic = true
+    intent.confidence = 0.95
+    intent.artistQuery = precedent.artistQuery ?? undefined
+    intent.seedTitle = precedent.seedTitle ?? undefined
+    intent.targetCount = precedent.targetCount ?? 1
+    if (precedent.mood) intent.moodTerms = [precedent.mood]
+    return intent
+  }
+  if (precedent && (precedent.expectedKind === 'weather' || precedent.expectedKind === 'identity' || precedent.expectedKind === 'casual_chat')) {
+    incrementLearnedCaseHit(precedent.caseId)
+    const intent = createLlmRouteBaseIntent(text)
+    intent.kind = precedent.expectedKind as ChatIntentKind
+    intent.confidence = 0.95
+    return intent
+  }
   const route = await inferChatRouteWithLlm(
     text,
     signal,

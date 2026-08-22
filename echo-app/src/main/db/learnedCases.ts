@@ -20,6 +20,7 @@ export interface LearnedCaseRecord {
   confidence: number
   status: LearnedCaseStatus
   corroborations: number
+  hitCount: number
   sourceDate: string
   createdAt: string
   updatedAt: string
@@ -34,6 +35,7 @@ interface LearnedCaseRow {
   confidence: number
   status: string
   corroborations: number
+  hit_count: number
   source_date: string
   created_at: string
   updated_at: string
@@ -55,10 +57,15 @@ function toRecord(row: LearnedCaseRow): LearnedCaseRecord {
     confidence: row.confidence,
     status: (STATUSES.has(row.status as LearnedCaseStatus) ? row.status : 'retired') as LearnedCaseStatus,
     corroborations: row.corroborations,
+    hitCount: row.hit_count ?? 0,
     sourceDate: row.source_date,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
+}
+
+export function incrementLearnedCaseHit(id: string): void {
+  getDb().prepare('UPDATE learned_cases SET hit_count = COALESCE(hit_count, 0) + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(id)
 }
 
 export function insertLearnedCase(input: {

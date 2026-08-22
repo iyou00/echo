@@ -12,7 +12,7 @@ function record(overrides: Record<string, unknown> = {}) {
     evidence: { conversationIds: [], quotes: [], sourceDate: '' },
     confidence: 0.9,
     status: 'active',
-    corroborations: 1,
+    corroborations: 1, hitCount: 0,
     sourceDate: '',
     createdAt: '',
     updatedAt: '',

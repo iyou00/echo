@@ -12,6 +12,8 @@ export interface LearnedCorrectionBrief {
   kind: LearnedCaseRecord['kind']
   trigger: string
   summary: string
+  /** 原始记录（含完整 learned payload），供确定性匹配层使用 */
+  sourceRecord: LearnedCaseRecord
 }
 
 let snapshot: { at: number; briefs: LearnedCorrectionBrief[] } | null = null
@@ -38,7 +40,16 @@ function buildBriefs(records: LearnedCaseRecord[]): LearnedCorrectionBrief[] {
     kind: record.kind,
     trigger: record.triggerText.slice(0, 60),
     summary: summarizeLearned(record).slice(0, 40),
+    sourceRecord: record,
   }))
+}
+
+/** 供确定性匹配层使用：返回当前 active 案例的完整记录。 */
+export function getActiveLearnedCases(): LearnedCaseRecord[] {
+  if (!snapshot || Date.now() - snapshot.at > SNAPSHOT_TTL_MS) {
+    refreshLearnedCasesSnapshot()
+  }
+  return (snapshot?.briefs ?? []).map((b) => b.sourceRecord).filter(Boolean)
 }
 
 /** 复盘写入后调用，立即让新经验对路由可见。 */

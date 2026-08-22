@@ -24,7 +24,7 @@ function record(overrides: Partial<LearnedCaseRecord> = {}): LearnedCaseRecord {
     evidence: { conversationIds: [1], quotes: ['不是这首'], sourceDate: '2026-08-15' },
     confidence: 0.9,
     status: 'active',
-    corroborations: 1,
+    corroborations: 1, hitCount: 0,
     sourceDate: '2026-08-15',
     createdAt: '2026-08-15 23:30:00',
     updatedAt: '2026-08-15 23:30:00',

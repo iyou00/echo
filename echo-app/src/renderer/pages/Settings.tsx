@@ -1836,7 +1836,7 @@ export function SettingsPage({
                           <div>
                             <div className="d2-learned-trigger">「{item.triggerText}」</div>
                             <div className="d2-learned-summary">{summarizeLearnedCase(item)}</div>
-                            <small>{learnedStatusLabels[item.status]}{item.corroborations > 0 ? ` · 被印证 ${item.corroborations} 次` : ''} · {item.sourceDate}</small>
+                            <small>{learnedStatusLabels[item.status]}{item.corroborations > 0 ? ` · 被印证 ${item.corroborations} 次` : ''}{item.hitCount > 0 ? ` · 已生效 ${item.hitCount} 次` : ''} · {item.sourceDate}</small>
                           </div>
                         </div>
                         <button className="btn danger d2-learned-delete" type="button" onClick={() => { void deleteLearnedCase(item.id) }}>删除</button>

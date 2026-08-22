@@ -291,6 +291,13 @@ const migrations: DbMigration[] = [
       `)
     },
   },
+  {
+    version: 14,
+    name: 'learned_cases_hit_count',
+    up: (db) => {
+      db.exec('ALTER TABLE learned_cases ADD COLUMN hit_count INTEGER NOT NULL DEFAULT 0')
+    },
+  },
 ]
 
 function backfillSettingsFirstUsedAt(database: Database.Database): void {
