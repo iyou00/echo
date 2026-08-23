@@ -72,8 +72,7 @@ if (!panelOn) {
 step('enter listening', panelOn)
 
 for (const [win, expectW, expectH] of [['compact', 1152, 720], ['standard', 1280, 800]]) {
-  const info = await send('Browser.getWindowForTarget').catch(() => null)
-  if (info?.windowId != null) { await send('Browser.setWindowBounds', { windowId: info.windowId, bounds: { width: expectW, height: expectH } }); await sleep(800) }
+  await evalJson(`window.echo.window.setSizePreset('${win}').catch(() => null)`); await sleep(900)
   const g = await rects({
     card: '.global-player',
     panel: '.d2-listening-panel',
@@ -97,8 +96,7 @@ for (const [win, expectW, expectH] of [['compact', 1152, 720], ['standard', 1280
   step(`${win}: return btn sits in card top zone`, Boolean(g.returnBtn) && g.returnBtn.t >= (g.card?.t ?? 0) && g.returnBtn.b <= (g.card?.t ?? 0) + 80)
 }
 // 回 standard，真实点击全部控件
-const info = await send('Browser.getWindowForTarget').catch(() => null)
-if (info?.windowId != null) { await send('Browser.setWindowBounds', { windowId: info.windowId, bounds: { width: 1280, height: 800 } }); await sleep(800) }
+await evalJson(`window.echo.window.setSizePreset('standard').catch(() => null)`); await sleep(900)
 
 // 播放/暂停（两次往返）
 const pausedBefore = await evalJson(`document.querySelector('.global-player')?.classList.contains('is-paused')`)

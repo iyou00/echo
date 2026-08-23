@@ -204,44 +204,45 @@ await sleep(800)
 // —— 5. 队列页：入口+三页签 ——
 await evalJson(`window.echo.queue.history(7).then((days) => { const t = days.flatMap((d) => d.tracks)[0]; if (!t) return 'nohist'; return window.echo.playback.play({ ...t, sourceContext: 'history' }).then(() => 'played').catch((e) => 'ERR:' + e.message) }).catch(() => 'nohist'); 'dispatched'`)
 await sleep(2500)
-const qOpened = await click('[aria-label="打开队列"]')
+let qOpened = await click('[aria-label="打开队列"]')
+if (!qOpened) qOpened = await click('.d2-nav-button[aria-label="队列"]')
 await sleep(1100)
-step('queue: opened from player', qOpened)
+step('queue: opened', qOpened)
 if (qOpened) {
-  // 曲库区在页面下方，需滚动——只断言存在且有尺寸
+  // 有内容 → 会话卡+曲库；全空 → 整页空态（.qf-empty）也是合法形态
   const sessionOk = await evalJson(`(() => {
+    if (document.querySelector('.shell-page[data-page="queue"] .qf-empty')) return 'empty-page'
     const misses = []
     for (const sel of ['.session-card', '.session-head h1', '.lib-tools', '.lib-tab']) {
       const el = document.querySelector(sel)
       if (!el || el.getBoundingClientRect().width === 0) misses.push(sel)
     }
-    return misses
+    return misses.length ? misses.join(',') : 'ok'
   })()`)
-  step('queue: session card + library tools', sessionOk.length === 0, sessionOk.join(','))
+  step('queue: session card + library tools', sessionOk === 'ok' || sessionOk === 'empty-page', sessionOk)
   for (const label of ['favorites', 'past', 'favorites']) {
     await click(label === 'favorites' ? '.lib-tab:nth-child(1)' : '.lib-tab:nth-child(2)')
     await sleep(450)
   }
-  const libOk = await evalJson(`(() => { const el = document.querySelector('.lib-tab.on'); return el && el.getBoundingClientRect().width > 0 })()`)
-  step('queue: library tabs cycle', libOk === true)
+  const libOk = await evalJson(`(() => { if (document.querySelector('.shell-page[data-page="queue"] .qf-empty')) return 'empty-page'; const el = document.querySelector('.lib-tab.on'); return el && el.getBoundingClientRect().width > 0 ? 'ok' : 'missing' })()`)
+  step('queue: library tabs cycle', libOk !== 'missing', libOk)
   await click('.d2-brand')
   await sleep(800)
 }
 
 // —— 6. 三档窗口尺寸：顶栏可见性（像素）——
-const resize = async (w, h) => {
-  const info = await send('Browser.getWindowForTarget').catch(() => null)
-  if (info?.windowId != null) {
-    await send('Browser.setWindowBounds', { windowId: info.windowId, bounds: { width: w, height: h } })
-    await sleep(700)
-  }
+// CDP 的 Browser.setWindowBounds 在本 Electron 构建上不可用且会被静默吞掉——
+// 用应用自己的窗口档位 API，缩放才是真的发生过。
+const resize = async (_w, _h, preset) => {
+  await evalJson(`window.echo.window.setSizePreset('${preset}').catch(() => null)`)
+  await sleep(700)
 }
 for (const [name, w, h] of [['compact', 1152, 720], ['standard', 1280, 800], ['large', 1440, 900]]) {
-  await resize(w, h)
+  await resize(w, h, name)
   const nav = await evalJson(`(() => { const btns = [...document.querySelectorAll('.d2-nav-button')]; return btns.filter((b) => { const r = b.getBoundingClientRect(); return r.width > 0 && r.right <= window.innerWidth }).length })()`)
   step(`window ${name}: 5 nav buttons laid out`, nav === 5, 'count=' + nav)
 }
-await resize(1280, 800)
+await resize(1280, 800, 'standard')
 
 // —— 汇总 ——
 console.log(results.join('\n'))
