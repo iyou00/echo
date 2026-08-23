@@ -5,6 +5,7 @@ import { correctProfileMemory } from '../services/profileCorrection'
 import { tastePortraitRefreshAgent } from '../services/schedulerAgents'
 import { applySignal, getProfileWithQuestions, refreshStructuredProfile, respondToProfileInsight } from '../services/taste'
 import { recordTasteQuestionAnswer } from '../services/tasteQuestionScheduler'
+import { getLanguageDistribution } from '../db/semantics'
 import { listTasteProfileVersions, restoreTasteProfileVersion } from '../db/taste'
 
 export function registerTasteIpc(): void {
@@ -26,4 +27,5 @@ export function registerTasteIpc(): void {
   ipcMain.handle('taste:restoreProfileVersion', (_event, id: number) => restoreTasteProfileVersion(id))
   ipcMain.handle('taste:correctMemory', (_event, note: string) => correctProfileMemory(note))
   ipcMain.handle('taste:answerQuestion', (_event, id: number, answer: string) => recordTasteQuestionAnswer(id, answer))
+  ipcMain.handle('taste:languageDistribution', () => getLanguageDistribution())
 }

@@ -96,6 +96,7 @@ const echoApi: EchoApi = {
   taste: {
     getProfile: () => invoke('taste:getProfile'),
     getMemoryAudit: () => invoke('taste:getMemoryAudit'),
+    getLanguageDistribution: () => invoke('taste:languageDistribution'),
     getProfileVersions: () => invoke('taste:getProfileVersions'),
     refreshStructuredProfile: () => invoke('taste:refreshStructuredProfile'),
     regeneratePortrait: () => invoke('taste:regeneratePortrait'),

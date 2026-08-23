@@ -671,6 +671,13 @@ const mockEcho: EchoApi = {
     async getProfile() {
       return { profile: structuredClone(profileState), questions: structuredClone(questionState) }
     },
+    async getLanguageDistribution() {
+      return [
+        { language: '华语', ratio: 0.6 },
+        { language: '欧美', ratio: 0.3 },
+        { language: '日语', ratio: 0.1 },
+      ]
+    },
     async getMemoryAudit() {
       const audit: MemoryAuditSummary = {
         updatedAt: new Date().toISOString(),

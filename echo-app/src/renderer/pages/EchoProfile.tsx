@@ -1,22 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown } from 'lucide-react'
-import type { EchoApi, MemoryAuditItem, MemoryAuditKind, MemoryAuditSummary, PlaybackState, ProfileInsight, TasteProfile, TasteProfileVersion, TasteQuestion, Track, UiBoundarySnapshot } from '../../types/ipc'
+import type { EchoApi, PlaybackState, TasteProfile, TasteQuestion, Track, UiBoundarySnapshot } from '../../types/ipc'
 import type { AppPageProps } from '../appState'
 import { latestRunningRuntimeTask, useRuntimeTasks } from '../hooks/useRuntimeTasks'
 import { friendlyOperationError } from '../../shared/runtimeRecovery'
-import { trackIdentity } from '../../shared/trackIdentity'
 import { BoundaryState } from '../components/BoundaryState'
 import {
-  ERA_SCALE,
   findPortraitClueMatch,
-  normalizeProfileMoodFilter,
   profileEvidenceSourceLabel,
   profileItemIsPositiveDisplaySignal,
-  profileSignatureItemVisible,
-  profileItemHasBehaviorEvidence,
   profileAsPercent as asPercent,
-  profileWeightDisplay,
-  tempoPreferenceDisplay,
   type ProfileStatsEvidence,
 } from './echoProfileDisplay'
 
@@ -31,11 +23,6 @@ interface EchoProfileProps extends AppPageProps {
   onOpenLearned?: () => void
 }
 
-function displayDate(value?: string) {
-  if (!value) return ''
-  return new Date(value).toLocaleDateString('zh-CN')
-}
-
 function displayDateTime(value?: string) {
   if (!value) return ''
   const date = new Date(value)
@@ -45,120 +32,16 @@ function displayDateTime(value?: string) {
   return `${date.toLocaleDateString('zh-CN')} ${clock}`
 }
 
-const AUDIT_TAG_TEXT: Record<MemoryAuditKind, string> = {
-  correction: '纠正',
-  favorite: '收藏',
-  loop: '循环',
-  played: '听过',
-  skip: '跳过',
-  explicit_like: '口头',
-  explicit_miss: '口头',
-}
-
-const AUDIT_TAG_TONE: Record<MemoryAuditKind, string> = {
-  correction: 'red',
-  favorite: 'green',
-  loop: '',
-  played: '',
-  skip: 'red',
-  explicit_like: 'green',
-  explicit_miss: 'red',
-}
-
-function auditTimeLabel(value?: string) {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  return date.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })
-}
-
-function renderAuditEvent(item: MemoryAuditItem, older = false) {
-  const meterWidth = Math.round(Math.min(Math.max(item.weight ?? 0.4, 0.05), 1) * 100)
-  const negative = item.kind === 'skip' || item.kind === 'explicit_miss'
-  return (
-    <div className={older ? 'ev-row older' : 'ev-row'} key={item.id}>
-      <span className={`tag ${AUDIT_TAG_TONE[item.kind]}`}>{item.label || AUDIT_TAG_TEXT[item.kind]}</span>
-      <span className="what">
-        {item.title}
-        {item.detail && <small>{item.detail}</small>}
-      </span>
-      <div className="meter" aria-hidden="true">
-        <i style={{ width: `${meterWidth}%`, ...(negative ? { background: 'var(--d2-red)' } : null) }} />
-      </div>
-      <time>{auditTimeLabel(item.createdAt)}</time>
-    </div>
-  )
-}
-
 function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)) }
-
-type SignatureDisplayItem = NonNullable<TasteProfile['display']>['signatureItems'][number]
-
-type MemoryLoadState = 'idle' | 'loading' | 'loaded' | 'error'
-
-type StatEvidenceKind = 'era' | 'energy' | 'tempo'
 
 function statsEvidence(profile?: TasteProfile | null): ProfileStatsEvidence | undefined {
   return profile?.profile_meta?.statsEvidence
-}
-
-function statCounts(evidence: ProfileStatsEvidence | undefined, kind: StatEvidenceKind) {
-  if (!evidence) return { imported: undefined as number | undefined, behavior: undefined as number | undefined }
-  if (kind === 'era') return { imported: evidence.eraImportedCount, behavior: evidence.eraBehaviorCount }
-  if (kind === 'energy') return { imported: evidence.energyImportedCount, behavior: evidence.energyBehaviorCount }
-  return { imported: evidence.tempoImportedCount, behavior: evidence.tempoBehaviorCount }
-}
-
-function hasStatSignal(evidence: ProfileStatsEvidence | undefined, kind: StatEvidenceKind, hasLegacyValue: boolean): boolean {
-  const { imported, behavior } = statCounts(evidence, kind)
-  if (imported == null || behavior == null) return hasLegacyValue
-  return imported + behavior > 0
-}
-
-function statMetaLabel(evidence: ProfileStatsEvidence | undefined, kind: StatEvidenceKind, fallback: string): string {
-  const { imported, behavior } = statCounts(evidence, kind)
-  if (imported == null || behavior == null) return fallback
-  if (behavior >= 3) return `${Math.round(behavior)} 条播放/反馈`
-  if (behavior > 0) return `${Math.round(behavior)} 条行为线索`
-  if (imported >= 5) return '来自导入歌单'
-  if (imported > 0) return '导入线索偏少'
-  return '继续观察'
-}
-
-function eraEvidenceLine(profile: TasteProfile, era: string): string {
-  const percent = asPercent(profile.era_preference?.[era] ?? 0)
-  const evidence = statsEvidence(profile)
-  const { imported, behavior } = statCounts(evidence, 'era')
-  if (percent <= 0) return '这个年代暂时没有足够线索。'
-  if (behavior != null && imported != null) {
-    if (behavior >= 3) return `这个频段占比 ${percent}%，主要来自你最近的播放和反馈。`
-    if (behavior > 0) return `这个频段占比 ${percent}%，已经有少量行为线索。`
-    if (imported >= 5) return `这个频段占比 ${percent}%，目前主要来自导入歌单。`
-    return `这个频段占比 ${percent}%，线索还少。`
-  }
-  if (percent >= 35) return `这个频段占比 ${percent}%，已经是你歌单里的明显线索。`
-  if (percent >= 15) return `这个频段占比 ${percent}%，有一些稳定出现的声音。`
-  return `这个频段占比 ${percent}%，目前只是轻微信号。`
-}
-
-function tempoLabel(value: 'slow' | 'medium' | 'fast') {
-  if (value === 'slow') return '慢速'
-  if (value === 'fast') return '快速'
-  return '中速'
 }
 
 function energyLabel(percent: number) {
   if (percent >= 66) return '偏高能'
   if (percent <= 38) return '偏安静'
   return '中等能量'
-}
-
-function signalStrengthLabel(value: number) {
-  const percent = asPercent(value)
-  if (percent >= 70) return '线索很强'
-  if (percent >= 45) return '线索稳定'
-  if (percent > 0) return '轻微信号'
-  return '还在观察'
 }
 
 function discoveryLabel(value: number) {
@@ -168,52 +51,138 @@ function discoveryLabel(value: number) {
   return '探索适中'
 }
 
-export function EchoProfilePage({ echo, navigate, profile, playbackState, setPlaybackState, refreshQueue, refreshProfile, boundary, onOpenLearned }: EchoProfileProps) {
+// —— 声音指纹：五维数据驱动的五色墨团 ——
+// 五瓣各自一色墨，轮廓由数值外推，噪声扰动让每次落墨独一无二。
+
+const DIM_META = [
+  { key: '语言', color: '#184734', icon: 'speech' },
+  { key: '情绪', color: '#315bd6', icon: 'heart' },
+  { key: '年代', color: '#8a5a2b', icon: 'clock' },
+  { key: '场景', color: '#6d597a', icon: 'moon' },
+  { key: '探索', color: '#e45036', icon: 'compass' },
+] as const
+
+const DIM_ICONS: Record<string, string> = {
+  speech: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 5h16v10H9l-5 4V5z"/><path d="M8 9h8M8 12h5" stroke-linecap="round"/></svg>',
+  heart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 20s-7-4.6-9-8.8C1.8 8 3.4 5 6.5 5c2 0 3.4 1.2 4.2 2.6L12 9l1.3-1.4C14.1 6.2 15.5 5 17.5 5c3.1 0 4.7 3 3.5 6.2C19 15.4 12 20 12 20z"/></svg>',
+  clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2" stroke-linecap="round"/></svg>',
+  moon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20 13.5A8 8 0 1 1 10.5 4 6.5 6.5 0 0 0 20 13.5z"/></svg>',
+  compass: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5 5-2z"/></svg>',
+}
+
+interface FingerprintProps {
+  values: number[]  // 0-1 × 5，与 DIM_META 对齐
+  seed: number      // 噪声相位（画像版本驱动，每版指纹独一无二）
+  hoverIdx: number  // -1 无悬停
+  size?: number
+}
+
+function fingerprintPath(values: number[], seed: number, size: number, hoverIdx: number): { blob: string; wedges: string[] } {
+  const cx = size / 2
+  const cy = size / 2
+  const n = values.length
+  const SEG_PER_DIM = 8
+  const total = n * SEG_PER_DIM
+  const pts: Array<[number, number]> = []
+  for (let i = 0; i < total; i++) {
+    const seg = i / total
+    const dimIdx = Math.floor(seg * n)
+    const localT = seg * n - dimIdx
+    const a = values[dimIdx] ?? 0.4
+    const b = values[(dimIdx + 1) % n] ?? 0.4
+    const blend = a * (1 - localT) + b * localT
+    const baseR = size * 0.17 + blend * size * 0.19
+    const angle = seg * Math.PI * 2 - Math.PI / 2
+    const wob = Math.sin(seg * Math.PI * 2 * 7 + seed) * size * 0.02 + Math.sin(seg * Math.PI * 2 * 13 + seed * 1.7) * size * 0.012
+    const r = baseR + wob
+    pts.push([cx + Math.cos(angle) * r, cy + Math.sin(angle) * r])
+  }
+  let d = `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`
+  for (let i = 0; i < pts.length; i++) {
+    const p0 = pts[(i - 1 + pts.length) % pts.length]
+    const p1 = pts[i]
+    const p2 = pts[(i + 1) % pts.length]
+    const p3 = pts[(i + 2) % pts.length]
+    const c1x = p1[0] + (p2[0] - p0[0]) / 6
+    const c1y = p1[1] + (p2[1] - p0[1]) / 6
+    const c2x = p2[0] - (p3[0] - p1[0]) / 6
+    const c2y = p2[1] - (p3[1] - p1[1]) / 6
+    d += ` C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`
+  }
+  d += ' Z'
+
+  const rMax = size * 0.6
+  const wedges: string[] = []
+  for (let i = 0; i < n; i++) {
+    const a0 = (i / n) * Math.PI * 2 - Math.PI / 2
+    const a1 = ((i + 1) / n) * Math.PI * 2 - Math.PI / 2
+    const x0 = cx + Math.cos(a0) * rMax
+    const y0 = cy + Math.sin(a0) * rMax
+    const x1 = cx + Math.cos(a1) * rMax
+    const y1 = cy + Math.sin(a1) * rMax
+    wedges.push(`<path d="M ${cx} ${cy} L ${x0.toFixed(1)} ${y0.toFixed(1)} A ${rMax} ${rMax} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)} Z" fill="url(#fpDim${i})" opacity="${i === hoverIdx ? 0.95 : 0.55}"/>`)
+  }
+  return { blob: d, wedges }
+}
+
+function SoundFingerprint({ values, seed, hoverIdx, size = 320 }: FingerprintProps) {
+  const safeValues = values.length === 5 ? values : [...values, ...Array(5 - values.length).fill(0.4)]
+  const { blob, wedges } = fingerprintPath(safeValues, seed, size, hoverIdx)
+  const cx = size / 2
+  const cy = size / 2
+  const n = 5
+  const gradientDefs = DIM_META.map((meta, i) =>
+    `<linearGradient id="fpDim${i}" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="${meta.color}" stop-opacity="0.78"/><stop offset="100%" stop-color="${meta.color}" stop-opacity="0.38"/></linearGradient>`,
+  ).join('')
+  const labels = DIM_META.map((meta, i) => {
+    const a = (i / n) * Math.PI * 2 - Math.PI / 2
+    const lx = cx + Math.cos(a) * (size * 0.44)
+    const ly = cy + Math.sin(a) * (size * 0.44)
+    return `<text x="${lx.toFixed(0)}" y="${ly.toFixed(0)}" text-anchor="middle" font-size="${Math.round(size * 0.032)}" letter-spacing="2" fill="${i === hoverIdx ? '#e45036' : '#6e766f'}">${meta.key}</text>`
+  }).join('')
+  return (
+    <svg viewBox={`0 0 ${size} ${size}`} className="fingerprint-svg" role="img" aria-label="你的声音指纹">
+      <defs>
+        <radialGradient id="fpInk" cx="42%" cy="38%">
+          <stop offset="0%" stop-color="#243128" stop-opacity="0.85"/>
+          <stop offset="100%" stop-color="#184734" stop-opacity="0.25"/>
+        </radialGradient>
+        {gradientDefs}
+        <clipPath id="fpClip"><path d={blob} /></clipPath>
+      </defs>
+      <path d={blob} fill="#184734" opacity="0.10" transform={`translate(${size * 0.015},${size * 0.03}) scale(1.03) translate(${-size * 0.015},${-size * 0.024})`} />
+      <g clipPath="url(#fpClip)">{wedges.map((w, i) => <g key={i} dangerouslySetInnerHTML={{ __html: w }} />)}</g>
+      <path d={blob} fill="url(#fpInk)" stroke="#184734" strokeWidth="1.6" strokeOpacity="0.9" style={{ mixBlendMode: 'multiply' }} />
+      {hoverIdx >= 0 && (() => {
+        const a = (hoverIdx / n) * Math.PI * 2 - Math.PI / 2
+        return <circle cx={cx + Math.cos(a) * size * 0.1} cy={cy + Math.sin(a) * size * 0.1} r={size * 0.016} fill="#e45036" />
+      })()}
+      <circle cx={cx} cy={cy} r={size * 0.009} fill="#e45036" />
+      <g dangerouslySetInnerHTML={{ __html: labels }} />
+    </svg>
+  )
+}
+
+export function EchoProfilePage({ echo, navigate, profile, refreshProfile, boundary }: EchoProfileProps) {
   const [busy, setBusy] = useState(false)
   const [phase, setPhase] = useState<'idle' | 'loading' | 'in'>('idle')
-  const [playingKey, setPlayingKey] = useState('')
-  const playingKeyRef = useRef('')
   const statusTimerRef = useRef<ReturnType<typeof setTimeout>>()
   const mountedRef = useRef(true)
-  const memoryLoadingRef = useRef(false)
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle')
   const [statusMessage, setStatusMessage] = useState('')
 
-  const [correctionOpen, setCorrectionOpen] = useState(false)
-  const [correctionDraft, setCorrectionDraft] = useState('')
-  const [correctionSaving, setCorrectionSaving] = useState(false)
   const [questions, setQuestions] = useState<TasteQuestion[]>([])
-  const [questionDraft, setQuestionDraft] = useState('')
   const [questionSaving, setQuestionSaving] = useState(false)
-  const [dismissedInsights, setDismissedInsights] = useState<Set<string>>(() => new Set())
-  const [savingInsightId, setSavingInsightId] = useState('')
-  const [memoryAudit, setMemoryAudit] = useState<MemoryAuditSummary | null>(null)
-  const [profileVersions, setProfileVersions] = useState<TasteProfileVersion[] | null>(null)
-  const [memoryLoadState, setMemoryLoadState] = useState<MemoryLoadState>('idle')
-  const [restoringVersionId, setRestoringVersionId] = useState<number | null>(null)
   const [clueEvidence, setClueEvidence] = useState<{ title: string; detail: string; source: string } | null>(null)
+  const [languageDist, setLanguageDist] = useState<Array<{ language: string; ratio: number }>>([])
+  const [hoverDim, setHoverDim] = useState(-1)
 
-  const [activeMoodFilter, setActiveMoodFilter] = useState<string>('all')
-  const [tunerActiveEra, setTunerActiveEra] = useState<string>('20s')
-  const [showEnergyDetails, setShowEnergyDetails] = useState<boolean>(false)
 
   // Retained task and cancellation hook
   const runtimeTasks = useRuntimeTasks(echo)
   const profileTask = latestRunningRuntimeTask(runtimeTasks, ['taste-refresh'], { includeChildren: false })
   const profileTaskRunning = Boolean(profileTask)
   const profileBusy = busy || profileTaskRunning
-
-  // Automatically initialize tuner pointer to the strongest valid era signal,
-  // but keep the user's current selection across profile refreshes.
-  useEffect(() => {
-    const sorted = profile?.era_preference
-      ? Object.entries(profile.era_preference)
-          .filter(([, value]) => Number.isFinite(value) && value > 0)
-          .sort((a, b) => b[1] - a[1])
-      : []
-    const known = new Set(sorted.map(([era]) => era))
-    setTunerActiveEra((current) => (known.has(current) ? current : sorted[0]?.[0] ?? '20s'))
-  }, [profile])
 
   useEffect(() => {
     mountedRef.current = true
@@ -231,13 +200,17 @@ export function EchoProfilePage({ echo, navigate, profile, playbackState, setPla
     return () => { active = false }
   }, [echo, profile?.profile_meta?.portraitUpdatedAt])
 
+  useEffect(() => {
+    let active = true
+    echo.taste.getLanguageDistribution()
+      .then((items) => { if (active) setLanguageDist(items) })
+      .catch(() => { if (active) setLanguageDist([]) })
+    return () => { active = false }
+  }, [echo, profile?.profile_meta?.structuredUpdatedAt])
+
   const portraitUpdatedAt = profile?.profile_meta?.portraitUpdatedAt ?? profile?.profile_meta?.updatedAt ?? profile?.profile_meta?.structuredUpdatedAt
   const display = profile?.display
   
-  const signatureItems: SignatureDisplayItem[] = profile
-    ? (display?.signatureItems?.length ? display.signatureItems : profile.signature_tracks.slice(0, 7).map((track) => ({ track, note: track.reason, evidenceLevel: 'weak' as const, source: 'fallback' as const })))
-    : []
-
   const genreItems = profile
     ? (display?.genreItems?.length ? display.genreItems : profile.genres.map((genre) => ({ ...genre, representativeArtists: [] as string[], note: undefined, evidenceLevel: 'weak' as const, source: 'fallback' as const })))
     : []
@@ -245,42 +218,6 @@ export function EchoProfilePage({ echo, navigate, profile, playbackState, setPla
   const artistItems = profile
     ? (display?.artistItems?.length ? display.artistItems : profile.artists.map((artist) => ({ name: artist.name, affinity: artist.affinity, note: artist.notes ?? '还在观察', evidenceLevel: 'weak' as const, source: 'fallback' as const })))
     : []
-  const positiveArtistItems = artistItems.filter(profileItemIsPositiveDisplaySignal)
-
-  const artistNamesSet = new Set(positiveArtistItems.map(a => a.name.trim().toLowerCase()))
-
-  const genreItemsFiltered = genreItems.filter(profileItemIsPositiveDisplaySignal).filter((genre) => {
-    const nameLower = genre.name.trim().toLowerCase()
-    if (artistNamesSet.has(nameLower)) return false
-    return true
-  })
-
-  const rawDisplayedGenres = genreItemsFiltered.slice(0, 5)
-
-  const displayedGenres = rawDisplayedGenres.map((genre) => {
-    const display = profileWeightDisplay(genre.weight)
-    return {
-      ...genre,
-      displayPercent: display.value,
-      displayPercentLabel: display.label,
-      barPercent: display.bar,
-    }
-  })
-  
-  const moodItems = profile
-    ? (display?.moodItems?.length ? display.moodItems : profile.moods.slice(0, 6).map((mood) => ({ tag: mood.tag, frequency: mood.frequency, evidenceLevel: 'weak' as const, source: 'fallback' as const })))
-        .filter(profileItemIsPositiveDisplaySignal)
-    : []
-  const moodFilterKey = moodItems.map((mood) => mood.tag).join('\u0000')
-
-  useEffect(() => {
-    setClueEvidence(null)
-  }, [profile])
-
-  useEffect(() => {
-    const availableMoodTags = moodFilterKey ? moodFilterKey.split('\u0000') : []
-    setActiveMoodFilter((current) => normalizeProfileMoodFilter(current, availableMoodTags))
-  }, [moodFilterKey])
 
   function showStatus(type: 'success' | 'error', message: string, autoHideMs?: number) {
     clearTimeout(statusTimerRef.current)
@@ -344,27 +281,6 @@ export function EchoProfilePage({ echo, navigate, profile, playbackState, setPla
     }
   }
 
-  async function playSignature(track: Track) {
-    const key = trackIdentity(track)
-    playingKeyRef.current = key
-    setPlayingKey(key)
-    try {
-      const next = await echo.playback.play({
-        ...track,
-        sourceContext: 'history',
-        agentActionId: undefined,
-        agentActionItemId: undefined,
-        stageContextId: undefined,
-        playbackInstanceId: undefined,
-      })
-      setPlaybackState(next)
-      await refreshQueue()
-    } catch (error) {
-      showStatus('error', friendlyOperationError(error, '这首歌暂时没播放出来。'), 3000)
-    } finally {
-      if (playingKeyRef.current === key) setPlayingKey('')
-    }
-  }
 
   const triggerClueEvidence = (term: string) => {
     const match = findPortraitClueMatch(
@@ -392,51 +308,52 @@ export function EchoProfilePage({ echo, navigate, profile, playbackState, setPla
     }
   }
 
-  async function submitCorrection() {
-    const note = correctionDraft.trim()
-    if (!note || correctionSaving) return
-    setCorrectionSaving(true)
-    try {
-      const result = await echo.taste.correctMemory(note)
-      if (result.ok) {
-        setCorrectionDraft('')
-        setCorrectionOpen(false)
-        showStatus('success', result.message, 2600)
-        await refreshProfile()
-      } else {
-        showStatus('error', result.message, 3000)
-      }
-    } catch (error) {
-      showStatus('error', friendlyOperationError(error, '这次纠正没有记下来，请稍后再试。'), 3000)
-    } finally {
-      if (mountedRef.current) setCorrectionSaving(false)
-    }
-  }
 
-  async function respondToInsight(insight: ProfileInsight, action: 'confirm' | 'temporary' | 'reject') {
-    if (savingInsightId) return
-    setSavingInsightId(insight.id)
-    try {
-      await echo.taste.respondToInsight(insight, action)
-      showStatus('success', action === 'confirm' ? '好，这一点我会更认真地记住。' : action === 'temporary' ? '明白，只把它放在最近。' : '这条我收回，不再据此判断你。', 3000)
-      setDismissedInsights((current) => new Set(current).add(insight.id))
-      await refreshProfile()
-    } catch (error) {
-      showStatus('error', friendlyOperationError(error, '这次反馈没有记下来，请稍后再试。'), 3000)
-    } finally {
-      if (mountedRef.current) setSavingInsightId('')
-    }
-  }
 
-  async function answerProfileQuestion() {
-    const question = questions[0]
-    const answer = questionDraft.trim()
-    if (!question || !answer || questionSaving) return
+  const moodItems = profile?.display?.moodItems?.length
+    ? profile.display.moodItems.filter(profileItemIsPositiveDisplaySignal)
+    : []
+
+  const eraEntries = profile?.era_preference
+    ? Object.entries(profile.era_preference)
+        .filter(([, value]) => Number.isFinite(value) && value > 0)
+        .sort((a, b) => b[1] - a[1])
+    : []
+  const topEra = eraEntries[0]
+  const sceneItems = profile?.scenes?.filter((scene) => scene.tag.trim() && scene.frequency > 0).slice(0, 5) ?? []
+
+  const energyValue = profile?.energy_preference ?? 0
+  const energyPercent = asPercent(energyValue)
+  const energyKnown = energyValue > 0
+  const portraitPhase = profileBusy && phase === 'idle' ? 'loading' : phase
+
+  const recentInsights = profile?.insights?.recentChanges ?? []
+
+  // —— 指纹五维数值（0-1）：全部来自画像真实字段 ——
+  const languageTop = languageDist[0]?.ratio ?? 0.4
+  const moodTop = moodItems[0]?.frequency ?? 0
+  const eraTop = topEra ? Math.min(1, (topEra[1] ?? 0) * 1.6) : 0
+  const sceneTop = sceneItems[0] ? Math.min(1, sceneItems[0].frequency * 1.8) : 0
+  const discovery = Math.min(1, Math.max(0, profile?.discovery_appetite ?? 0.5))
+  const fingerprintValues = [languageTop, moodTop, eraTop, sceneTop, discovery]
+  const fingerprintSeed = (portraitUpdatedAt ? Date.parse(portraitUpdatedAt) % 100 : 7) / 7
+  const statEvidence = statsEvidence(profile)
+  const maxTracks = Math.max(statEvidence?.importedTrackCount ?? 0, statEvidence?.semanticTrackCount ?? 0)
+
+  const glossRows: Array<{ dim: string; main: string; sub: string; ticks: number; icon: string; idx: number }> = [
+    { dim: '语 言', main: languageDist.length ? `${languageDist[0].language}为主` : '还在观察', sub: languageDist[1] ? `${languageDist[1].language}不设防` : '', ticks: Math.max(1, Math.round(languageTop * 5)), icon: DIM_ICONS.speech, idx: 0 },
+    { dim: '情 绪 底 色', main: moodItems.length ? moodItems.slice(0, 2).map((mood) => mood.tag).join('、') : '还在观察', sub: energyKnown ? energyLabel(energyPercent) : '', ticks: Math.max(1, Math.round(Math.min(1, moodTop * 1.5) * 5)), icon: DIM_ICONS.heart, idx: 1 },
+    { dim: '年 代 与 新 旧', main: topEra ? `${topEra[0]} 的声音最多` : '还在观察', sub: eraEntries[1] ? `也有 ${eraEntries[1][0]}` : '', ticks: Math.max(1, Math.round(eraTop * 5)), icon: DIM_ICONS.clock, idx: 2 },
+    { dim: '常 去 场 景', main: sceneItems.length ? sceneItems.slice(0, 2).map((scene) => scene.tag).join('、') : '还在观察', sub: '', ticks: Math.max(1, Math.round(Math.min(1, sceneTop) * 5)), icon: DIM_ICONS.moon, idx: 3 },
+    { dim: '探 索 倾 向', main: discoveryLabel(profile?.discovery_appetite ?? 0.5), sub: '', ticks: Math.max(1, Math.round(discovery * 5)), icon: DIM_ICONS.compass, idx: 4 },
+  ]
+
+  async function answerWith(id: number, answer: string) {
+    if (questionSaving) return
     setQuestionSaving(true)
     try {
-      await echo.taste.answerQuestion(question.id, answer)
-      setQuestions((current) => current.filter((item) => item.id !== question.id))
-      setQuestionDraft('')
+      await echo.taste.answerQuestion(id, answer)
+      setQuestions((current) => current.filter((item) => item.id !== id))
       showStatus('success', '我记下了，这比我自己猜要准。', 2600)
       await refreshProfile()
     } catch (error) {
@@ -445,84 +362,6 @@ export function EchoProfilePage({ echo, navigate, profile, playbackState, setPla
       if (mountedRef.current) setQuestionSaving(false)
     }
   }
-
-  async function loadMemoryAudit(force = false) {
-    if (memoryLoadingRef.current || (!force && memoryLoadState === 'loaded')) return
-    memoryLoadingRef.current = true
-    setMemoryLoadState('loading')
-    try {
-      const [audit, versions] = await Promise.all([
-        echo.taste.getMemoryAudit(),
-        echo.taste.getProfileVersions(),
-      ])
-      if (!mountedRef.current) return
-      setMemoryAudit(audit)
-      setProfileVersions(versions)
-      setMemoryLoadState('loaded')
-    } catch (error) {
-      if (!mountedRef.current) return
-      setMemoryLoadState('error')
-      showStatus('error', friendlyOperationError(error, '暂时没读到 Echo 记住的内容。'), 3000)
-    } finally {
-      memoryLoadingRef.current = false
-    }
-  }
-
-  const loadMemoryAuditRef = useRef(loadMemoryAudit)
-  loadMemoryAuditRef.current = loadMemoryAudit
-
-  useEffect(() => {
-    if (profile) void loadMemoryAuditRef.current()
-  }, [profile])
-
-  async function restoreProfileVersion(id: number) {
-    if (restoringVersionId != null) return
-    setRestoringVersionId(id)
-    try {
-      await echo.taste.restoreProfileVersion(id)
-      await refreshProfile()
-      await loadMemoryAudit(true)
-      showStatus('success', '已经恢复到这版画像。', 3000)
-    } catch (error) {
-      showStatus('error', friendlyOperationError(error, '这版画像暂时没恢复成功。'), 3000)
-    } finally {
-      if (mountedRef.current) setRestoringVersionId(null)
-    }
-  }
-
-  const filteredSignatureDisplay = signatureItems
-    .filter((item) => ['favorite', 'loop', 'played', 'explicit_like'].includes(item.source))
-    .filter((item) => profileSignatureItemVisible(item, activeMoodFilter))
-    .slice(0, 5)
-
-  const evidence = statsEvidence(profile)
-  const energyKnown = hasStatSignal(evidence, 'energy', profile?.energy_preference != null)
-  const energyValue = profile?.energy_preference ?? 0
-  const energyPercent = asPercent(energyValue)
-  const eraEntries = profile?.era_preference
-    ? Object.entries(profile.era_preference)
-        .filter(([, value]) => Number.isFinite(value) && value > 0)
-        .sort((a, b) => b[1] - a[1])
-    : []
-  const topEra = eraEntries[0]
-  const tempoEntries = tempoPreferenceDisplay(profile?.tempo_preference)
-  const topTempo = tempoEntries[0]
-  const tempoKnown = hasStatSignal(evidence, 'tempo', Boolean(topTempo))
-  const sceneSource = profile?.scenes?.filter((scene) => scene.tag.trim() && scene.frequency > 0).slice(0, 5) ?? []
-  const sceneItems = sceneSource.map((scene) => ({ ...scene, strength: signalStrengthLabel(scene.frequency) }))
-  const recentInsights = (profile?.insights?.recentChanges ?? []).filter((item) => !dismissedInsights.has(item.id))
-  const hasSignatureBehaviorEvidence = filteredSignatureDisplay.some(profileItemHasBehaviorEvidence)
-  const signatureSectionLabel = activeMoodFilter === 'all'
-    ? (hasSignatureBehaviorEvidence ? '这 些 歌 ， 最 能 说 明' : '这 些 歌 ， 留 下 了 线 索')
-    : `${activeMoodFilter}时，你更像这些歌`
-  const auditItems = memoryAudit?.items ?? []
-  const auditCorrections = auditItems.filter((item) => item.kind === 'correction')
-  const auditEvents = auditItems.filter((item) => item.kind !== 'correction')
-  const weekStartMs = Date.now() - 7 * 24 * 60 * 60 * 1000
-  const isThisWeek = (item: MemoryAuditItem) => Boolean(item.createdAt && new Date(item.createdAt).getTime() >= weekStartMs)
-  const auditThisWeek = auditEvents.filter(isThisWeek)
-  const auditEarlier = auditEvents.filter((item) => !isThisWeek(item))
-  const portraitPhase = profileBusy && phase === 'idle' ? 'loading' : phase
 
   return (
     <div className="d2-profile">
@@ -544,311 +383,131 @@ export function EchoProfilePage({ echo, navigate, profile, playbackState, setPla
           )
       ) : (
         <>
-          <div className="pf-hero">
-            <div className="pf-kicker">E C H O 眼 里 的 你</div>
-            {portraitPhase === 'loading' ? (
-              <div className="d2-profile-skeleton" role="status" aria-label="画像生成中">
-                <span className="long" />
-                <span className="mid" />
-                <span className="short" />
-              </div>
-            ) : (
-              <h1 className="pf-portrait">
-                {profile.echo_portrait.split(/(，|。|、|！|？|”|“)/).map((segment, index) => {
-                  const match = findPortraitClueMatch(
-                    segment,
-                    artistItems.map((artist) => artist.name),
-                    genreItems.map((genre) => genre.name),
-                  )
+          <div className="pf-kicker">E C H O 眼 里 的 你</div>
 
-                  if (match) {
-                    return (
-                      <button
-                        type="button"
-                        key={index}
-                        className="d2-profile-mark"
-                        onClick={() => triggerClueEvidence(segment)}
-                      >
-                        {segment}
-                      </button>
+          {/* —— 信头：指纹与主句并置 —— */}
+          <div className="letterhead">
+            <div className="fingerprint-wrap">
+              <SoundFingerprint values={fingerprintValues} seed={fingerprintSeed} hoverIdx={hoverDim} />
+              <div className="fp-caption">
+                <b>你的声音指纹</b>
+                {maxTracks > 0 ? ` · 由 ${maxTracks} 首歌落下` : ''}
+              </div>
+            </div>
+            <div className="portrait-block">
+              {portraitPhase === 'loading' ? (
+                <div className="d2-profile-skeleton" role="status" aria-label="画像生成中">
+                  <span className="long" />
+                  <span className="mid" />
+                  <span className="short" />
+                </div>
+              ) : (
+                <div className="portrait-text">
+                  {profile.echo_portrait.split(/(，|。|、|！|？|”|“)/).map((segment, index) => {
+                    const match = findPortraitClueMatch(
+                      segment,
+                      artistItems.map((artist) => artist.name),
+                      genreItems.map((genre) => genre.name),
                     )
-                  }
-                  return <span key={index}>{segment}</span>
-                })}
-              </h1>
-            )}
-
-            {clueEvidence && (
-              <div className="d2-profile-clue" role="status">
-                <div className="d2-profile-clue-head">
-                  <span>为什么这么说</span>
-                  <strong>{clueEvidence.title}</strong>
-                  <button type="button" onClick={() => setClueEvidence(null)} title="收起依据" aria-label="收起依据">×</button>
+                    if (match) {
+                      return (
+                        <button type="button" key={index} className="d2-profile-mark" onClick={() => triggerClueEvidence(segment)}>
+                          {segment}
+                        </button>
+                      )
+                    }
+                    return <span key={index}>{segment}</span>
+                  })}
                 </div>
-                <p>{clueEvidence.detail}</p>
-                <small>{clueEvidence.source}</small>
-              </div>
-            )}
+              )}
 
-            {status !== 'idle' && <div className={`d2-profile-status ${status}`}>{statusMessage}</div>}
+              {clueEvidence && (
+                <div className="d2-profile-clue" role="status">
+                  <div className="d2-profile-clue-head">
+                    <span>为什么这么说</span>
+                    <strong>{clueEvidence.title}</strong>
+                    <button type="button" onClick={() => setClueEvidence(null)} title="收起依据" aria-label="收起依据">×</button>
+                  </div>
+                  <p>{clueEvidence.detail}</p>
+                  <small>{clueEvidence.source}</small>
+                </div>
+              )}
 
-            <div className="pf-hero-meta">
-              <span className="pf-updated">{portraitUpdatedAt ? `画像更新于 ${displayDateTime(portraitUpdatedAt)}` : '画像 · 尚未生成'}</span>
-              <div className="pf-hero-tools">
-                <button type="button" onClick={regenerate} disabled={profileBusy}>{profileBusy ? '正在重写…' : '更新理解'}</button>
-                <button type="button" onClick={() => navigate('settings')}>设置</button>
+              {status !== 'idle' && <div className={`d2-profile-status ${status}`}>{statusMessage}</div>}
+
+              <div className="portrait-meta">
+                <span className="updated">{portraitUpdatedAt ? `画像更新于 ${displayDateTime(portraitUpdatedAt)}` : '画像 · 尚未生成'}</span>
+                <div className="portrait-actions">
+                  <button type="button" className="pf-btn" onClick={regenerate} disabled={profileBusy}>{profileBusy ? '正在重写…' : '重写这封信'}</button>
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="pf-dims">
-            <div className="dim">
-              <small>声 音 方 向</small>
-              <h3>{displayedGenres.length > 0 ? `${displayedGenres[0].name}为主${displayedGenres[1] ? `，也有${displayedGenres[1].name}` : ''}` : '还在观察'}</h3>
-              {displayedGenres.length > 0 && (
-                <div className="tags">
-                  {displayedGenres.slice(0, 4).map((genre) => <i key={genre.name}>{genre.name} {genre.displayPercentLabel}</i>)}
-                </div>
-              )}
-              <div className="ev">{displayedGenres[0] ? (displayedGenres[0].trend === 'up' ? '最近更明显' : signalStrengthLabel(displayedGenres[0].weight)) : '线索还少'}</div>
-            </div>
-            <div className="dim">
-              <small>情 绪 底 色</small>
-              <h3>{moodItems.length > 0 ? moodItems.slice(0, 2).map((mood) => mood.tag).join('、') : energyKnown ? energyLabel(energyPercent) : '还在观察'}</h3>
-              {moodItems.length > 0 && (
-                <div className="tags">{moodItems.slice(0, 4).map((mood) => <i key={mood.tag}>{mood.tag}</i>)}</div>
-              )}
-              <div className="ev">{energyKnown ? `${energyLabel(energyPercent)} · ${statMetaLabel(evidence, 'energy', tempoKnown && topTempo ? tempoLabel(topTempo.tempo) : '节奏还在观察')}` : '能量线索还不够，我会继续观察'}</div>
-              {(energyKnown || tempoKnown) && (
-                <>
-                  <button className="dim-more" type="button" onClick={() => setShowEnergyDetails((current) => !current)} aria-expanded={showEnergyDetails}>
-                    {showEnergyDetails ? '收起节奏细节' : '节奏细节'}
-                    <ChevronDown className={showEnergyDetails ? 'expanded' : ''} size={12} />
-                  </button>
-                  {showEnergyDetails && (
-                    <div className="dim-detail">
-                      {tempoKnown && tempoEntries.map((entry) => (
-                        <div className="d2-profile-kv" key={entry.tempo}><span>{tempoLabel(entry.tempo)}</span><strong>{signalStrengthLabel(entry.rawValue)}</strong></div>
-                      ))}
-                      <div className="d2-profile-kv"><span>探索倾向</span><strong>{discoveryLabel(profile.discovery_appetite ?? 0.5)}</strong></div>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-            <div className="dim">
-              <small>年 代 与 新 旧</small>
-              <h3>{topEra ? `${topEra[0]} 的声音最多` : '还在观察'}</h3>
-              {eraEntries.length > 0 && (
-                <div className="tags">{eraEntries.slice(0, 3).map(([era, value]) => <i key={era}>{era} {asPercent(value)}%</i>)}</div>
-              )}
-              <div className="ev">{statMetaLabel(evidence, 'era', topEra ? signalStrengthLabel(topEra[1]) : '继续观察')}</div>
-              {eraEntries.length > 0 && (
-                <>
-                  <div className="d2-profile-era-scale">
-                    {ERA_SCALE.map((era) => (
-                      <button type="button" key={era} className={tunerActiveEra === era ? 'active' : ''} onClick={() => setTunerActiveEra(era)}>
-                        {era}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="d2-profile-era-meta">
-                    <span>{tunerActiveEra}</span>
-                    <strong>{signalStrengthLabel(profile.era_preference?.[tunerActiveEra] ?? 0)}</strong>
-                  </div>
-                  <p className="d2-profile-muted">{eraEvidenceLine(profile, tunerActiveEra)}</p>
-                </>
-              )}
-            </div>
-            <div className="dim">
-              <small>常 去 场 景</small>
-              <h3>{sceneItems.length > 0 ? sceneItems.slice(0, 2).map((scene) => scene.tag).join('、') : '还在观察'}</h3>
-              {sceneItems.length > 0 && (
-                <div className="tags">{sceneItems.slice(0, 4).map((scene) => <i key={scene.tag}>{scene.tag}</i>)}</div>
-              )}
-              <div className="ev">{sceneItems[0]?.strength ?? '场景线索还少'}</div>
-            </div>
+          {/* —— 指纹的注解 —— */}
+          <div className="gloss">
+            <div className="gloss-title">指 纹 的 注 解</div>
+            {glossRows.map((row) => (
+              <div
+                className="gloss-row"
+                key={row.dim}
+                onMouseEnter={() => setHoverDim(row.idx)}
+                onMouseLeave={() => setHoverDim(-1)}
+              >
+                <span className="gloss-dim">{row.dim}</span>
+                <span className="gloss-main">
+                  {row.main}
+                  {row.sub && <span className="sub">{row.sub}</span>}
+                  <span className="ticks" aria-hidden="true">
+                    {Array.from({ length: 5 }, (_, t) => <i key={t} className={t < row.ticks ? 'on' : ''} />)}
+                  </span>
+                </span>
+                <span className="dim-icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: row.icon }} />
+              </div>
+            ))}
           </div>
 
-          <div className="sub-kicker pf-gap">{signatureSectionLabel}</div>
-          {moodItems.length > 0 && (
-            <div className="d2-profile-moods" role="tablist" aria-label="按氛围查看代表歌曲">
-              <button type="button" role="tab" aria-selected={activeMoodFilter === 'all'} className={activeMoodFilter === 'all' ? 'active' : ''} onClick={() => setActiveMoodFilter('all')}>全部</button>
-              {moodItems.slice(0, 5).map((mood) => {
-                const isSelected = activeMoodFilter === mood.tag
-                return (
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={isSelected}
-                    className={isSelected ? 'active' : ''}
-                    key={mood.tag}
-                    onClick={() => setActiveMoodFilter(isSelected ? 'all' : mood.tag)}
-                  >
-                    {mood.tag}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-          {filteredSignatureDisplay.length === 0 ? (
-            <p className="d2-profile-muted">
-              {activeMoodFilter === 'all' ? '还没有足够的主动线索，我先不替你选代表歌曲。' : '在这个情绪切片下，还没有收集到契合的歌曲。'}
-            </p>
-          ) : (
-            filteredSignatureDisplay.map((item, index) => {
-              const trackKeyStr = trackIdentity(item.track)
-              const isCurrentTrack = Boolean(trackKeyStr && trackKeyStr === trackIdentity(playbackState.current))
-              const isPlayingThis = playingKey === trackKeyStr
-
-              return (
-                <div className={`d2-profile-row${isCurrentTrack ? ' current' : ''}`} key={`${item.track.title}-${index}`}>
-                  <div>
-                    <strong>{String(index + 1).padStart(2, '0')} · {item.track.title}</strong>
-                    <small>{item.track.artist}{item.track.year ? ` · ${item.track.year}` : ''}</small>
-                    {item.note && <small className="d2-profile-row-note">{item.note}</small>}
-                  </div>
-                  <button
-                    className="d2-profile-row-btn"
-                    type="button"
-                    title="播放这首代表曲目"
-                    onClick={() => playSignature(item.track)}
-                    disabled={isPlayingThis}
-                  >
-                    {isPlayingThis ? '正在放' : '播放'}
-                  </button>
-                </div>
-              )
-            })
-          )}
-          {positiveArtistItems.length > 0 && (
-            <div className="d2-profile-group pf-artists">
-              <div className="d2-profile-group-label">人声线索</div>
-              {positiveArtistItems.slice(0, 5).map((artist) => (
-                <div className="d2-profile-row" key={artist.name}>
-                  <div>
-                    <strong>{artist.name}</strong>
-                    <small>{artist.note ?? profileEvidenceSourceLabel(artist)}</small>
-                    <span className="d2-profile-meter" aria-hidden="true"><span style={{ width: `${asPercent(artist.affinity)}%` }} /></span>
-                  </div>
-                  <span className="d2-profile-row-label">{asPercent(artist.affinity)}%</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="sub-kicker pf-gap">它 记 下 的 证 据<span className="n">· 本周与更早</span></div>
-          {memoryLoadState === 'loading' && <p className="d2-profile-muted" role="status">正在整理…</p>}
-          {memoryLoadState === 'error' && (
-            <div className="d2-profile-row">
-              <div><strong>这次没读到我记住的线索。</strong></div>
-              <button className="d2-profile-row-btn" type="button" onClick={() => void loadMemoryAudit(true)}>重新读取</button>
-            </div>
-          )}
-          {memoryLoadState === 'loaded' && auditEvents.length === 0 && <p className="d2-profile-muted">还没有形成可核对的记忆。</p>}
-          {memoryLoadState === 'loaded' && auditThisWeek.length > 0 && (
-            <>
-              <div className="ev-group">本 周</div>
-              {auditThisWeek.map((item) => renderAuditEvent(item, false))}
-            </>
-          )}
-          {memoryLoadState === 'loaded' && auditEarlier.length > 0 && (
-            <>
-              <div className="ev-group">更 早</div>
-              {auditEarlier.map((item) => renderAuditEvent(item, true))}
-            </>
-          )}
-          {memoryLoadState === 'loaded' && profileVersions && profileVersions.length > 0 && (
-            <>
-              <div className="sub-kicker pf-gap">画 像 版 本</div>
-              {profileVersions.slice(0, 6).map((version) => (
-                <div className="d2-profile-row" key={version.id}>
-                  <div>
-                    <strong>{displayDate(version.createdAt)}</strong>
-                    <small>{version.summary ?? version.portrait}</small>
-                  </div>
-                  <button
-                    className="d2-profile-row-btn"
-                    type="button"
-                    disabled={restoringVersionId != null}
-                    onClick={() => restoreProfileVersion(version.id)}
-                    title="恢复这版画像"
-                  >
-                    {restoringVersionId === version.id ? '恢复中' : '恢复'}
-                  </button>
-                </div>
-              ))}
-            </>
-          )}
-
-          <div className="sub-kicker pf-gap">这 周 ， 我 对 你 改 观 的 一 点</div>
-          {recentInsights.length > 0 ? recentInsights.slice(0, 2).map((insight) => (
-            <div className="d2-profile-row" key={insight.id}>
-              <div>
-                <strong>{insight.statement}</strong>
-                <small>{insight.evidenceLabel}</small>
-                <div className="d2-insight-actions" role="group" aria-label={`回应：${insight.statement}`}>
-                  <button type="button" disabled={Boolean(savingInsightId)} onClick={() => respondToInsight(insight, 'confirm')}>是我</button>
-                  <button type="button" disabled={Boolean(savingInsightId)} onClick={() => respondToInsight(insight, 'temporary')}>只是最近</button>
-                  <button type="button" disabled={Boolean(savingInsightId)} onClick={() => respondToInsight(insight, 'reject')}>不太对</button>
+          {/* —— 这周的新线索：画像走向 —— */}
+          <div className="trend-section">
+            <div className="gloss-title">这 周 的 新 线 索<span className="n">· 画像正在往哪里长</span></div>
+            {recentInsights.length > 0 ? recentInsights.slice(0, 4).map((insight) => (
+              <div className="trend-row" key={insight.id}>
+                <svg className="trend-spark" viewBox="0 0 120 36" preserveAspectRatio="none" aria-hidden="true">
+                  <path
+                    d={insight.direction === 'up' ? 'M2 28 C 24 26, 44 18, 62 20 S 92 12, 118 8' : 'M2 10 C 24 12, 44 20, 62 18 S 92 26, 118 28'}
+                    fill="none"
+                    stroke={insight.direction === 'up' ? '#184734' : '#315bd6'}
+                    strokeWidth="1.6"
+                  />
+                  <circle cx="118" cy={insight.direction === 'up' ? 8 : 28} r="2.5" fill={insight.direction === 'up' ? '#e45036' : '#315bd6'} />
+                </svg>
+                <div className="trend-text">
+                  <strong>{insight.statement}</strong>
+                  <small>{insight.evidenceLabel}{insight.confidence === 'strong' ? ' · 很确定' : ''}</small>
                 </div>
               </div>
-            </div>
-          )) : (
-            <p className="d2-profile-muted">最近的线索还不够跨天，我先不急着替你下结论。</p>
-          )}
+            )) : (
+              <p className="d2-profile-muted">这周还没有形成新的走向。多听几首，线索会自己浮上来。</p>
+            )}
+          </div>
 
+          {/* —— Echo 还想问你的 —— */}
           {questions[0] && (
-            <>
-              <div className="d2-profile-subtitle pf-gap">我还没看清</div>
-              <p className="d2-profile-question-copy">{questions[0].content}</p>
-              <div className="d2-profile-question-answer">
-                <form
-                  className="d2-profile-question-form"
-                  onSubmit={(event) => {
-                    event.preventDefault()
-                    void answerProfileQuestion()
-                  }}
-                >
-                  <input value={questionDraft} onChange={(event) => setQuestionDraft(event.target.value)} maxLength={180} placeholder="跟 Echo 说一句" />
-                  <button type="submit" disabled={!questionDraft.trim() || questionSaving}>{questionSaving ? '记着' : '告诉 Echo'}</button>
-                </form>
-              </div>
-            </>
-          )}
-
-          <div className="sub-kicker pf-gap">你 纠 正 过 它</div>
-          {auditCorrections.length > 0 ? auditCorrections.map((item) => (
-            <div className="corr" key={item.id}>
-              <span className="corr-seal" aria-hidden="true">已改正</span>
-              <q>{item.title}</q>
-              <small>{[auditTimeLabel(item.createdAt), item.detail].filter(Boolean).join(' · ')}</small>
-            </div>
-          )) : (
-            <p className="d2-profile-muted">还没有被你纠正过的记忆。说错了就直接讲，我会当场改。</p>
-          )}
-          {correctionOpen ? (
-            <div className="d2-profile-correct">
-              <textarea
-                value={correctionDraft}
-                onChange={(event) => setCorrectionDraft(event.target.value)}
-                maxLength={300}
-                placeholder="比如：我最近听王菲比较多，是那几天刚好在听。"
-              />
-              <div className="d2-profile-correct-actions">
-                <button className="d2-profile-row-btn" type="button" onClick={() => { setCorrectionOpen(false); setCorrectionDraft('') }} disabled={correctionSaving}>取消</button>
-                <button className="d2-profile-row-btn primary" type="button" onClick={submitCorrection} disabled={!correctionDraft.trim() || correctionSaving}>{correctionSaving ? '保存中' : '记下'}</button>
+            <div className="ask-section">
+              <div className="gloss-title">E C H O 还 想 问 你 的</div>
+              <div className="ask-card">
+                <q>{questions[0].content}</q>
+                <div className="ask-actions">
+                  <button type="button" className="pf-btn ask-btn" disabled={questionSaving} onClick={() => { void answerWith(questions[0].id, '是这个方向') }}>是这个方向</button>
+                  <button type="button" className="pf-btn ask-btn" disabled={questionSaving} onClick={() => { void answerWith(questions[0].id, '不太对，先别这么想') }}>不太对</button>
+                  <button type="button" className="pf-btn ask-btn plain" disabled={questionSaving} onClick={() => { setQuestions((current) => current.filter((item) => item.id !== questions[0].id)) }}>跳过</button>
+                </div>
               </div>
             </div>
-          ) : (
-            <button className="d2-profile-correct-link" type="button" onClick={() => setCorrectionOpen(true)}>这段理解不准</button>
           )}
-          {onOpenLearned && (
-            <p className="cross-link">这些纠正沉淀在 <button type="button" className="cross-link-btn" onClick={onOpenLearned}>设置 · Echo 学到了什么</button>，可随时删除或停用夜间复盘。</p>
-          )}
-          <p className="migrate-note">觉得哪里说得不对？不用找设置——直接对 Echo 说「你记错了，……」，它会当场改。</p>
         </>
       )}
     </div>
   )
 }
+

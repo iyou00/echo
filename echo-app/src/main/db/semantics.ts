@@ -136,6 +136,23 @@ export function splitMissingSemantics(
   return { missing, skipped }
 }
 
+/** 语种分布：track_semantics.language 聚合（品味页指纹「语言」瓣的数据源） */
+export function getLanguageDistribution(): Array<{ language: string; ratio: number }> {
+  const db = getDb()
+  const rows = db
+    .prepare(`
+      SELECT language, COUNT(*) AS cnt
+      FROM track_semantics
+      WHERE user_id = current_user_id() AND language IS NOT NULL AND language != ''
+      GROUP BY language
+      ORDER BY cnt DESC
+    `)
+    .all() as Array<{ language: string; cnt: number }>
+  const total = rows.reduce((sum, row) => sum + row.cnt, 0)
+  if (total === 0) return []
+  return rows.map((row) => ({ language: row.language, ratio: row.cnt / total }))
+}
+
 export function getSemanticSummary(): SemanticSummary {
   const db = getDb()
 

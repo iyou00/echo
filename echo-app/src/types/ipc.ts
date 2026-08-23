@@ -776,6 +776,7 @@ export interface EchoApi {
   taste: {
     getProfile(): Promise<{ profile: TasteProfile | null; questions: TasteQuestion[] }>
     getMemoryAudit(): Promise<MemoryAuditSummary>
+    getLanguageDistribution(): Promise<Array<{ language: string; ratio: number }>>
     getProfileVersions(): Promise<TasteProfileVersion[]>
     refreshStructuredProfile(): Promise<TasteProfile | null>
     regeneratePortrait(): Promise<TasteProfile | null>

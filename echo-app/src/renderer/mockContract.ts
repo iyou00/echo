@@ -11,7 +11,7 @@ export const ECHO_API_CONTRACT: ContractShape = {
   health: ['get', 'check'],
   scheduler: ['runCatchup'],
   chat: ['send', 'loadRecent', 'cancel', 'onChunk', 'onMessageInjected'],
-  taste: ['getProfile', 'getMemoryAudit', 'getProfileVersions', 'refreshStructuredProfile', 'regeneratePortrait', 'applySignal', 'respondToInsight', 'restoreProfileVersion', 'correctMemory', 'answerQuestion'],
+  taste: ['getProfile', 'getMemoryAudit', 'getLanguageDistribution', 'getProfileVersions', 'refreshStructuredProfile', 'regeneratePortrait', 'applySignal', 'respondToInsight', 'restoreProfileVersion', 'correctMemory', 'answerQuestion'],
   yinyi: ['generate', 'getByDate', 'getRange', 'getRandom', 'onGenerated'],
   queue: ['get', 'history', 'clearHistoryDates', 'markStatus'],
   favorites: ['list', 'count', 'listKeys', 'toggle', 'isFavorite', 'onChanged'],
