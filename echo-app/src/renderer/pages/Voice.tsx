@@ -6,6 +6,7 @@ import { sameTrack, trackIdentity } from '../../shared/trackIdentity'
 import { friendlyOperationError } from '../../shared/runtimeRecovery'
 import { nextVoiceFailureAction, shouldAcceptVoiceContinuousTrigger, shouldTriggerNextVoiceSegment } from './voiceContinuous'
 import { BoundaryState } from '../components/BoundaryState'
+import { InkGrindCanvas } from '../components/InkGrindCanvas'
 
 interface VoicePageProps extends AppPageProps {
   echo: EchoApi
@@ -836,14 +837,7 @@ export function VoicePage({
           })()
         ) : status === 'generating' ? (
           <div className="voice-grinding" aria-live="polite">
-            <svg className="voice-grind-svg" viewBox="0 0 240 96" aria-hidden="true">
-              <ellipse className="grind-pool" cx="120" cy="72" rx="86" ry="10" />
-              <ellipse className="grind-ink" cx="120" cy="72" rx="58" ry="6.5" />
-              <g className="grind-stick">
-                <rect x="-5" y="0" width="10" height="26" rx="2" />
-                <rect className="grind-stick-tip" x="-5" y="23" width="10" height="4" rx="2" />
-              </g>
-            </svg>
+            <InkGrindCanvas width={300} height={96} />
             <span>研 墨 中</span>
           </div>
         ) : (
