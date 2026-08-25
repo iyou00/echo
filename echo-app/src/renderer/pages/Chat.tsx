@@ -285,12 +285,17 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
       scheduleReplyStart(assistantMessage.id)
       const nextTrack = returnedTracks.find((track) => track.playUrl) ?? null
       if (nextTrack) {
-        const nextState = result.hints?.playbackAlreadyApplied
-          ? await echo.playback.getState()
-          : await echo.playback.play(nextTrack)
-        setPlaybackState(nextState)
-        if (!result.hints?.playbackAlreadyApplied) {
-          await primePlaybackQueue(returnedTracks, nextTrack)
+        // 立刻起歌，不等打字动画——歌先到，字跟上（原来的顺序造成了
+        // 3-6 秒「曲线回平静但歌还没播」的空档）。
+        if (result.hints?.playbackAlreadyApplied) {
+          const nextState = await echo.playback.getState()
+          setPlaybackState(nextState)
+        } else {
+          const [nextState] = await Promise.all([
+            echo.playback.play(nextTrack),
+            primePlaybackQueue(returnedTracks, nextTrack),
+          ])
+          setPlaybackState(nextState)
         }
       }
       await refreshQueue()
