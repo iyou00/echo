@@ -341,6 +341,25 @@ export async function fetchGenericDiscoveryCandidates(intent: RecommendationInte
   return uniqueTracks(groups.flat()).slice(0, 160)
 }
 
+/** 本地库按歌手找歌：导入的、收藏的、听过的——不需要网络 */
+export function localLibraryArtistTracks(artistQuery: string, targetCount: number, pool?: Track[]): Track[] {
+  const searchPool = pool ?? uniqueTracks([...listFavorites(), ...loadRecentRecommendedTracks(100), ...getAllImportedTracks()])
+  const needle = normalizeText(artistQuery)
+  if (!needle) return []
+  const matched = searchPool.filter((track) => {
+    const artist = normalizeText(track.artist)
+    return artist.includes(needle) || needle.includes(artist)
+  })
+  // 按 publishedAt/year 降序——「最新歌曲」的语义尽量满足
+  return matched
+    .sort((a, b) => {
+      const aTime = a.publishedAt ?? (a.year ? String(a.year) : '')
+      const bTime = b.publishedAt ?? (b.year ? String(b.year) : '')
+      return bTime.localeCompare(aTime)
+    })
+    .slice(0, Math.max(targetCount, 5))
+}
+
 function importedSeedTracks(intent: RecommendationIntent): Track[] {
   const imported = getAllImportedTracks()
   const favorites = listFavorites()
@@ -510,6 +529,17 @@ async function fetchCandidatesInternal(intent: RecommendationIntent, signal?: Ab
   const cookie = readNeteaseCookie()
   if (!cookie) throw new NeteaseAuthRequiredError()
   const candidates: Track[] = []
+
+  // —— 本地库优先（artist_request 场景）——
+  // 用户点名要某个歌手时，先查本地（导入/收藏/听过的），本地有就直接用。
+  // 云端搜索是补充，不是唯一来源——陈默之在本地有歌但云端搜索偶发失败时，
+  // 不应该整条链路报废。
+  if (intent.artistQuery) {
+    const localArtistTracks = localLibraryArtistTracks(intent.artistQuery, intent.targetCount)
+    if (localArtistTracks.length >= Math.min(intent.targetCount, 2)) {
+      candidates.push(...localArtistTracks)
+    }
+  }
 
   const keyword = keywordFromIntent(intent, determinism, context)
   const searchOffset = stableInt(`${determinism.daySeed}:search-offset:${intent.query}:${keyword}`, 4) * 10

@@ -663,8 +663,8 @@ export function VoicePage({
         return
       }
       if (!segment.audioUrl) {
-        if (segment.boundary) setVoiceBoundary(segment.boundary)
-        else setNotice(friendlyOperationError(segment.error, '我现在说不出话来，但文字还在。'))
+        // TTS 偶发失败不升格为卡片——文字和音乐都在，行内提示足够
+        setNotice(`这段的语音没合成出来，先用文字陪你。（${friendlyOperationError(segment.error, '语音服务瞬断')}）`)
         if (segment.track) {
           const next = await echo.playback.play(segment.track)
           setPlaybackState(next)
