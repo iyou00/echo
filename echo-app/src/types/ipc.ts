@@ -562,6 +562,8 @@ export interface Settings {
   }
   chat: {
     restoreOnStart: boolean
+    /** 翻译制路由开关。缺省/true = 走 LLM 翻译路由；false = 回退到旧分类路由。 */
+    translateRouter?: boolean
   }
   playback: {
     autoPlayNext: boolean
@@ -612,6 +614,7 @@ export interface SettingPathValueMap {
   'carePings.quietHours.end': string
   'carePings.pausedUntil': string
   'chat.restoreOnStart': boolean
+  'chat.translateRouter': boolean
   'playback.autoPlayNext': boolean
   'ui.theme': NonNullable<Settings['ui']['theme']>
   'ui.closeBehavior': NonNullable<Settings['ui']['closeBehavior']>

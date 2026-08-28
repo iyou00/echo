@@ -16,9 +16,13 @@ import {
 import { checkJailbreak, pickJailbreakResponse } from '../safety/jailbreak-filter'
 import {
   classifyFallbackChatIntent,
+  fallbackChatIntent,
+  resolvePreLlmChatIntent,
   routeChatIntentWithLlm,
   type ChatContinuationTarget,
   type ChatIntent,
+  type ChatIntentContext,
+  type ChatIntentKind,
 } from './intent'
 import type { ChatActiveTask } from './recommendationCandidates'
 import {
@@ -70,9 +74,91 @@ import {
   unavailableWeatherContext,
   type RecommendationWeatherContext,
 } from './weatherRecommendation'
+import { translateUserInput, type TranslatedInput } from './inputTranslator'
 import { createUiBoundary } from '../../../shared/uiBoundary'
 
 type ActiveChat = ChatActiveTask
+
+/**
+ * 翻译器不得改判的确定性意图：天气/身份/越界。
+ * 这三类本身不是音乐请求，翻译器若误判出 searchQuery，一律以确定性层为准。
+ */
+const TRANSLATION_IMMUNE_KINDS: ReadonlySet<ChatIntentKind> = new Set(['weather', 'identity', 'out_of_scope'])
+
+/**
+ * 翻译器只能补充、不能改写的意图。这三类各自对应一条独立的推荐管线或追问流程，
+ * 被改掉就是整条管线失效，不是降级：
+ * - `similar_to_track` → `recommendationCandidates.ts` 的 similar-to-track 管线
+ * - `feedback_current_track` → 当前曲目反馈重选 + 同上管线
+ * - `clarification_needed` → 同名歌多版本的追问流程
+ */
+const TRANSLATION_PRESERVED_KINDS: ReadonlySet<ChatIntentKind> = new Set([
+  'feedback_current_track',
+  'similar_to_track',
+  'clarification_needed',
+])
+
+/**
+ * 把翻译器的结果合并进确定性层的基础意图。
+ *
+ * 确定性优先，翻译只补充不改写：
+ * - 确定性层判为非音乐（天气/身份/越界）→ 翻译器再怎么说是音乐也不改判
+ * - 确定性层判为独立管线对应的 kind → 保留该 kind，只并入翻译出的搜索词与实体
+ * - 其余 → 按翻译出的实体推导 kind
+ *
+ * 返回 null 表示翻译结果不生效（没有搜索词）。
+ * 详见 specs/routing-layering-design.md §5.2。
+ */
+export function mergeTranslatedIntent(base: ChatIntent, translated: TranslatedInput): ChatIntent | null {
+  if (!translated.searchQuery) return null
+  if (TRANSLATION_IMMUNE_KINDS.has(base.kind)) return base
+
+  const preserved = TRANSLATION_PRESERVED_KINDS.has(base.kind)
+  const intent: ChatIntent = {
+    ...base,
+    kind: preserved
+      ? base.kind
+      : translated.title
+        ? 'direct_song'
+        : translated.artist
+          ? 'artist_request'
+          : 'mood_request',
+    // 当前曲目反馈里，「收藏」「不对但不想换」都不该触发放歌，尊重确定性层
+    wantsMusic: preserved ? base.wantsMusic : true,
+    confidence: 0.92,
+    routeSource: 'llm',
+    artistQuery: translated.artist ?? base.artistQuery,
+    seedTitle: translated.title ?? base.seedTitle,
+    moodTerms: translated.searchQuery.split(' ').slice(0, 2),
+    intentDescription: translated.intent ?? undefined,
+  }
+  intent.recommendationIntent = {
+    ...base.recommendationIntent,
+    searchQuery: translated.searchQuery,
+    seedTitle: translated.title ?? base.recommendationIntent.seedTitle,
+    artistQuery: translated.artist ?? base.recommendationIntent.artistQuery,
+  }
+  if (!preserved) {
+    // searchQuery 必须进 llmIntentOverride 才能到达召回层：
+    // fetchRecommendationCandidates 只把 override 传给 searchMusic（顺带短路
+    // inferMusicSearchIntent 的第二次 LLM 调用），recall 的 keywordFromIntent
+    // 也只消费 mergeIntent 后的 intent.searchQuery。只写在 recommendationIntent
+    // 上没有任何下游读取。clear* 防止 validateIntentOverride 把规则层从原话
+    // 猜的实体（描述性短语被当歌名）补回搜索意图。
+    // preserved 的三条独立管线不走这里：管线自带实体语义，翻译器不越权。
+    intent.llmIntentOverride = {
+      wantsMusic: true,
+      searchQuery: translated.searchQuery,
+      artistQuery: translated.artist ?? undefined,
+      seedTitle: translated.title ?? undefined,
+      clearArtistQuery: !translated.artist,
+      clearSeedTitle: !translated.title,
+      intentConfidence: 0.92,
+      evidence: ['输入翻译器'],
+    }
+  }
+  return intent
+}
 
 function identityReply(): string {
   return '我是 Echo，你电脑里的 AI 音乐伴侣。可以陪你聊当下的状态，帮你找歌、推荐歌，也会慢慢记住你喜欢什么声音。'
@@ -448,6 +534,7 @@ async function inferTasteSignal(text: string, intent: ChatIntent, currentTrack?:
 export const chatSendPipelineTestHelpers = {
   buildChatTasteSignal,
   isPositiveExplicitTrackPreference,
+  mergeTranslatedIntent,
   shouldRecordCurrentTrackRejectionAlongsideExternalRequest,
   shouldUsePendingIntentFallback,
   shouldForcePendingIntentCancel: (text: string, hasPendingIntent: boolean) => (
@@ -488,10 +575,10 @@ function resolvePendingIntentState(
 }
 
 function recentDialogBefore(messageId: number): Array<{ role: 'user' | 'assistant'; content: string }> {
-  return loadRecentConversations(6)
+  return loadRecentConversations(10)
     .filter((message) => message.id !== messageId)
-    .slice(-4)
-    .map((message) => ({ role: message.role, content: message.content }))
+    .slice(-8)
+    .map((message) => ({ role: message.role, content: message.content.slice(0, 200) }))
 }
 
 function handlePendingIntentReply(state: PendingIntentState, reply: ReplyFn): SendChatResult | null {
@@ -556,7 +643,30 @@ export async function runChatSendPipeline(
     const companionProfile = getCompanionProfile()
     const previousResponseStrategy = loadLatestAssistantResponseStrategy()
     const activeStageContext = loadActiveStageContext()
-    const routedIntent = await routeChatIntentWithLlm(trimmed, {
+    // —— 确定性优先 ——
+    // 情绪快速通道与已学到的先例不经过 LLM，必须让它们先于翻译器执行：
+    // 否则会绕过夜间复盘学到的纠正（系统永远学不会），也会把今早修好的
+    // 情绪快速通道架空。函数内部已按语种跳过非中文输入。
+    // 详见 specs/routing-layering-design.md P0-1、决策 3。
+    const preLlmIntent = resolvePreLlmChatIntent(trimmed)
+
+    // —— 翻译制 ——
+    // LLM 只做翻译（searchQuery + intent + entities），不做分类。
+    // 翻译成功且有 searchQuery 时，直接组装 ChatIntent 跳过旧路由。
+    // pendingIntent / pendingTasteQuestion 存在时一律走旧路由：多轮澄清与口味追问
+    // 的承接语义由旧路由负责，翻译器不参与（见 specs/translate-architecture.md 风险 #4）。
+    const translateRouterEnabled = settings.chat?.translateRouter !== false
+    let translatedResult: TranslatedInput | null = null
+    if (!preLlmIntent && translateRouterEnabled && !pendingIntentContext && !pendingTasteQuestion && trimmed.length >= 2) {
+      translatedResult = await translateUserInput(trimmed, settings, {
+        recentDialog: recentDialogBefore(userMessage.id),
+        musicSession,
+        currentTrack: currentPlaybackTrack ? { title: currentPlaybackTrack.title, artist: currentPlaybackTrack.artist } : null,
+      }, signal)
+    }
+
+    // 三路归并：确定性层 → 翻译器 → 旧路由兜底
+    const routeContext: ChatIntentContext = {
       currentTrack: currentPlaybackTrack,
       currentSceneKey: getCurrentScene()?.key,
       recentDialog: recentDialogBefore(userMessage.id),
@@ -568,7 +678,27 @@ export async function runChatSendPipeline(
       companionResponseBrief,
       currentConversationId: userMessage.id,
       activeStageContext,
-    }, signal)
+    }
+    let routedIntent: ChatIntent | null = preLlmIntent
+    if (!routedIntent && translatedResult) {
+      const base = classifyFallbackChatIntent(trimmed, { currentTrack: currentPlaybackTrack })
+      routedIntent = mergeTranslatedIntent(base, translatedResult)
+      if (routedIntent) {
+        console.info(`[translator] routing: kind=${routedIntent.kind} sq=${translatedResult.searchQuery}`)
+      }
+    }
+    if (!routedIntent && translatedResult) {
+      // 翻译成功但明确不是音乐请求：语义判断已由翻译器完成，不再二次调用 LLM
+      // 旧路由，直接用确定性兜底产出 kind 进回复生成（决策 2，省 1 次 LLM）。
+      // 兜底内部含规则分类 + musicSession 承接：若规则层仍认定是音乐请求，
+      // 以确定性层为准（确定性优先），行为与旧路由的规则路径完全一致。
+      routedIntent = fallbackChatIntent(trimmed, routeContext)
+      if (translatedResult.intent) routedIntent.intentDescription = translatedResult.intent
+      console.info(`[translator] non-music: kind=${routedIntent.kind}`)
+    }
+    if (!routedIntent) {
+      routedIntent = await routeChatIntentWithLlm(trimmed, routeContext, signal)
+    }
     if (routedIntent.stageContextProposal) {
       applyStageContextProposal({
         proposal: routedIntent.stageContextProposal,

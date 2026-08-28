@@ -2,6 +2,7 @@ import agentSoul from '../../../../prompts/agent-soul.md?raw'
 import carePingCasual from '../../../../prompts/care-ping-casual.md?raw'
 import carePingRecommend from '../../../../prompts/care-ping-recommend.md?raw'
 import carePingVoiceInvite from '../../../../prompts/care-ping-voice-invite.md?raw'
+import inputTranslator from '../../../../prompts/input-translator.md?raw'
 import portraitWriterV2 from '../../../../prompts/portrait-writer-v2.md?raw'
 import portraitWriter from '../../../../prompts/portrait-writer.md?raw'
 import scenario100 from '../../../../prompts/scenario-100.md?raw'
@@ -16,6 +17,7 @@ const EMBEDDED_PROMPTS: Record<string, string> = {
   'prompts/care-ping-casual.md': carePingCasual,
   'prompts/care-ping-recommend.md': carePingRecommend,
   'prompts/care-ping-voice-invite.md': carePingVoiceInvite,
+  'prompts/input-translator.md': inputTranslator,
   'prompts/portrait-writer-v2.md': portraitWriterV2,
   'prompts/portrait-writer.md': portraitWriter,
   'prompts/scenario-100.md': scenario100,

@@ -107,3 +107,21 @@ export function stripMusicLanguageCues(text: string): string {
   }
   return result.replace(/\s+/g, ' ').trim()
 }
+
+// —— 用户输入语种判定 ——
+// 确定性路由层（情绪快速通道、规则分类）的正则全部面向中文，非中文输入既匹配不上、
+// 也不该参与决策，应交给天然多语言的 LLM 翻译器（specs/routing-layering-design.md 决策 3）。
+
+const HAN_PATTERN = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/
+const KANA_PATTERN = /[\u3040-\u30ff]/
+const HANGUL_PATTERN = /[\uac00-\ud7af\u1100-\u11ff]/
+
+/**
+ * 输入是否应走中文确定性路径：含汉字，且不是日文（含假名）或韩文（含谚文）。
+ *
+ * 日文同样使用汉字，单看汉字区分不了「疲れた」和「累了」，靠假名/谚文判定更准。
+ */
+export function isChineseDominantInput(text: string): boolean {
+  if (!HAN_PATTERN.test(text)) return false
+  return !KANA_PATTERN.test(text) && !HANGUL_PATTERN.test(text)
+}

@@ -1,6 +1,8 @@
 export {
   classifyChatIntent,
   classifyFallbackChatIntent,
+  fallbackChatIntent,
+  resolvePreLlmChatIntent,
   routeChatIntentWithLlm,
   type ChatIntent,
   type ChatIntentClarification,

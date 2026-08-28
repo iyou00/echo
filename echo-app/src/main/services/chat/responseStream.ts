@@ -152,9 +152,9 @@ export function friendlyError(error: unknown): string {
     if (error.kind === 'config') return '我连不上自己脑子。去设置里看看 API key?'
     if (error.kind === 'auth') return '我连不上自己脑子。API key 好像过期了。'
     if (error.kind === 'rate_limit') return '我们今天聊得有点快,我这边被限速了。等一下再来。'
-    return '我这会儿好像走神了,你刚说的我没跟上,再说一遍?'
+    return '这句我刚才没接上,你再说一遍?我在听。'
   }
-  return '我这会儿好像走神了,你刚说的我没跟上,再说一遍?'
+  return '这句我刚才没接上,你再说一遍?我在听。'
 }
 
 export function recordChatStreamError(error: unknown): void {
@@ -267,6 +267,7 @@ export async function streamChatReply(options: {
   responseStrategy?: CompanionResponseStrategy
   companionProfile?: CompanionProfile
   weatherContext?: RecommendationWeatherContext
+  intentDescription?: string
   emitChunk?: ChatChunkEmitter
 }): Promise<string> {
   let content = ''
@@ -279,6 +280,7 @@ export async function streamChatReply(options: {
     responseStrategy: options.responseStrategy,
     companionProfile: options.companionProfile,
     weatherContext: options.weatherContext,
+    intentDescription: options.intentDescription,
   })
   try {
     for await (const chunk of streamChat(options.settings, messages, { signal: options.active.signal, maxTokens: 300 })) {

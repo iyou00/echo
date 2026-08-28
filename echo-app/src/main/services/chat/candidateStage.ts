@@ -206,8 +206,11 @@ export async function prepareCandidateStage(input: CandidateStageInput): Promise
     ? input.initialChatIntent
     : {
         ...classifyDerivedRecommendationIntent(recommendationQuery, input),
-        // 从路由器携带 searchQuery（快速通道/LLM 生成的搜索词），不被重建丢弃
-        searchQuery: input.initialChatIntent.recommendationIntent?.searchQuery,
+        // searchQuery 不再在 ChatIntent 顶层补挂：路由器（快速通道/翻译器）已把它
+        // 写进 llmIntentOverride，classifyDerivedRecommendationIntent 内部的
+        // mergeIntent 会携带进 recommendationIntent.searchQuery。
+        // 翻译器对用户意图的自然语言理解也随重建保留，供回复生成消歧参考。
+        intentDescription: input.initialChatIntent.intentDescription,
         // 快速通道已清除 seedTitle（描述性短语不是歌名），重建也不要恢复它
         seedTitle: input.initialChatIntent.kind === 'mood_request'
           ? undefined

@@ -47,9 +47,17 @@ function emptyModelReply(
   tracks: Track[],
   companionResponseBrief: CompanionResponseBrief | null = null,
   responseStrategy?: CompanionResponseStrategy,
+  musicSearch?: { expected: boolean; query?: string },
 ): string {
   if (tracks.length === 0) {
-    return applyCompanionResponseStyle('我刚才走神了一下。你接着说，我在听。', userText, companionResponseBrief, responseStrategy)
+    // 区分两种空手而归：想要音乐但没搜到（给下一步动作）vs 纯聊天没接住（邀请继续）。
+    // 不再用「走神」——产品方要求任何输入都要有承接用户状态的出路。
+    if (musicSearch?.expected) {
+      const query = musicSearch.query?.trim().slice(0, 12)
+      const head = query ? `按「${query}」找了一圈，` : '这次'
+      return applyCompanionResponseStyle(`${head}能直接放的版本暂时没找到。你说个歌手，或者换个说法，我马上再找一轮。`, userText, companionResponseBrief, responseStrategy)
+    }
+    return applyCompanionResponseStyle('这句我没一下接住。你接着说，或者换个说法都行，我在听。', userText, companionResponseBrief, responseStrategy)
   }
 
   const picked = tracks.length === 1 ? '我给你挑了这首' : `我给你挑了${tracks.length}首`
@@ -134,11 +142,17 @@ export async function runRecommendationResponseStage(input: RecommendationRespon
       responseStrategy,
       companionProfile,
       weatherContext,
+      intentDescription: recommendationIntent.intentDescription,
       emitChunk,
     }))
 
     if (!content.trim()) {
-      content = emptyModelReply(trimmed, tracks, companionResponseBrief, responseStrategy)
+      const musicQuery = recommendationIntent.recommendationIntent?.searchQuery
+        ?? [recommendationIntent.artistQuery, recommendationIntent.seedTitle].filter(Boolean).join(' ')
+      content = emptyModelReply(trimmed, tracks, companionResponseBrief, responseStrategy, {
+        expected: musicActionExpected,
+        query: musicQuery || undefined,
+      })
     }
     if (requested.overLimit && tracks.length > 0 && !content.includes(OVER_LIMIT_RECOMMENDATION_LINE)) {
       content = `${OVER_LIMIT_RECOMMENDATION_LINE}${content ? ` ${content}` : ''}`

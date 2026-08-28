@@ -88,6 +88,7 @@ export const SETTINGS_PATHS: readonly SettingPath[] = [
   'carePings.quietHours.end',
   'carePings.pausedUntil',
   'chat.restoreOnStart',
+  'chat.translateRouter',
   'playback.autoPlayNext',
   'ui.theme',
   'ui.closeBehavior',
@@ -189,6 +190,7 @@ function validateSettingValue(path: SettingPath, value: unknown): unknown {
     case 'carePings.detectFullscreen':
     case 'carePings.quietHours.enabled':
     case 'chat.restoreOnStart':
+    case 'chat.translateRouter':
     case 'playback.autoPlayNext':
     case 'window.closeHintShown':
       return assertBoolean(value, path)

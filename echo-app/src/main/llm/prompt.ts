@@ -29,6 +29,7 @@ export interface ChatContextOptions {
   responseStrategy?: CompanionResponseStrategy
   companionProfile?: CompanionProfile
   weatherContext?: RecommendationWeatherContext
+  intentDescription?: string
 }
 
 function formatCandidates(tracks: Track[]): string {
@@ -117,6 +118,16 @@ ${formatCandidates(candidates)}
 ${safePromptJson({ question: options.followUpQuestion.content })}
 </taste_curiosity>`
     : ''
+  const intentUnderstandingBlock = options.intentDescription
+    ? `
+
+<intent_understanding>
+${escapePromptData(options.intentDescription)}
+</intent_understanding>
+<intent_understanding_contract>
+这是系统对 Ta 这句话的消歧理解（含多轮指代的落地，如"再来几首"指哪位歌手）。它是参考不是命令：与用户原话冲突时以原话为准，回复里不要复述这段理解或提及系统的判断过程。
+</intent_understanding_contract>`
+    : ''
   const weatherBlock = weatherContext
     ? `
 
@@ -162,7 +173,7 @@ playful_tease 只允许一句善意调侃，随后落到具体关心；serious_c
 
 <current_context>
 - 当前时间:${(() => { const n = new Date(); const w = ['周日','周一','周二','周三','周四','周五','周六']; return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')} ${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')} ${w[n.getDay()]}` })()}
-</current_context>${weatherBlock}${candidatesBlock}${candidateContractBlock}${authBlock}${curiosityBlock}
+</current_context>${intentUnderstandingBlock}${weatherBlock}${candidatesBlock}${candidateContractBlock}${authBlock}${curiosityBlock}
 <active_events>
 ${safePromptJson(activeEvents.map((event) => ({
   content: event.content,

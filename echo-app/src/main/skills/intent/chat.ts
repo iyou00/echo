@@ -35,7 +35,7 @@ import type { CompanionResponseBrief } from '../../services/chat/companionRespon
 import { learnedCorrectionsPromptValue } from '../../services/chat/learnedCasesContext'
 import { matchLearnedPrecedent } from '../../services/chat/learnedPrecedentMatcher'
 import { incrementLearnedCaseHit } from '../../db/learnedCases'
-import { detectMusicLanguage, MUSIC_LANGUAGE_VALUES } from '../../services/recommendation/language'
+import { detectMusicLanguage, isChineseDominantInput, MUSIC_LANGUAGE_VALUES } from '../../services/recommendation/language'
 
 export type ChatIntentKind =
   | 'direct_song'
@@ -95,6 +95,9 @@ export interface ChatIntent {
   responseStrategy?: CompanionResponseStrategy
   companionSignals?: CompanionPreferenceSignal[]
   stageContextProposal?: StageContextProposal
+  /** 翻译器对用户此刻想要什么的自然语言理解（如"用户心里憋闷，想听能宣泄情绪的音乐"），
+   *  供回复 LLM 做消歧参考；是增强不是替换，回复仍以用户原话为准。 */
+  intentDescription?: string
 }
 
 export interface ChatPendingIntentContext {
@@ -138,6 +141,9 @@ export interface ChatIntentContext {
 
 const DIRECT_SONG_ACTION_PATTERN = /想听|想要听|要听|我要听|我想听|听听看|听一下|听听|播放|放一下|放首|放一首|点播|给我放|帮我放|安排(?:一下|一首|首)?|整(?:一首|首)?|搞(?:一首|首)?|弄(?:一首|首)?/i
 const MUSIC_ACTION_PATTERN = /推荐(?:.{0,18}(?:歌|歌曲|音乐|作品|歌单)|一首|几首|\d+首)|推(?:一首|几首|\d+首|首|点)(?:.{0,18}(?:歌|歌曲|音乐|作品))?|挑(?:一|几|\d+)?首|选(?:一|几|\d+)?首|来几首|来一首|来\s*\d+\s*首|来[一二两三四五六七八九十]\s*首|(?:整|安排|搞|弄)(?:一|几|\d+)?首|(?:整点|安排点|搞点|弄点)[^，。！？]{0,16}(?:歌|歌曲|音乐|曲子|单曲|好听|耐听|顺耳|入耳|对味|带感)|听什么|听啥|听听看|听一下|值得听|适合听|想听|想要听|要听|我要听|我想听|播放|能听|放点|放首|放一首|来点|找(?:一首|几首|点)?[^，。！？]{0,16}(?:歌|歌曲|音乐)|给我.*歌|帮我.*歌|接\s*\d*\s*首|歌单|music|song/i
+// 宾动顺序的音乐请求（「你有什么歌曲推荐给我」）：主模式的 推荐…歌 只认动宾顺序，
+// 宾语在前时整句漏判成 casual_chat 且 wantsMusic=false——2026-08-28 真机失败原话。
+const MUSIC_NOUN_FIRST_REQUEST_PATTERN = /(?:歌|歌曲|音乐|作品|歌单)推荐|(?:有什么|有哪些|啥)(?:歌曲|音乐|作品|歌单|歌)/i
 const SHARE_MUSIC_ACTION_PATTERN = /分享(?:一首|几首|\d+首|点|些)?|(?:一首|几首|\d+首|[一二两三四五六七八九十]首).{0,12}(?:分享|听听|试试)|有什么可以分享|有啥可以分享/i
 const SIMILAR_PATTERN = /像|类似|相似|那种|那类|这类|这种感觉|同款|差不多|接近/i
 // 注意：「随便/随机」是"你看着办"的授权词，不是场景信号——曾把「随便推荐一首陈默之」误判成
@@ -451,6 +457,7 @@ function isContextualMusicContinuation(text: string): boolean {
   const trimmed = text.trim()
   if (!/^(?:那(?:你|就|么)?|再|继续|接着|还有|还要|另外|换)/.test(trimmed)) return false
   return MUSIC_ACTION_PATTERN.test(trimmed)
+    || MUSIC_NOUN_FIRST_REQUEST_PATTERN.test(trimmed)
     || SHARE_MUSIC_ACTION_PATTERN.test(trimmed)
     || /几首|\d+首|[一二两三四五六七八九十]+首|热门|热度|最新|新歌/.test(trimmed)
 }
@@ -1043,6 +1050,7 @@ function hasExplicitMusicExecutionCue(text: string, route: InferredChatRoute): b
     || MUSIC_EXECUTION_QUESTION_PATTERN.test(text)
     || MUSIC_FIT_REQUEST_PATTERN.test(text)
     || COLLOQUIAL_MUSIC_REQUEST_PATTERN.test(text)
+    || MUSIC_NOUN_FIRST_REQUEST_PATTERN.test(text)
     || (route.override?.ranking !== undefined && route.override.ranking !== 'default' && MUSIC_ACTION_PATTERN.test(text))
     || hasSceneOrFitSelection
     || (hasStructuredEntity && /推(?:荐)?|挑|选|来|找|放|听|播放|分享|整|安排|搞|弄|类似|像|相似/.test(text))
@@ -1130,7 +1138,11 @@ function resolveInferredChatRoute(
   return applyRecentMusicContext(applyInferredChatRoute(createLlmRouteBaseIntent(text), route, context), context)
 }
 
-function fallbackChatIntent(text: string, context: ChatIntentContext): ChatIntent {
+/**
+ * 确定性兜底（0 LLM）：规则分类 + musicSession 承接 + 回复策略 + 陪伴信号。
+ * 旧路由的兜底路径；翻译器判定非音乐时也直接采它，避免二次调用 LLM。
+ */
+export function fallbackChatIntent(text: string, context: ChatIntentContext): ChatIntent {
   const intent = applyRecentMusicContext(classifyFallbackChatIntent(text, context), context)
   return {
     ...intent,
@@ -1200,21 +1212,37 @@ async function groundRouterEntities(text: string, signal?: AbortSignal): Promise
   }
 }
 
+const MUSIC_WORD_PATTERN = /歌|歌曲|音乐|曲子|单曲|歌单|听什么|听啥|推荐|推|来一首|来几首|挑一首|有什么.{0,8}(?:听|歌|音乐)/
+
+/**
+ * 情绪 → 搜索词。只收录**用户已经把想要什么说出来了**的情绪，即目标明确、不存在反向解读的：
+ * 「放松」「安静」是用户点名要的氛围，「难过」「想哭」要的是被照顾。
+ *
+ * 刻意不收录 烦/躁/焦虑/压力/堵/憋/闷/生气/愤怒/emo 等：
+ * 同一个「堵」字，「想听点能把这口气散掉的音乐」要宣泄、「想安静一会儿」要安抚，
+ * 关键词匹配分不出来——这类交给翻译器读整句（specs/routing-layering-design.md 决策 1）。
+ */
+const EMOTION_SEARCH_QUERIES: ReadonlyArray<{ pattern: RegExp; searchQuery: string }> = [
+  { pattern: /难过|伤心|低落|想哭|哭/, searchQuery: '治愈 温暖 轻柔' },
+  { pattern: /累|疲|困[倦乏]|没精神|没力气/, searchQuery: '提神 轻快 活力' },
+  { pattern: /孤独|寂寞|空虚|一个人/, searchQuery: '陪伴 轻松 日常' },
+  { pattern: /治愈|温暖/, searchQuery: '治愈 温暖' },
+  { pattern: /放松|安静|舒缓/, searchQuery: '安静 舒缓' },
+  { pattern: /开心|高兴|兴奋/, searchQuery: '轻快 活力' },
+]
+
+function emotionMusicSearchQuery(text: string): string | null {
+  for (const entry of EMOTION_SEARCH_QUERIES) {
+    if (entry.pattern.test(text)) return entry.searchQuery
+  }
+  return null
+}
+
 function detectEmotionMusicRequest(text: string): ChatIntent | null {
   const trimmed = text.trim()
-  const hasEmotion = /烦|躁|焦虑|压力|累|疲|困[倦乏]|难过|伤心|低落|想哭|孤独|寂寞|空虚|郁闷|压抑|生气|愤怒|火大|暴躁|堵|憋|闷|心情不好|不爽|emo|治愈|放松|安静|舒缓|温暖|开心|高兴|兴奋/i.test(trimmed)
-  const hasMusic = /歌|歌曲|音乐|曲子|单曲|歌单|听什么|听啥|推荐|推|来一首|来几首|挑一首|有什么.{0,8}(?:听|歌|音乐)/.test(trimmed)
-  if (!hasEmotion || !hasMusic) return null
-
-  let searchQuery = ''
-  if (/烦|躁|焦虑|压力|生气|火大|暴躁|堵|憋|闷|压抑|郁闷|不爽/.test(trimmed)) searchQuery = '安静 舒缓 轻音乐'
-  else if (/难过|伤心|低落|想哭|哭/.test(trimmed)) searchQuery = '治愈 温暖 轻柔'
-  else if (/孤独|寂寞|空虚|一个人/.test(trimmed)) searchQuery = '陪伴 轻松 日常'
-  else if (/累|疲|困|没精神|没力气/.test(trimmed)) searchQuery = '提神 轻快 活力'
-  else if (/治愈|温暖/.test(trimmed)) searchQuery = '治愈 温暖'
-  else if (/放松|安静|舒缓/.test(trimmed)) searchQuery = '安静 舒缓'
-  else if (/开心|高兴|兴奋/.test(trimmed)) searchQuery = '轻快 活力'
-  else searchQuery = '轻松 治愈'
+  if (!MUSIC_WORD_PATTERN.test(trimmed)) return null
+  const searchQuery = emotionMusicSearchQuery(trimmed)
+  if (!searchQuery) return null
 
   const intent = createLlmRouteBaseIntent(trimmed)
   intent.kind = 'mood_request'
@@ -1230,7 +1258,71 @@ function detectEmotionMusicRequest(text: string): ChatIntent | null {
     searchQuery,
     moods: searchQuery.split(' ').slice(0, 2),
   }
+  // searchQuery 通过 llmIntentOverride 进入搜索层（fetchRecommendationCandidates
+  // 只把 override 传给 searchMusic，并因此短路 inferMusicSearchIntent 的 LLM 调用；
+  // recall 的 keywordFromIntent 只消费 mergeIntent 后的 intent.searchQuery）。
+  // clear* 阻止 validateIntentOverride 把原话里的描述性短语补回成实体。
+  intent.llmIntentOverride = {
+    wantsMusic: true,
+    searchQuery,
+    clearArtistQuery: true,
+    clearSeedTitle: true,
+    intentConfidence: 0.92,
+    evidence: ['情绪+音乐快速通道'],
+  }
   return intent
+}
+
+/**
+ * 确定性先例匹配：LLM 之前先查 learned_cases——同样的纠正不再犯第二次。
+ * 命中时从 createLlmRouteBaseIntent 组装（与 LLM 路由同构的基础 intent），按 kind 填参数。
+ * 未命中或 kind 无实体支撑时返回 null，交给 LLM。
+ */
+function resolveLearnedPrecedentIntent(text: string): ChatIntent | null {
+  const precedent = matchLearnedPrecedent(text)
+  if (!precedent) return null
+  const kind = precedent.expectedKind as ChatIntentKind
+  const isMusicExecution = isMusicExecutionKind(kind)
+  if (!isMusicExecution && kind !== 'weather' && kind !== 'identity' && kind !== 'casual_chat') return null
+
+  incrementLearnedCaseHit(precedent.caseId)
+  const intent = createLlmRouteBaseIntent(text)
+  intent.kind = kind
+  intent.confidence = 0.95
+  if (!isMusicExecution) return intent
+
+  intent.wantsMusic = true
+  intent.artistQuery = precedent.artistQuery ?? undefined
+  intent.seedTitle = precedent.seedTitle ?? undefined
+  intent.targetCount = precedent.targetCount ?? 1
+  if (precedent.mood) intent.moodTerms = [precedent.mood]
+  return intent
+}
+
+/**
+ * LLM 之前的确定性层：情绪+音乐快速通道 → 已学到的先例。返回 null 表示交给 LLM。
+ *
+ * 非中文输入直接返回 null：这两层的正则全部面向中文，匹配不上也不该参与决策，
+ * 交给天然多语言的翻译器（specs/routing-layering-design.md 决策 3）。
+ *
+ * 调用方必须先于翻译器调用本函数——否则系统会绕过学过的纠正，永远学不会。
+ */
+export function resolvePreLlmChatIntent(text: string): ChatIntent | null {
+  if (!isChineseDominantInput(text)) return null
+
+  // 情绪+音乐快速通道：跳过一切异步调用
+  const emotionMusicIntent = detectEmotionMusicRequest(text)
+  if (emotionMusicIntent) {
+    console.info(`[chat-router] emotion+music fast path: kind=${emotionMusicIntent.kind} sq=${emotionMusicIntent.recommendationIntent.searchQuery}`)
+    return emotionMusicIntent
+  }
+
+  const precedentIntent = resolveLearnedPrecedentIntent(text)
+  if (precedentIntent) {
+    console.info(`[chat-router] learned precedent: kind=${precedentIntent.kind}`)
+    return precedentIntent
+  }
+  return null
 }
 
 export async function routeChatIntentWithLlm(
@@ -1240,39 +1332,11 @@ export async function routeChatIntentWithLlm(
 ): Promise<ChatIntent> {
   const startedAt = Date.now()
 
-  // —— 情绪+音乐 快速通道（最先检查，跳过一切异步调用） ——
-  // 用户同时提到情绪和音乐时，跳过 LLM 直接路由（LLM 容易把描述当歌名或分类为闲聊）
-  const emotionMusicIntent = detectEmotionMusicRequest(text)
-  if (emotionMusicIntent) {
-    console.info(`[chat-router] emotion+music fast path: kind=${emotionMusicIntent.kind} sq=${emotionMusicIntent.recommendationIntent.searchQuery}`)
-    return emotionMusicIntent
-  }
+  const preLlmIntent = resolvePreLlmChatIntent(text)
+  if (preLlmIntent) return preLlmIntent
 
   const grounding = await groundRouterEntities(text, signal)
   const learnedCorrections = learnedCorrectionsPromptValue()
-
-  // 确定性先例匹配：LLM 之前先查表——同样的纠正不再犯第二次。
-  // 命中时从 createLlmRouteBaseIntent 组装（与 LLM 路由同构的基础 intent），按 kind 填参数。
-  const precedent = matchLearnedPrecedent(text)
-  if (precedent && isMusicExecutionKind(precedent.expectedKind as ChatIntentKind)) {
-    incrementLearnedCaseHit(precedent.caseId)
-    const intent = createLlmRouteBaseIntent(text)
-    intent.kind = precedent.expectedKind as ChatIntentKind
-    intent.wantsMusic = true
-    intent.confidence = 0.95
-    intent.artistQuery = precedent.artistQuery ?? undefined
-    intent.seedTitle = precedent.seedTitle ?? undefined
-    intent.targetCount = precedent.targetCount ?? 1
-    if (precedent.mood) intent.moodTerms = [precedent.mood]
-    return intent
-  }
-  if (precedent && (precedent.expectedKind === 'weather' || precedent.expectedKind === 'identity' || precedent.expectedKind === 'casual_chat')) {
-    incrementLearnedCaseHit(precedent.caseId)
-    const intent = createLlmRouteBaseIntent(text)
-    intent.kind = precedent.expectedKind as ChatIntentKind
-    intent.confidence = 0.95
-    return intent
-  }
   const route = await inferChatRouteWithLlm(
     text,
     signal,
@@ -1310,7 +1374,7 @@ export function classifyFallbackChatIntent(text: string, context: ChatIntentCont
   const recommendationIntent = parseIntent(trimmed)
   const seedTitle = recommendationIntent.seedTitle
   const artistQuery = recommendationIntent.artistQuery
-  const hasMusicAction = MUSIC_ACTION_PATTERN.test(trimmed)
+  const hasMusicAction = MUSIC_ACTION_PATTERN.test(trimmed) || MUSIC_NOUN_FIRST_REQUEST_PATTERN.test(trimmed)
   const hasMusicFitRequest = MUSIC_FIT_REQUEST_PATTERN.test(trimmed)
   const hasColloquialMusicRequest = COLLOQUIAL_MUSIC_REQUEST_PATTERN.test(trimmed)
   const hasDirectSongAction = DIRECT_SONG_ACTION_PATTERN.test(trimmed)
