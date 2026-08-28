@@ -185,6 +185,23 @@ describe('mergeTranslatedIntent', () => {
       const recallIntent = mergeIntent(parseIntent('心里堵得慌，想听点能把这口气散掉的音乐'), merged?.llmIntentOverride)
       expect(recallIntent.searchQuery).toBe('宣泄 节奏')
     })
+
+    it('does not wipe a deterministic entity the translator missed (search layer)', async () => {
+      // 回归：clear* 曾无条件跟随翻译器缺实体置位——翻译器漏抽歌手时，
+      // recommendFromNetease 的 mergeIntent 会把确定性层抽到的实体 delete 掉，
+      // 「推荐几首陈默之的歌」退化成泛泛的情绪搜索。搜索层同样要守住
+      // 「实体只补充不清空」契约。
+      const { mergeIntent, parseIntent } = await import('../recommendation/intent')
+      const base = classifyFallbackChatIntent('推荐几首陈默之的歌')
+      expect(base.artistQuery).toBe('陈默之')
+
+      const merged = mergeTranslatedIntent(base, translate({ artist: null, searchQuery: '安静 舒缓' }))
+      expect(merged?.llmIntentOverride?.clearArtistQuery).toBe(false)
+
+      const recallIntent = mergeIntent(parseIntent('推荐几首陈默之的歌'), merged?.llmIntentOverride)
+      expect(recallIntent.artistQuery).toBe('陈默之')
+      expect(recallIntent.searchQuery).toBe('安静 舒缓')
+    })
   })
 
   describe('intentDescription', () => {

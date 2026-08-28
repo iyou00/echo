@@ -151,8 +151,12 @@ export function mergeTranslatedIntent(base: ChatIntent, translated: TranslatedIn
       searchQuery: translated.searchQuery,
       artistQuery: translated.artist ?? undefined,
       seedTitle: translated.title ?? undefined,
-      clearArtistQuery: !translated.artist,
-      clearSeedTitle: !translated.title,
+      // 只有翻译器和确定性层都没有实体时才 clear：翻译器漏抽时不能误杀
+      // 确定性层抽到的实体——override 的 clear* 会在 recommendFromNetease 的
+      // mergeIntent 里 delete 掉 parseIntent 重新抽取的实体（「实体只补充不清空」
+      // 契约在搜索层同样要守住）。
+      clearArtistQuery: !translated.artist && !base.artistQuery,
+      clearSeedTitle: !translated.title && !base.seedTitle,
       intentConfidence: 0.92,
       evidence: ['输入翻译器'],
     }

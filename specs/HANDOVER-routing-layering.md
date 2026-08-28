@@ -390,8 +390,12 @@ rm -rf dist && npm run build                                  # 见 §8.2
 
 **修复**：两处产 intent 的地方同时把 searchQuery 写进 `llmIntentOverride`：
 - `mergeTranslatedIntent`（sendPipeline.ts）：非 preserved kind 时附带
-  `{ wantsMusic: true, searchQuery, artistQuery/seedTitle 或 clear* 标志, intentConfidence, evidence }`；
-- `detectEmotionMusicRequest`（chat.ts）：附带 `{ wantsMusic: true, searchQuery, clearArtistQuery: true, clearSeedTitle: true, … }`。
+  `{ wantsMusic: true, searchQuery, artistQuery/seedTitle 或 clear* 标志, intentConfidence, evidence }`。
+  **clear 标志只在翻译器和确定性层都没有该实体时置位**（review 修正：无条件置位会在翻译器
+  漏抽实体时，让 recommendFromNetease 的 mergeIntent 把确定性层抽到的实体 delete 掉——
+  「推荐几首陈默之的歌」会退化成泛泛情绪搜索。回归测试锁死，见 mergeTranslatedIntent.test）；
+- `detectEmotionMusicRequest`（chat.ts）：无条件 clear——它的 base 以 `inferEntities: false`
+  构建且快速通道已判定为纯情绪请求，无实体可保。
 
 一石三鸟：recall 真正消费翻译结果；`fetchRecommendationCandidates` 的
 `llmIntentOverride ?? inferMusicSearchIntent` 短路（**省一次 LLM**）；
