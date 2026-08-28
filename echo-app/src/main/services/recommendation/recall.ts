@@ -232,18 +232,75 @@ function keywordFromIntent(intent: RecommendationIntent, determinism: Recommenda
     return unique([intent.seedTitle, intent.artistQuery ?? ''].filter(Boolean)).join(' ')
   }
   const languageKeyword = musicLanguageSearchTerms(intent.language)[0] ?? ''
+
+  // —— 第一优先：LLM 生成的 searchQuery ——
+  // 路由器已将用户的情绪/场景翻译为搜索友好的关键词，直接消费
+  if (intent.searchQuery && intent.searchQuery.trim().length >= 2) {
+    return unique([intent.searchQuery.trim(), languageKeyword].filter(Boolean)).join(' ')
+  }
+
+  // —— 第二优先：硬编码情绪→关键词映射（LLM 失败时的兜底） ——
+  // 同时检查 intent.moods（被 ALLOWED_MOODS 过滤）和 intent.query（用户原话）
+  const moodKeywords = moodSearchKeywords(intent)
+
+  // 如果情绪关键词已命中，不再拼入用户原话——原话里的情绪表述
+  // （"当心情烦躁的时候"）对搜索引擎是噪音，会稀释匹配
+  const rawTextFallback = moodKeywords.length > 0
+    ? ''
+    : compactIntentQuery(intent.query)
+
   const parts = [
     sceneKeyword(intent, determinism, context),
     context.similarityArtistQuery ?? '',
     intent.artistQuery ?? '',
     languageKeyword,
-    intent.moods.includes('放松') || intent.tempo === 'slow' ? '慢歌' : '',
-    intent.moods.includes('清醒') || intent.energy === 'high' ? '激昂 节奏 热血' : '',
+    ...moodKeywords,
     intent.scenes.includes('雨天') ? '雨天' : '',
     intent.scenes.includes('夜晚') || intent.scenes.includes('睡前') ? '夜晚' : '',
-    compactIntentQuery(intent.query),
+    rawTextFallback,
   ].filter(Boolean)
   return parts.join(' ') || '华语流行'
+}
+
+/**
+ * 情绪 → 搜索关键词映射（兜底层，LLM 的 searchQuery 优先消费）。
+ * 覆盖 ALLOWED_MOODS 词表中的全部 10 个情绪 + 常见负面/复合情绪表达。
+ * 返回去重后的关键词组（最多 2 组，避免搜索词过长稀释匹配）。
+ */
+function moodSearchKeywords(intent: RecommendationIntent): string[] {
+  const keywords: string[] = []
+  // 同时搜索 moods（结构化标签）和 query（用户原话）——
+  // LLM 路由器可能把「烦躁」放进 moods 但 ALLOWED_MOODS 过滤掉了，
+  // 但原始 query 文本里始终有这个词
+  const haystack = `${intent.moods.join(' ')} ${intent.query}`
+  const has = (pattern: RegExp) => pattern.test(haystack)
+
+  // —— 正向情绪（ALLOWED_MOODS 中的 10 个全覆盖） ——
+  if (intent.moods.includes('放松') || intent.moods.includes('松弛') || intent.tempo === 'slow') {
+    keywords.push('慢歌 舒缓')
+  }
+  if (intent.moods.includes('清醒') || intent.moods.includes('热烈') || intent.energy === 'high') {
+    keywords.push('激昂 节奏 热血')
+  }
+  if (has(/轻快/)) keywords.push('轻快 活力')
+  if (has(/治愈/)) keywords.push('治愈 温暖')
+  if (has(/怀旧/)) keywords.push('经典 老歌')
+  if (has(/陪伴/)) keywords.push('日常 轻松')
+  if (has(/孤独/)) keywords.push('深夜 舒缓')
+  if (has(/发呆/)) keywords.push('轻音乐 氛围')
+
+  // —— 负面情绪（用户想要的是对应的舒缓/宣泄，不是搜「烦躁」） ——
+  if (has(/烦躁|焦虑|压力大|生气|郁闷|压抑|烦(?!躁)/)) keywords.push('安静 舒缓 轻音乐')
+  if (has(/难过|伤心|低落|想哭|哭泣|哭(?!泣)/)) keywords.push('治愈 温暖 轻柔')
+  if (has(/孤独|寂寞|空虚|一个人/)) keywords.push('陪伴 轻松 日常')
+  if (has(/累|疲惫|困(?!难)|没精神|没力气/)) keywords.push('提神 轻快 活力')
+  if (has(/愤怒|气愤|火大|暴躁/)) keywords.push('宣泄 摇滚 节奏')
+
+  // —— 场景衍生 ——
+  if (intent.scenes.includes('运动') || intent.scenes.includes('通勤')) keywords.push('节奏 动感')
+  if (intent.scenes.includes('午休') || intent.scenes.includes('独处')) keywords.push('安静 氛围')
+
+  return unique(keywords).slice(0, 2)
 }
 
 function styleTagId(intent: RecommendationIntent): number | null {

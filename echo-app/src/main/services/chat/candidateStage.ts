@@ -204,7 +204,15 @@ export async function prepareCandidateStage(input: CandidateStageInput): Promise
   const recommendationQuery = effectiveMusicSearchQuery(rawRecommendationQuery, input.initialChatIntent)
   const recommendationIntent = recommendationQuery === input.effectiveText
     ? input.initialChatIntent
-    : classifyDerivedRecommendationIntent(recommendationQuery, input)
+    : {
+        ...classifyDerivedRecommendationIntent(recommendationQuery, input),
+        // 从路由器携带 searchQuery（快速通道/LLM 生成的搜索词），不被重建丢弃
+        searchQuery: input.initialChatIntent.recommendationIntent?.searchQuery,
+        // 快速通道已清除 seedTitle（描述性短语不是歌名），重建也不要恢复它
+        seedTitle: input.initialChatIntent.kind === 'mood_request'
+          ? undefined
+          : classifyDerivedRecommendationIntent(recommendationQuery, input).seedTitle,
+      }
   const requested = parseRequestedTrackCount(input.trimmed)
   const targetCount = Math.max(1, Math.min(MAX_RECOMMENDATION_COUNT, Math.floor(recommendationIntent.targetCount || requested.targetCount)))
   const countExplicit = requested.explicit || targetCount > requested.targetCount

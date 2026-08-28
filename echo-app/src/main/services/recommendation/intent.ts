@@ -28,6 +28,8 @@ export interface RecommendationIntent {
   query: string
   seedTitle?: string
   artistQuery?: string
+  /** LLM 生成的搜索关键词（2-4 个词，空格分隔），供推荐引擎直接搜索用 */
+  searchQuery?: string
   intentConfidence?: number
   evidence?: string[]
   rejectIf?: IntentRejectIf
@@ -49,6 +51,7 @@ export interface IntentOverride {
   targetCount?: number
   seedTitle?: string
   artistQuery?: string
+  searchQuery?: string
   intentConfidence?: number
   evidence?: string[]
   rejectIf?: IntentRejectIf
@@ -200,6 +203,10 @@ function normalizeIntentOverride(raw: unknown): IntentOverride | null {
   if (typeof value.artistQuery === 'string' && value.artistQuery.trim()) {
     override.artistQuery = normalizeMusicArtistName(value.artistQuery).slice(0, 40)
   }
+  if (typeof value.searchQuery === 'string' && value.searchQuery.trim()) {
+    const sq = value.searchQuery.trim().replace(/\s+/g, ' ').slice(0, 30)
+    if (sq.length >= 2 && !/[.!?！？。]/.test(sq)) override.searchQuery = sq
+  }
   if (typeof value.intentConfidence === 'number' && Number.isFinite(value.intentConfidence)) {
     override.intentConfidence = Math.max(0, Math.min(1, value.intentConfidence))
   }
@@ -274,6 +281,7 @@ export function mergeIntent(base: RecommendationIntent, override?: IntentOverrid
   if (!override) return base
   const merged: RecommendationIntent = {
     ...base,
+    searchQuery: override.searchQuery ?? base.searchQuery,
     source: 'hybrid',
     intentConfidence: override.intentConfidence,
     evidence: unique([...(base.evidence ?? []), ...(override.evidence ?? [])]).slice(0, 8),

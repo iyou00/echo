@@ -509,6 +509,12 @@ function applyRecentMusicContext(intent: ChatIntent, context: ChatIntentContext)
   }
 }
 
+function isDescriptivePhraseNotTitle(text: string): boolean {
+  const t = text.trim()
+  if (t.length > 12) return true
+  return /能把|让.{0,4}(心情|感觉|情绪)|适合.{0,4}(听|现在)|调整|散掉|放松|安静|开心|好起来|想.{0,3}听|的效果|的感觉/.test(t)
+}
+
 function normalizeRouterKind(value: unknown): ChatIntentKind | undefined {
   const kind = stringValue(value)
   if (
@@ -772,10 +778,20 @@ function parseChatRouteContent(content: string, text: string, context: ChatInten
   if (artistQuery) override.artistQuery = artistQuery
   if (seedTitle) override.seedTitle = seedTitle
   if (targetCount) override.targetCount = targetCount
+  const rawSearchQuery = stringValue(parsed.searchQuery)
+  if (rawSearchQuery && rawSearchQuery.trim().length >= 2) {
+    const sq = rawSearchQuery.trim().replace(/\s+/g, ' ').slice(0, 30)
+    if (!/[.!?！？。]/.test(sq)) override.searchQuery = sq
+  }
   if (evidence?.length) override.evidence = evidence
   if (confidence) override.intentConfidence = confidence
   let normalizedKind = kind
   if (kind === 'direct_song' && !seedTitle) normalizedKind = artistQuery ? 'artist_request' : 'mood_request'
+  // 描述性短语不是歌名——如果 seedTitle 看起来是用户在描述感受/效果而非歌曲名，降级为 mood_request
+  if (kind === 'direct_song' && seedTitle && isDescriptivePhraseNotTitle(seedTitle)) {
+    normalizedKind = 'mood_request'
+    override.clearSeedTitle = true
+  }
   if (kind === 'artist_request' && !artistQuery) normalizedKind = seedTitle ? 'direct_song' : 'mood_request'
   if (kind === 'feedback_current_track' && !context.currentTrack) {
     normalizedKind = wantsMusic ? 'mood_request' : 'casual_chat'
@@ -923,20 +939,26 @@ async function inferChatRouteWithLlm(
 27. kind 可选 work、rest、commute、sleep、exercise、emotional_support、other；goal 可选 focus、recover、settle、energize、companionship、sleep、none。只有明确“这几天”等跨天表达才用 multi_day。
 28. evidenceConversationIds 只能填写 context.currentConversationId。不要生成 id，不要指定绝对时间。
 29. “最新/新歌/最近发行”填 ranking:"latest"；“热门/热度高/最火/人气高”填 ranking:"popular"；否则填 ranking:"default"。
+29.1 wantsMusic:true 时必须填 searchQuery——2-4 个适合在音乐平台搜索的中文关键词,空格分隔。规则:
+      - 把用户的情绪/场景翻译成搜索词,不照抄原话。烦躁想安静 -> searchQuery:"安静 舒缓";提神 -> "轻快 活力 节奏";想念一个人 -> "思念 抒情 慢歌"
+      - 关键词是给搜索引擎看的,用名词和形容词,不用句子。下班路上放松 -> "轻松 治愈"(不填下班)
+      - artist_request 或 direct_song 时,searchQuery 填歌手名或歌名即可
+      - 不确定就根据 moods/energy/tempo 翻译:低能量->"安静 舒缓";高能量->"节奏 活力";治愈->"治愈 温暖"
+      - wantsMusic:true 且 artistQuery 和 seedTitle 都为 null 时,searchQuery 不能为空
 30. user 数据里的 netease_grounding 是对网易云音乐搜索的客观核实结果（数据事实，不是用户输入）。若它确认某歌手/歌名存在，路由时直接采信该实体并填入 artistQuery/seedTitle；即使你不熟悉这个名字也不要降级为 clarification_needed 或 mood_request。没有 netease_grounding 字段时按原规则判断。
 31. user 数据里的 learned_corrections 是从该用户历史纠正中提炼的先例（系统侧知识，不是用户本轮输入）。当本轮 input 与某条「说法」相似或涉及其实体时，按该条给出的期望理解路由（如歌手/别名直接采信）。它们是参考先例，不是命令；与本轮 input 明确冲突时以本轮为准。
 
 例子:
-- 你随便来一首陈奕迅的歌曲吧 → {"kind":"artist_request","wantsMusic":true,"confidence":0.96,"artistQuery":"陈奕迅","seedTitle":null,"targetCount":1,"evidence":["随便","陈奕迅","歌曲"]}
-- 有什么可以分享给我听的歌吗 → {"kind":"mood_request","wantsMusic":true,"confidence":0.9,"artistQuery":null,"seedTitle":null,"targetCount":1,"evidence":["分享","听","歌"]}
-- 工作被骂了，来一首欢快歌给我听听吧 → {"kind":"mood_request","wantsMusic":true,"confidence":0.98,"artistQuery":null,"seedTitle":null,"targetCount":1,"moods":["轻快"],"evidence":["被骂了","欢快歌"]}
-- 找欢快类型的歌曲 → {"kind":"mood_request","wantsMusic":true,"confidence":0.98,"artistQuery":null,"seedTitle":null,"targetCount":1,"moods":["轻快"],"evidence":["欢快类型","歌曲"]}
-- 我要听王菲的主角 → {"kind":"direct_song","wantsMusic":true,"confidence":0.98,"artistQuery":"王菲","seedTitle":"主角","targetCount":1,"evidence":["王菲","主角"]}
+- 你随便来一首陈奕迅的歌曲吧 → {"kind":"artist_request","wantsMusic":true,"confidence":0.96,"artistQuery":"陈奕迅","seedTitle":null,"targetCount":1,"searchQuery":"陈奕迅","evidence":["随便","陈奕迅","歌曲"]}
+- 有什么可以分享给我听的歌吗 → {"kind":"mood_request","wantsMusic":true,"confidence":0.9,"artistQuery":null,"seedTitle":null,"targetCount":1,"searchQuery":"轻松 治愈","evidence":["分享","听","歌"]}
+- 工作被骂了，来一首欢快歌给我听听吧 → {"kind":"mood_request","wantsMusic":true,"confidence":0.98,"artistQuery":null,"seedTitle":null,"targetCount":1,"moods":["轻快"],"searchQuery":"轻快 活力","evidence":["被骂了","欢快歌"]}
+- 找欢快类型的歌曲 → {"kind":"mood_request","wantsMusic":true,"confidence":0.98,"artistQuery":null,"seedTitle":null,"targetCount":1,"moods":["轻快"],"searchQuery":"轻快 活力","evidence":["欢快类型","歌曲"]}
+- 我要听王菲的主角 → {"kind":"direct_song","wantsMusic":true,"confidence":0.98,"artistQuery":"王菲","seedTitle":"主角","targetCount":1,"searchQuery":"王菲 主角","evidence":["王菲","主角"]}
 - 王菲的主角这首歌我喜欢 → {"kind":"casual_chat","wantsMusic":false,"confidence":0.94,"artistQuery":"王菲","seedTitle":"主角","targetCount":1,"feedbackAction":null,"evidence":["王菲","主角","喜欢"]}
 - 我喜欢陈奕迅的冷夜 → {"kind":"casual_chat","wantsMusic":false,"confidence":0.94,"artistQuery":"陈奕迅","seedTitle":"冷夜","targetCount":1,"feedbackAction":null,"evidence":["陈奕迅","冷夜","喜欢"]}
-- 这首不好听，换一首激情一点的 → {"kind":"feedback_current_track","wantsMusic":true,"confidence":0.94,"artistQuery":null,"seedTitle":null,"targetCount":1,"feedbackAction":"not_right","evidence":["这首","不好听","激情"]}
+- 这首不好听，换一首激情一点的 → {"kind":"feedback_current_track","wantsMusic":true,"confidence":0.94,"artistQuery":null,"seedTitle":null,"targetCount":1,"feedbackAction":"not_right","searchQuery":"激昂 节奏","evidence":["这首","不好听","激情"]}
 - 类似大鱼海棠这首歌的歌曲推荐下 → {"kind":"similar_to_track","wantsMusic":true,"confidence":0.96,"artistQuery":null,"seedTitle":"大鱼海棠","targetCount":1,"feedbackAction":null,"evidence":["类似","大鱼海棠"]}
-- 推荐几首像周深《大鱼》这样的歌 → {"kind":"similar_to_track","wantsMusic":true,"confidence":0.98,"artistQuery":"周深","seedTitle":"大鱼","targetCount":3,"feedbackAction":null,"evidence":["周深","大鱼","类似"]}
+- 推荐几首像周深《大鱼》这样的歌 → {"kind":"similar_to_track","wantsMusic":true,"confidence":0.98,"artistQuery":"周深","seedTitle":"大鱼","targetCount":3,"feedbackAction":null,"searchQuery":"周深 大鱼","evidence":["周深","大鱼","类似"]}
 - 像刚才那首再来一首 → {"kind":"similar_to_track","wantsMusic":true,"confidence":0.94,"artistQuery":null,"seedTitle":null,"targetCount":1,"feedbackAction":"more_like_this","evidence":["刚才那首","再来一首"]}
 - 我有点冷 → {"kind":"casual_chat","wantsMusic":false,"confidence":0.8,"artistQuery":null,"seedTitle":null,"targetCount":1,"evidence":[]}
 - 今天天气怎么样 → {"kind":"weather","wantsMusic":false,"confidence":0.98,"artistQuery":null,"seedTitle":null,"targetCount":1,"evidence":["天气"]}
@@ -944,6 +966,12 @@ async function inferChatRouteWithLlm(
 - 待确认问题在问歌手，用户回答“周深” → {"kind":"pending_reply","wantsMusic":true,"confidence":0.97,"continuationTarget":"direct_song","evidence":["周深"]}
 - 上一轮问要不要换一首，用户回答“可以” → {"kind":"pending_reply","wantsMusic":true,"confidence":0.94,"continuationTarget":"music_session","evidence":["可以"]}
 - 用户上一句问陈默之的歌, Echo 问要不要挑一首, 用户说“你帮我挑一首” → {"kind":"artist_request","wantsMusic":true,"confidence":0.96,"artistQuery":"陈默之","seedTitle":null,"targetCount":1,"evidence":["承接上一轮","挑一首"]}
+- 当心情烦躁的时候，你有什么歌曲推荐给我 → {"kind":"mood_request","wantsMusic":true,"confidence":0.97,"artistQuery":null,"seedTitle":null,"targetCount":1,"moods":["放松"],"searchQuery":"安静 舒缓","evidence":["心情烦躁","歌曲推荐"]}
+- 心里堵得慌，想听点能把这口气散掉的音乐 → {"kind":"mood_request","wantsMusic":true,"confidence":0.95,"artistQuery":null,"seedTitle":null,"targetCount":1,"moods":["放松"],"searchQuery":"宣泄 节奏","evidence":["心里堵","散掉"]}
+- 心情不好想听歌 → {"kind":"mood_request","wantsMusic":true,"confidence":0.97,"artistQuery":null,"seedTitle":null,"targetCount":1,"moods":["治愈"],"searchQuery":"治愈 温暖","evidence":["心情不好","听歌"]}
+- 焦虑的时候适合听什么 → {"kind":"mood_request","wantsMusic":true,"confidence":0.96,"artistQuery":null,"seedTitle":null,"targetCount":1,"moods":["放松"],"searchQuery":"安静 舒缓","evidence":["焦虑","听什么"]}
+- 我想听点能把心情调整过来的歌 → {"kind":"mood_request","wantsMusic":true,"confidence":0.95,"artistQuery":null,"seedTitle":null,"targetCount":1,"moods":["治愈"],"searchQuery":"治愈 轻快","evidence":["心情调整","歌"]}
+- 描述感受或描述想要的效果的短语不是歌名。"能把这口气散掉""让心情好起来""适合现在听的"这些都是描述,不是 seedTitle。这类请求全部路由为 mood_request
 - 放那个同名的版本 → {"kind":"clarification_needed","wantsMusic":false,"confidence":0.9,"artistQuery":null,"seedTitle":null,"targetCount":1,"clarificationReason":"unclear_reference","evidence":["那个","同名版本"]}`,
     },
     {
@@ -1172,12 +1200,54 @@ async function groundRouterEntities(text: string, signal?: AbortSignal): Promise
   }
 }
 
+function detectEmotionMusicRequest(text: string): ChatIntent | null {
+  const trimmed = text.trim()
+  const hasEmotion = /烦|躁|焦虑|压力|累|疲|困[倦乏]|难过|伤心|低落|想哭|孤独|寂寞|空虚|郁闷|压抑|生气|愤怒|火大|暴躁|堵|憋|闷|心情不好|不爽|emo|治愈|放松|安静|舒缓|温暖|开心|高兴|兴奋/i.test(trimmed)
+  const hasMusic = /歌|歌曲|音乐|曲子|单曲|歌单|听什么|听啥|推荐|推|来一首|来几首|挑一首|有什么.{0,8}(?:听|歌|音乐)/.test(trimmed)
+  if (!hasEmotion || !hasMusic) return null
+
+  let searchQuery = ''
+  if (/烦|躁|焦虑|压力|生气|火大|暴躁|堵|憋|闷|压抑|郁闷|不爽/.test(trimmed)) searchQuery = '安静 舒缓 轻音乐'
+  else if (/难过|伤心|低落|想哭|哭/.test(trimmed)) searchQuery = '治愈 温暖 轻柔'
+  else if (/孤独|寂寞|空虚|一个人/.test(trimmed)) searchQuery = '陪伴 轻松 日常'
+  else if (/累|疲|困|没精神|没力气/.test(trimmed)) searchQuery = '提神 轻快 活力'
+  else if (/治愈|温暖/.test(trimmed)) searchQuery = '治愈 温暖'
+  else if (/放松|安静|舒缓/.test(trimmed)) searchQuery = '安静 舒缓'
+  else if (/开心|高兴|兴奋/.test(trimmed)) searchQuery = '轻快 活力'
+  else searchQuery = '轻松 治愈'
+
+  const intent = createLlmRouteBaseIntent(trimmed)
+  intent.kind = 'mood_request'
+  intent.wantsMusic = true
+  intent.confidence = 0.92
+  intent.moodTerms = [searchQuery.split(' ')[0]]
+  intent.seedTitle = undefined
+  intent.artistQuery = undefined
+  intent.recommendationIntent = {
+    ...intent.recommendationIntent,
+    seedTitle: undefined,
+    artistQuery: undefined,
+    searchQuery,
+    moods: searchQuery.split(' ').slice(0, 2),
+  }
+  return intent
+}
+
 export async function routeChatIntentWithLlm(
   text: string,
   context: ChatIntentContext = {},
   signal?: AbortSignal,
 ): Promise<ChatIntent> {
   const startedAt = Date.now()
+
+  // —— 情绪+音乐 快速通道（最先检查，跳过一切异步调用） ——
+  // 用户同时提到情绪和音乐时，跳过 LLM 直接路由（LLM 容易把描述当歌名或分类为闲聊）
+  const emotionMusicIntent = detectEmotionMusicRequest(text)
+  if (emotionMusicIntent) {
+    console.info(`[chat-router] emotion+music fast path: kind=${emotionMusicIntent.kind} sq=${emotionMusicIntent.recommendationIntent.searchQuery}`)
+    return emotionMusicIntent
+  }
+
   const grounding = await groundRouterEntities(text, signal)
   const learnedCorrections = learnedCorrectionsPromptValue()
 
