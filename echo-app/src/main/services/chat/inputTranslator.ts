@@ -33,25 +33,42 @@ function readTranslatorPrompt(): string {
   return userMarker > 0 ? raw.slice(0, userMarker).trim() : raw.trim()
 }
 
-function sanitizeTranslated(raw: unknown): TranslatedInput | null {
+/** 引语信号：用户在引用一句话/观点/歌词，而不是在点歌。 */
+const QUOTE_SIGNAL = /有人说|人们说|大家说|他说|她说|听到这[句番]|这句(?:话|歌词)|这番话|所谓|歌词(?:里|中)?(?:有|说|写[道着]?)/
+
+function sanitizeTranslated(raw: unknown, userText = ''): TranslatedInput | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
   const record = raw as Record<string, unknown>
 
   const sq = typeof record.searchQuery === 'string' ? record.searchQuery.trim().replace(/\s+/g, ' ').slice(0, 30) : ''
-  const searchQuery = sq.length >= 2 && !/[.!?！？。]/.test(sq) ? sq : null
+  let searchQuery = sq.length >= 2 && !/[.!?！？。]/.test(sq) ? sq : null
 
   const intent = typeof record.intent === 'string' ? record.intent.trim().slice(0, 120) || null : null
 
   const entities = record.entities && typeof record.entities === 'object' && !Array.isArray(record.entities)
     ? record.entities as Record<string, unknown> : {}
   const artist = typeof entities.artist === 'string' && entities.artist.trim() ? entities.artist.trim().slice(0, 40) : null
-  const title = typeof entities.title === 'string' && entities.title.trim() ? entities.title.trim().slice(0, 60) : null
+  let title = typeof entities.title === 'string' && entities.title.trim() ? entities.title.trim().slice(0, 60) : null
 
   // 描述性短语不是歌名
-  if (title && isDescriptivePhrase(title)) return { searchQuery, intent, artist, title: null }
+  if (title && isDescriptivePhrase(title)) title = null
+
+  // 引语守卫：用户在引用一句话问「适合什么歌」时，引语本身既不是歌名也不是
+  // 搜索词——「有人说爱是自由」的「爱是自由」是主题，不是点播《爱是自由》。
+  // 误判成歌名会走 direct_song 精确搜索，小众短语搜不到可播放版本。
+  if (userText && QUOTE_SIGNAL.test(userText)) {
+    if (title && userText.includes(title) && !userText.includes(`《${title}》`)) title = null
+    if (searchQuery && userText.includes(searchQuery) && /[是的了]/.test(searchQuery)) {
+      // 引语整句当搜索词时拆成主题关键词：「爱是自由」→「爱 自由」
+      const decomposed = searchQuery.replace(/[是的了]/g, ' ').replace(/\s+/g, ' ').trim()
+      searchQuery = decomposed.length >= 2 ? decomposed : searchQuery
+    }
+  }
 
   return { searchQuery, intent, artist, title }
 }
+
+export const inputTranslatorTestHelpers = { sanitizeTranslated }
 
 function isDescriptivePhrase(text: string): boolean {
   const t = text.trim()
@@ -90,7 +107,7 @@ export async function translateUserInput(
     // 解析 JSON（LLM 可能带 markdown 围栏）
     const cleaned = raw.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim()
     const parsed = JSON.parse(cleaned)
-    const result = sanitizeTranslated(parsed)
+    const result = sanitizeTranslated(parsed, trimmed)
     if (!result) return null
 
     console.info(`[translator] sq=${result.searchQuery ?? 'null'} artist=${result.artist ?? '-'} title=${result.title ?? '-'}`)

@@ -162,6 +162,14 @@ export const INTENT_EVAL_CASES: IntentEvalCase[] = [
     addedAt: '2026-08-28',
   },
   {
+    id: 'real-2026-08-28-quote-theme-not-title',
+    text: '有人说爱是自由，听到这句话，你觉得适合听哪首歌？',
+    expect: { kind: 'mood_request', artistQuery: null, seedTitle: null, wantsMusic: true },
+    source: 'real-failure',
+    note: '0.2.1 真机失败：翻译器把引语「爱是自由」当 title/searchQuery，direct_song 精确搜索小众短语无可播放版本，契约兜底回复「不乱报歌名」。确定性层本身判得对（mood_request 无实体）——本条锁定降级路径不再退化，翻译层由引语守卫（inputTranslator）+ prompt 规则修复。',
+    addedAt: '2026-08-28',
+  },
+  {
     id: 'guard-weather-not-music',
     text: '今天天气怎么样',
     expect: { kind: 'weather', artistQuery: null, wantsMusic: false },

@@ -180,4 +180,46 @@ describe('translateUserInput', () => {
 
     expect(mocks.completeChat.mock.calls.at(-1)?.[2]).toMatchObject({ temperature: 0 })
   })
+
+  // 引语守卫：用户引用一句话问「适合什么歌」时，引语不是歌名也不是搜索词。
+  // 2026-08-28 真机失败：翻译器把「爱是自由」当 title/searchQuery，direct_song
+  // 精确搜索小众短语，无可播放版本，契约兜底回复「不乱报歌名」。
+  describe('引语/主题类请求守卫', () => {
+    const quoteText = '有人说爱是自由，听到这句话，你觉得适合听哪首歌？'
+
+    it('drops a quoted clause misread as a song title', async () => {
+      replyWith({ searchQuery: '爱 自由', intent: '用户想要贴合主题的歌', entities: { artist: null, title: '爱是自由' } })
+
+      const result = await translateUserInput(quoteText, settings, {})
+
+      expect(result?.title).toBeNull()
+      expect(result?.searchQuery).toBe('爱 自由')
+    })
+
+    it('decomposes a quoted clause echoed verbatim as the search query', async () => {
+      replyWith({ searchQuery: '爱是自由', intent: 'x', entities: { artist: null, title: null } })
+
+      const result = await translateUserInput(quoteText, settings, {})
+
+      expect(result?.searchQuery).toBe('爱 自由')
+    })
+
+    it('keeps an explicitly bracketed title even inside a quote context', async () => {
+      const explicit = '有人说爱是自由，但你直接放《爱是自由》吧'
+      replyWith({ searchQuery: '爱是自由', intent: 'x', entities: { artist: null, title: '爱是自由' } })
+
+      const result = await translateUserInput(explicit, settings, {})
+
+      expect(result?.title).toBe('爱是自由')
+    })
+
+    it('leaves non-quote inputs untouched', async () => {
+      replyWith({ searchQuery: '爱是自由', intent: 'x', entities: { artist: null, title: '爱是自由' } })
+
+      const result = await translateUserInput('放一首爱是自由', settings, {})
+
+      expect(result?.title).toBe('爱是自由')
+      expect(result?.searchQuery).toBe('爱是自由')
+    })
+  })
 })

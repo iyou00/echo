@@ -30,6 +30,11 @@
   - 「想念一个人」→ "思念 抒情 慢歌"
   - 「心里堵得慌」→ "宣泄 节奏"
 - 关键词是给搜索引擎看的，用名词和形容词，不用句子
+- **引语/观点/主题类请求按主题翻译，不引用原话**：
+  - 用户引用一句话、一个观点、一句歌词，问「适合听什么歌」时，这是主题推荐，不是点歌
+  - entities 一律不填——引语不是歌名，也不是歌手
+  - searchQuery 用主题关键词，把引语拆成内容词：「有人说爱是自由」→ "爱 自由"，不是 "爱是自由"
+  - 「你觉得」「适合」是征询推荐，被引用的短语永远不进 entities
 - 用户说了具体歌手或歌名时，searchQuery 填歌手名或歌名
   - 「陈默之的新歌」→ "陈默之"
   - 「王菲的主角」→ "王菲 主角"
@@ -98,3 +103,5 @@
 - （上下文 musicSession: 陈默之）再来几首 → {"searchQuery":"陈默之","intent":"用户想继续听陈默之的歌","entities":{"artist":"陈默之","title":null}}
 - Taylor Swift 的歌 → {"searchQuery":"Taylor Swift","intent":"用户想听 Taylor Swift 的歌","entities":{"artist":"Taylor Swift","title":null}}
 - I'm so stressed, give me a song → {"searchQuery":"宣泄 舒缓","intent":"用户压力很大，想听缓解压力的歌","entities":{"artist":null,"title":null}}
+- 有人说爱是自由，听到这句话，你觉得适合听哪首歌？ → {"searchQuery":"爱 自由","intent":"用户被「爱是自由」这句话触动，想要贴合这个主题的歌","entities":{"artist":null,"title":null}}
+- 歌词里唱到时间都去哪儿了，放点类似的 → {"searchQuery":"时光 感怀","intent":"用户被歌词里关于时间的内容触动，想要同主题的歌","entities":{"artist":null,"title":null}}
