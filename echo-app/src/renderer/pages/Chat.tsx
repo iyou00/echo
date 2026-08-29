@@ -76,6 +76,8 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
   const [messageBoundaries, setMessageBoundaries] = useState<Record<number, { snapshot: UiBoundarySnapshot; retryText: string }>>({})
   const activeAssistantId = useRef<number | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  // 舞台模式只渲染最新一轮，AI 消息至多一条——ref 无歧义
+  const aiMsgRef = useRef<HTMLDivElement | null>(null)
   const autoScrollPaused = useRef(false)
   const chatNoticeTimerRef = useRef<number | null>(null)
   const chunkBuffers = useRef<Record<number, string>>({})
@@ -208,10 +210,33 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
   }, [echo])
 
   useEffect(() => {
-    const element = scrollRef.current
-    if (!element || autoScrollPaused.current) return
-    element.scrollTop = element.scrollHeight
+    if (autoScrollPaused.current) return
+    const container = scrollRef.current
+    if (container) container.scrollTop = container.scrollHeight
+    const aiMessage = aiMsgRef.current
+    if (aiMessage) aiMessage.scrollTop = aiMessage.scrollHeight
   }, [messages])
+
+  // 衬线字体晚加载、窗口尺寸变化都会让已滚到底的内容重新"弹回"中部——
+  // 用 ResizeObserver 把 AI 消息钉在底部，直到用户主动上滚。
+  useEffect(() => {
+    const aiMessage = aiMsgRef.current
+    if (!aiMessage || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      if (autoScrollPaused.current) return
+      aiMessage.scrollTop = aiMessage.scrollHeight
+    })
+    observer.observe(aiMessage)
+    return () => observer.disconnect()
+  }, [messages])
+
+  // 舞台模式下消息绝对定位、容器不滚；长回复在 AI 消息内部滚动，
+  // 打字过程中保持末尾可见（否则最后几行会被浮在底部的输入框盖住）。
+  function handleAiMessageScroll() {
+    const element = aiMsgRef.current
+    if (!element) return
+    autoScrollPaused.current = !isNearConversationBottom(element)
+  }
 
   function handleConversationScroll() {
     const element = scrollRef.current
@@ -645,7 +670,12 @@ export function ChatPage({ echo, navigate, playbackState, setPlaybackState, hasL
           renderEmptyChat()
         ) : (
           stageMessages.map((message) => (
-            <div key={message.id} className={message.role === 'user' ? 'msg me' : 'msg ai'}>
+            <div
+              key={message.id}
+              ref={message.role === 'assistant' ? aiMsgRef : undefined}
+              onScroll={message.role === 'assistant' ? handleAiMessageScroll : undefined}
+              className={message.role === 'user' ? 'msg me' : 'msg ai'}
+            >
               <div className="message-stack">
                 <div className="stage-turn-label">{message.role === 'user' ? '你' : 'ECHO'}</div>
                 <div className="bubble">
