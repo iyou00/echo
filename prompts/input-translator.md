@@ -26,9 +26,9 @@
 ### 判定顺序（每句话都按这个顺序过一遍）
 
 1. **有明确的找歌动作吗？** 点歌、来一首、推荐几首、适合听什么、放首歌、换一首、这首不好听换一个 → 填 searchQuery
-2. **有情绪/场景，同时提到了歌吗？**（"歌/音乐/听歌/歌单"等词）→ 填 searchQuery，方向按下面的心法定
+2. **有情绪/场景，并且 Ta 在要新的歌吗？** 注意区分「要」和「描述」：只有 Ta 想现在听点新的（想听/来点/找点/有什么推荐）才填 searchQuery；**只是在描述自己正在听、一直在听什么（"一直在听悲伤的歌""上班总听轻音乐"）不算，走第 4 步**
 3. **在承接上一轮音乐吗？** recentDialog 或 musicSession 里有歌手/话题，Ta 说"再来几首""继续""换一个" → searchQuery 带上该歌手或方向
-4. **在倾诉、分享、闲聊吗？** 哪怕提到情绪、提到某个歌手（"我今天好累""我最近老听周杰伦"），只要没有找歌动作 → searchQuery 填 null，intent 写清 Ta 的状态和此刻需要什么（倾听、认同、还是陪着说说话）
+4. **在倾诉、分享、闲聊吗？** 哪怕提到情绪、提到某个歌手、提到正在听的歌（"我今天好累""我最近老在听周杰伦""今天一直在听悲伤的歌""刚才那首歌真好听"），只要没有找新歌的动作 → searchQuery 填 null，intent 写清 Ta 的状态和此刻需要什么（倾听、认同、还是陪着说说话）
 5. **是功能/事实问询吗？** 天气、你是谁、怎么设置城市 → null + intent 写明在问什么
 6. **拿不准是想要歌还是只是说说？** searchQuery 填 null，intent 写"可能想听歌，也可能只是说说，先别急着推"——让 Echo 先问一句，不要猜错方向硬推
 
@@ -154,6 +154,9 @@
 - 你好 → {"searchQuery":null,"intent":"用户在打招呼，等着 Echo 接话","entities":{"artist":null,"title":null}}
 - 今天天气怎么样 → {"searchQuery":null,"intent":"用户在问天气","entities":{"artist":null,"title":null}}
 - 今天好累啊 → {"searchQuery":null,"intent":"用户今天很累，想被听见和安慰，没有在点歌","entities":{"artist":null,"title":null}}
+- 今天心情不好，一直在听悲伤的歌 → {"searchQuery":null,"intent":"用户心情低落，在描述自己正在听的歌，想被关心，没有在找新歌","entities":{"artist":null,"title":null}}
+- 上班的时候我总听轻音乐 → {"searchQuery":null,"intent":"用户在分享自己的听歌习惯，顺着聊就好","entities":{"artist":null,"title":null}}
+- 刚才那首歌真好听 → {"searchQuery":null,"intent":"用户在夸刚才放的歌，可以接着聊聊这首歌","entities":{"artist":null,"title":null}}
 - 我最近老在听周杰伦 → {"searchQuery":null,"intent":"用户在分享自己的听歌偏好，没有找歌，顺着聊就好","entities":{"artist":null,"title":null}}
 - 刚找到一首特别好听的歌 → {"searchQuery":null,"intent":"用户在分享发现好歌的喜悦，可以问是什么歌","entities":{"artist":null,"title":null}}
 - 我能问你个事吗 → {"searchQuery":null,"intent":"用户有话想说，正在起头，回应并等待下文","entities":{"artist":null,"title":null}}

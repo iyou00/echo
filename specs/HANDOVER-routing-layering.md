@@ -456,3 +456,14 @@ preLlmRouting.test +1（快速通道 override）。评测集现 16 条。
 - `[translator] non-music` 的 kind 分布埋点目前只有 console.info，跑一周再决定
   是否给非音乐直通加开关；
 - §8.4 的 e2e native binding 崩溃仍待 `npm run rebuild:native`。
+
+### 11.8 部署红线：本机禁用 NSIS 卸载器（2026-08-29 事故）
+
+本机环境下 NSIS 安装器/卸载器会**静默卡死后再延迟执行**：一次 `/S` 卸载请求挂起约
+半小时后自行完成，把安装目录、注册表卸载项、开始菜单快捷方式全部清除。
+（用户数据无恙——应用真实数据目录是 `Roaming/echo-app`（Electron 运行时读 package.json
+的 name），卸载器删的 `Roaming/Echo` 是 productName 的错误路径。）
+
+**部署流程（本机）**：`electron-builder --win nsis` 出包后，用 robocopy 把
+`release/win-unpacked` 覆盖到安装目录；**绝不运行 `Echo-Setup-*.exe` 或
+`Uninstall Echo.exe`**，哪怕是静默参数。快捷方式/注册表项用脚本补建。
