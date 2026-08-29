@@ -49,6 +49,29 @@ describe('resolvePreLlmChatIntent', () => {
       expect(intent?.llmIntentOverride?.clearArtistQuery).toBe(true)
     })
 
+    it('fast-path searchQuery survives mergeIntent into the exact object recall consumes', async () => {
+      // 端到端锁：recommendFromNetease 内部执行 mergeIntent(parseIntent(text), override)，
+      // keywordFromIntent 读的是这个结果的 searchQuery。此断言回答"快速通道的搜索词
+      // 是否还能到达召回"——candidateStage 顶层补挂删除后，override 是唯一通路。
+      // 重建分支（classifyDerivedRecommendationIntent）会剥掉实体/clear 字段，
+      // searchQuery 必须保留。
+      const { mergeIntent, parseIntent } = await import('../../services/recommendation/intent')
+      const text = '推荐一首放松的歌'
+      const fast = resolvePreLlmChatIntent(text)
+
+      const recallIntent = mergeIntent(parseIntent(text), fast?.llmIntentOverride)
+      expect(recallIntent.searchQuery).toBe('安静 舒缓')
+      expect(recallIntent.artistQuery).toBeUndefined()
+      expect(recallIntent.seedTitle).toBeUndefined()
+
+      const semantic = { ...(fast?.llmIntentOverride ?? {}) }
+      delete (semantic as Record<string, unknown>).artistQuery
+      delete (semantic as Record<string, unknown>).seedTitle
+      delete (semantic as Record<string, unknown>).clearArtistQuery
+      delete (semantic as Record<string, unknown>).clearSeedTitle
+      expect(mergeIntent(parseIntent(text), semantic).searchQuery).toBe('安静 舒缓')
+    })
+
     it('maps sadness to healing keywords', () => {
       expect(resolvePreLlmChatIntent('难过，想听首歌')?.recommendationIntent.searchQuery).toBe('治愈 温暖 轻柔')
     })
