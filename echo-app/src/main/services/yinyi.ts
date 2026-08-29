@@ -216,7 +216,8 @@ async function reviewYinyi(
   try {
     const raw = await completeChat(settings, buildYinyiCriticMessages(content, brief, bundle, relations, recentEntries.map((entry) => entry.content)), {
       temperature: 0.2,
-      maxTokens: 220,
+      maxTokens: 1200,
+      timeoutMs: 60_000,
       signal,
     })
     assertYinyiActive(signal)
@@ -269,7 +270,8 @@ export async function generateYinyi(date = todayIso(), options: GenerateYinyiOpt
     const directorRaw = await completeChat(settings, directorMessages, {
       temperature: 0.55,
       signal: options.signal,
-      maxTokens: 520,
+      maxTokens: 1200,
+      timeoutMs: 90_000,
     })
     assertYinyiActive(options.signal)
     let brief = parseYinyiWritingBrief(directorRaw, bundle)
@@ -279,7 +281,7 @@ export async function generateYinyi(date = todayIso(), options: GenerateYinyiOpt
         const revisedRaw = await completeChat(settings, [...directorMessages, {
           role: 'user',
           content: `上一版写法计划与近期风信重复。只重做写法计划并返回 JSON：\n${styleIssues.map((issue) => `- ${issue}`).join('\n')}`,
-        }], { temperature: 0.55, signal: options.signal, maxTokens: 520 })
+        }], { temperature: 0.55, signal: options.signal, maxTokens: 1200, timeoutMs: 90_000 })
         assertYinyiActive(options.signal)
         const revised = parseYinyiWritingBrief(revisedRaw, bundle)
         if (revised && yinyiStyleConflicts(revised, recentStyles).length === 0) brief = revised
@@ -293,7 +295,7 @@ export async function generateYinyi(date = todayIso(), options: GenerateYinyiOpt
     brief ??= fallbackYinyiWritingBrief(bundle, recentStyles)
     const relations = verifyYinyiTimeRelations(brief, bundle)
     const writerMessages = buildYinyiWriterMessages(brief, bundle, relations)
-    let content = cleanYinyiContent(await completeChat(settings, writerMessages, { temperature: 0.88, signal: options.signal, maxTokens: 800 }))
+    let content = cleanYinyiContent(await completeChat(settings, writerMessages, { temperature: 0.88, signal: options.signal, maxTokens: 3600, timeoutMs: 150_000 }))
     assertYinyiActive(options.signal)
     let issues = content && hasYinyiQuality(content)
       ? await reviewYinyi(settings, content, brief, bundle, relations, recentEntries, options.signal)
@@ -309,7 +311,7 @@ export async function generateYinyi(date = todayIso(), options: GenerateYinyiOpt
             role: 'user',
             content: `${yinyiQualityRetryInstruction()}\n这次只修复以下问题：\n${issues.map((issue) => `- ${issue}`).join('\n')}`,
           },
-        ], { temperature: 0.85, signal: options.signal, maxTokens: 800 }))
+        ], { temperature: 0.85, signal: options.signal, maxTokens: 3600, timeoutMs: 150_000 }))
         assertYinyiActive(options.signal)
         issues = retry && hasYinyiQuality(retry)
           ? await reviewYinyi(settings, retry, brief, bundle, relations, recentEntries, options.signal)

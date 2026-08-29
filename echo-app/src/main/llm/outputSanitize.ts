@@ -48,6 +48,9 @@ export const SYSTEM_CONTEXT_TAGS = [
   'continuation',
   'candidates',
   'date',
+  // 部分推理模型把思考过程内联在 content 里；连同被预算截断、没写完的思考块一起剥掉。
+  'think',
+  'thinking',
 ]
 
 export function escapeRegExp(value: string): string {

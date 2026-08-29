@@ -66,6 +66,13 @@ export function runYinyiDailyTask(date: string): Promise<SchedulerCatchupResult>
     if (!readiness.ready) {
       return { ok: true, job: 'yinyi_daily', date, status: 'skipped', message: readiness.reason ?? '这一天暂时不需要生成风信。' }
     }
+    // 定时档位不覆盖已经写好的信（含事实兜底信）：用户可能已经读过，重写只能走手动重新生成。
+    const existing = getByDate(date)
+    if (shouldSkipExistingYinyi(existing)) {
+      insertScheduledJob('yinyi_daily', date, 'skipped', '这一天已经有风信了。')
+      recordSchedulerHealth('yinyi', 'ok', '运行正常。')
+      return { ok: true, job: 'yinyi_daily', date, status: 'skipped', message: '这一天已经有风信了。' }
+    }
     try {
       const entry = await generateYinyi(date, { signal: context.signal })
       const status = entry.meta?.status === 'failed' ? 'failed' : entry.meta?.status === 'absent' ? 'skipped' : 'completed'

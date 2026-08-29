@@ -149,7 +149,7 @@ energy/confidence 是 0-1 数字。tempo 是 slow/medium/fast。familiarity 对�
           })),
         }),
       },
-    ], { temperature: 0.2, signal, maxTokens: Math.min(5000, Math.max(900, tracks.length * 180)) })
+    ], { temperature: 0.2, signal, timeoutMs: 120_000, maxTokens: Math.min(5000, Math.max(900, tracks.length * 180)) })
     assertSemanticsActive(signal)
     const parsed = parseJsonArray(response)
     if (!parsed || parsed.length !== tracks.length) return fallbacks

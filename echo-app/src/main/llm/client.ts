@@ -17,7 +17,10 @@ export interface LlmRequestOptions {
 }
 
 function maxTokensFor(options?: LlmRequestOptions): number {
-  return Math.max(1, Math.floor(options?.maxTokens ?? 600))
+  const budget = Math.max(1, Math.floor(options?.maxTokens ?? 600))
+  // 推理模型把思考计入 max_tokens：调用方给的是正文预算，请求必须附带思考余量。
+  // max_tokens 只是上限，按实际生成量计费，余量不增加正常请求的成本。
+  return Math.min(8000, budget * 2 + 800)
 }
 
 export class LlmError extends Error {
@@ -33,7 +36,8 @@ const STREAM_READ_TIMEOUT_MS = 60_000
 
 function createRequestSignal(options?: LlmRequestOptions): { signal: AbortSignal; cleanup: () => void; parentAborted: () => boolean; timedOut: () => boolean; timeoutMs: number; resetStreamTimeout: () => void } {
   const controller = new AbortController()
-  const timeoutMs = options?.timeoutMs ?? 30_000
+  // 推理模型先思考后作答，整段生成的耗时长于纯文本模型，默认超时给足。
+  const timeoutMs = options?.timeoutMs ?? 60_000
   let timedOut = false
   const timers: ReturnType<typeof setTimeout>[] = []
   let connectTimer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
@@ -207,8 +211,16 @@ export async function completeChat(settings: Settings, messages: LlmMessage[], o
       throw new LlmError(`服务端返回 ${response.status}`, 'server')
     }
 
-    const parsed = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> }
-    return parsed.choices?.[0]?.message?.content ?? ''
+    const parsed = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string }, finish_reason?: string | null }>
+    }
+    const choice = parsed.choices?.[0]
+    const content = choice?.message?.content ?? ''
+    if (!content && choice?.finish_reason === 'length') {
+      // 思考烧尽了全部预算。返回空字符串只会被上游记成「LLM 连续返回空内容」，这里给出可诊断的错误。
+      throw new LlmError('模型把 token 预算全部耗在思考上（finish_reason=length 且正文为空），请提高 maxTokens', 'server')
+    }
+    return content
   } catch (error) {
     if (error instanceof LlmError) throw error
     if (error instanceof SyntaxError) throw new LlmError('LLM 响应格式异常', 'server')

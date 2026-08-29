@@ -82,6 +82,16 @@ describe('yinyi startup catchup wording', () => {
     expect(shouldSkipCompletedYinyiJob(null, 'completed')).toBe(true)
   })
 
+  it('counts factual fallback letters as existing so the daily slot never overwrites them', () => {
+    // 事实兜底信 status 是 ok：定时档位与启动补写一样只认 failed 占位需要重试，其余一律不覆盖。
+    expect(shouldSkipExistingYinyi({
+      date: '2026-08-29',
+      content: '你今天最后留下的一句话是“生活还苦啊”。',
+      style: 'dialogue',
+      meta: { status: 'ok', fallback: true, fallback_error: 'LLM 连续返回空内容' } as never,
+    })).toBe(true)
+  })
+
   it('uses normal generation wording on the first use date', () => {
     expect(yinyiCatchupCompletedMessage('2026-06-18', '2026-06-18')).toBe('风信已生成。')
   })
