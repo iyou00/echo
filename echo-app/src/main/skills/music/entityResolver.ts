@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module'
 import { readNeteaseCookie } from '../../netease/auth'
-import { normalizeText, unique } from './identity'
+import { isConversationalFragment, normalizeText, unique } from './identity'
 
 const require = createRequire(import.meta.url)
 const netease = require('@neteasecloudmusicapienhanced/api') as Record<string, (query: Record<string, unknown>) => Promise<ApiResponse>>
@@ -151,6 +151,7 @@ function usableSongTitle(value: string, allowDescriptor = false): string | undef
   if (GENERIC_TITLE_WORDS.has(genericCandidate)) return undefined
   if (CONTEXTUAL_TRACK_REFERENCE_PATTERN.test(title)) return undefined
   if (/的?(歌|歌曲|音乐|作品)$/.test(title)) return undefined
+  if (isConversationalFragment(title)) return undefined
   if (!allowDescriptor && isMusicDescriptorPhrase(title)) return undefined
   if (title.length > 40) return undefined
   return title
@@ -171,6 +172,8 @@ function isPlausibleArtistName(value: string): boolean {
   // 单字名一律不信：中文无单字歌手，拉丁单字母更不是；「轻音乐睡前」被 normalize 截成「轻」这类残渣在这里拦下。
   if (artist.length < 2) return false
   if (artist.length > 24) return false
+  // 会话碎片不是歌手：「你看有没」「有没有什么」这类疑问句残片曾被当歌手送去网易云校准
+  if (isConversationalFragment(value)) return false
   if (IMPLAUSIBLE_ARTIST_TERMS.test(value)) return false
   if (isMusicDescriptorPhrase(value)) return false
   return true

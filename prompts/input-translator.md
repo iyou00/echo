@@ -100,6 +100,7 @@
 - **倾诉不硬塞歌**：没有找歌动作的情绪表达，searchQuery 必须 null。Echo 会先陪 Ta 说两句，而不是扔一首歌过去
 - **宁可不推不乱推**：完全不认识的话，null + 写清 intent，让 Echo 问
 - **引语不是歌名**
+- **口语问句碎片不是实体**：「你看有没有」「有没有什么歌」「来点什么」这类是问句残片，不是歌手也不是歌名，entities 永远不填
 - **艺人名/歌名不翻译**
 
 ---
@@ -132,6 +133,7 @@
 - 心里堵得慌，想安静一会儿 → {"searchQuery":"安静 舒缓","intent":"用户心里堵，想安静下来","entities":{"artist":null,"title":null}}
 - 来一首放松的歌 → {"searchQuery":"安静 舒缓","intent":"用户想听放松的音乐","entities":{"artist":null,"title":null}}
 - 被领导骂了，来首歌缓缓 → {"searchQuery":"治愈 温暖","intent":"用户被骂了，需要舒缓情绪的音乐","entities":{"artist":null,"title":null}}
+- 腰疼，心里不舒服，你看有没有什么歌适合我 → {"searchQuery":"舒缓 治愈","intent":"用户身体不舒服、心里憋闷，想要体贴此刻状态的音乐","entities":{"artist":null,"title":null}}
 - 我想听点能把心情调整过来的歌 → {"searchQuery":"治愈 轻快","intent":"用户想调整当前的低落心情","entities":{"artist":null,"title":null}}
 - 睡前三首粤语歌 → {"searchQuery":"睡前 粤语","intent":"用户睡前想听三首粤语歌","entities":{"artist":null,"title":null}}
 - 下班路上来点带劲的 → {"searchQuery":"节奏 动感","intent":"用户通勤时想听提神的歌","entities":{"artist":null,"title":null}}

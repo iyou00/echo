@@ -170,6 +170,14 @@ export const INTENT_EVAL_CASES: IntentEvalCase[] = [
     addedAt: '2026-08-28',
   },
   {
+    id: 'real-2026-08-29-conversational-fragment-not-artist',
+    text: '腰疼，心里不舒服，你看有没有什么歌适合我',
+    expect: { kind: 'mood_request', artistQuery: null, seedTitle: null, wantsMusic: true },
+    source: 'real-failure',
+    note: '0.2.4 真机失败：名词前置模式捕获「你看有没有什么」、normalizeMusicArtistName 剥尾「有什么」剩「你看有没」，当歌手送去网易云校准失败，回复「确认拼写」。修复：isConversationalFragment 守卫进 isPlausibleArtistName/usableSongTitle/翻译器清洗三处——剥离口语功能字后不剩实质字 = 句子碎片不是名字。',
+    addedAt: '2026-08-29',
+  },
+  {
     id: 'guard-weather-not-music',
     text: '今天天气怎么样',
     expect: { kind: 'weather', artistQuery: null, wantsMusic: false },

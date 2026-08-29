@@ -1,6 +1,7 @@
 import { completeChat } from '../../llm/client'
 import type { Settings } from '../../../types/ipc'
 import { buildSoulPolicyPrompt } from '../../skills/soul/policy'
+import { isConversationalFragment } from '../../skills/music/identity'
 import { readRootFile } from '../../utils/paths'
 
 /**
@@ -47,11 +48,13 @@ function sanitizeTranslated(raw: unknown, userText = ''): TranslatedInput | null
 
   const entities = record.entities && typeof record.entities === 'object' && !Array.isArray(record.entities)
     ? record.entities as Record<string, unknown> : {}
-  const artist = typeof entities.artist === 'string' && entities.artist.trim() ? entities.artist.trim().slice(0, 40) : null
+  let artist = typeof entities.artist === 'string' && entities.artist.trim() ? entities.artist.trim().slice(0, 40) : null
   let title = typeof entities.title === 'string' && entities.title.trim() ? entities.title.trim().slice(0, 60) : null
-
-  // 描述性短语不是歌名
+  // 描述性短语不是歌名；会话碎片（疑问句残片）既不是歌名也不是歌手——
+  // 双层守卫：抽取端（entityResolver）拦确定性产物，这里拦 LLM 的同类误抽
   if (title && isDescriptivePhrase(title)) title = null
+  if (artist && isConversationalFragment(artist)) artist = null
+  if (title && isConversationalFragment(title)) title = null
 
   // 引语守卫：用户在引用一句话问「适合什么歌」时，引语本身既不是歌名也不是
   // 搜索词——「有人说爱是自由」的「爱是自由」是主题，不是点播《爱是自由》。
