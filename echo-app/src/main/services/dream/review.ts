@@ -225,7 +225,7 @@ export async function runDreamReview(date: string, options: { signal?: AbortSign
       temperature: 0,
       signal: options.signal,
       timeoutMs: 90_000,
-      maxTokens: 1600,
+      maxTokens: 3600,
     })
     content = completion
   } catch (error) {

@@ -216,8 +216,8 @@ async function reviewYinyi(
   try {
     const raw = await completeChat(settings, buildYinyiCriticMessages(content, brief, bundle, relations, recentEntries.map((entry) => entry.content)), {
       temperature: 0.2,
-      maxTokens: 1200,
-      timeoutMs: 60_000,
+      maxTokens: 3600,
+      timeoutMs: 90_000,
       signal,
     })
     assertYinyiActive(signal)
@@ -270,7 +270,7 @@ export async function generateYinyi(date = todayIso(), options: GenerateYinyiOpt
     const directorRaw = await completeChat(settings, directorMessages, {
       temperature: 0.55,
       signal: options.signal,
-      maxTokens: 1200,
+      maxTokens: 3600,
       timeoutMs: 90_000,
     })
     assertYinyiActive(options.signal)
@@ -281,7 +281,7 @@ export async function generateYinyi(date = todayIso(), options: GenerateYinyiOpt
         const revisedRaw = await completeChat(settings, [...directorMessages, {
           role: 'user',
           content: `上一版写法计划与近期风信重复。只重做写法计划并返回 JSON：\n${styleIssues.map((issue) => `- ${issue}`).join('\n')}`,
-        }], { temperature: 0.55, signal: options.signal, maxTokens: 1200, timeoutMs: 90_000 })
+        }], { temperature: 0.55, signal: options.signal, maxTokens: 3600, timeoutMs: 90_000 })
         assertYinyiActive(options.signal)
         const revised = parseYinyiWritingBrief(revisedRaw, bundle)
         if (revised && yinyiStyleConflicts(revised, recentStyles).length === 0) brief = revised
