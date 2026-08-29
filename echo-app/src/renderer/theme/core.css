@@ -936,8 +936,14 @@
 .d2-now-page .stage-dialogue .msg.ai { top: 310px; left: 7.2%; width: min(610px, 51%); }
 /* 长回复在舞台内自行滚动，绝不裁剪文字：上限 = 舞台容器高 - 顶部偏移 310 - 输入框区域
    （bottom 36 + 输入行 48 + 场景条约 90 + 呼吸空隙）。百分比相对绝对定位的包含块解析。 */
-.d2-now-page .stage-dialogue .msg.ai { max-height: max(160px, calc(100% - 310px - 190px)); overflow-y: auto; scrollbar-width: thin; overscroll-behavior: contain; padding-right: 10px; }
-.d2-now-page .stage-dialogue .msg.me { max-height: max(120px, calc(100% - 139px - 48px)); overflow-y: auto; scrollbar-width: thin; overscroll-behavior: contain; }
+.d2-now-page .stage-dialogue .msg.ai { max-height: max(160px, calc(100% - 310px - 190px)); overflow-y: auto; overscroll-behavior: contain; padding-right: 10px; }
+.d2-now-page .stage-dialogue .msg.me { max-height: max(120px, calc(100% - 139px - 48px)); overflow-y: auto; overscroll-behavior: contain; }
+/* 滚动条平时隐形，悬停消息时浮现一丝墨色——不占版面，也不失可发现性。
+   不用 scrollbar-width（非 auto 值会让 Chromium 忽略 ::-webkit-scrollbar 自定义）。 */
+.d2-now-page .stage-dialogue .msg.ai::-webkit-scrollbar, .d2-now-page .stage-dialogue .msg.me::-webkit-scrollbar { width: 5px; }
+.d2-now-page .stage-dialogue .msg.ai::-webkit-scrollbar-track, .d2-now-page .stage-dialogue .msg.me::-webkit-scrollbar-track { background: transparent; }
+.d2-now-page .stage-dialogue .msg.ai::-webkit-scrollbar-thumb, .d2-now-page .stage-dialogue .msg.me::-webkit-scrollbar-thumb { background: transparent; border-radius: 2.5px; transition: background .25s; }
+.d2-now-page .stage-dialogue .msg.ai:hover::-webkit-scrollbar-thumb, .d2-now-page .stage-dialogue .msg.me:hover::-webkit-scrollbar-thumb { background: rgba(25, 32, 27, 0.16); }
 .d2-now-page .stage-dialogue .message-stack { width: 100%; }
 .d2-now-page .stage-dialogue .msg.me .message-stack { padding-top: 12px; border-top: 1px solid var(--d2-blue); }
 .d2-now-page .stage-dialogue .msg.ai .message-stack { padding: 3px 0 3px 18px; border-left: 3px solid var(--d2-red); }
