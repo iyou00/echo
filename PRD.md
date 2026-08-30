@@ -1,6 +1,8 @@
 # Echo · AI 音乐陪伴助手
 
-> 最后更新:v0.1-draft
+> 状态：v0.1 产品决策归档，不再作为当前实现基线。
+>
+> 当前产品路线以 `specs/agent-product-next-stage.md` 为准，界面迁移以 `specs/fullpage-migration.md` 和最新 D1.3/D2 交接文档为准。本文保留早期取舍，供理解产品演进使用。
 
 ## 一句话
 

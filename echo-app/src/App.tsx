@@ -35,6 +35,7 @@ import {
   onboardingPatchesAfterLlmReady,
 } from './shared/onboardingPolicy'
 import { remainingStartupDelay } from './shared/startupPresentation'
+import { createUiBoundary } from './shared/uiBoundary'
 import { deriveWindowFieldMode, type ChatStageMode } from './renderer/stageMode'
 
 const SCENE_CONTINUATION_RETRY_DELAYS_MS = [8000, 20_000]
@@ -66,6 +67,7 @@ function App() {
   const echo = useMemo(() => getEchoApi(), [])
   const [state, dispatch] = useAppState()
   const handledImportTaskIdsRef = useRef(new Set<string>())
+  const bootResourceFailuresRef = useRef(new Set<string>())
   const playbackNoticeTimerRef = useRef<number | null>(null)
   const sceneRetryTimerRef = useRef<number | null>(null)
   const sceneRetryAttemptsRef = useRef(0)
@@ -172,7 +174,11 @@ function App() {
   }, [dispatch, echo])
 
   const refreshBoundaries = useCallback(async (): Promise<void> => {
-    dispatch({ boundaries: await echo.boundary.get() })
+    const next = await echo.boundary.get()
+    if (bootResourceFailuresRef.current.size > 0) {
+      next.unshift(createUiBoundary('startup_degraded', { sourceId: [...bootResourceFailuresRef.current].join(',') }))
+    }
+    dispatch({ boundaries: next })
   }, [dispatch, echo])
 
   const reloadSettings = useCallback(async (): Promise<void> => {
@@ -216,11 +222,24 @@ function App() {
     let alive = true
     const bootStartedAt = performance.now()
 
-    function bootTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
-      return Promise.race([
-        promise,
-        new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
-      ]).catch((error) => {
+    function bootTimeout<T>(resource: string, promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+      return new Promise<T>((resolve, reject) => {
+        const timer = window.setTimeout(() => {
+          bootResourceFailuresRef.current.add(resource)
+          resolve(fallback)
+        }, ms)
+        promise.then(
+          (value) => {
+            window.clearTimeout(timer)
+            resolve(value)
+          },
+          (error) => {
+            window.clearTimeout(timer)
+            reject(error)
+          },
+        )
+      }).catch((error) => {
+        bootResourceFailuresRef.current.add(resource)
         logAppAsyncError('boot optional resource', error)
         return fallback
       })
@@ -233,7 +252,8 @@ function App() {
       ])
     }
 
-    echo.settings.get().then((earlySettings) => {
+    const settingsPromise = echo.settings.get()
+    settingsPromise.then((earlySettings) => {
       if (!alive) return
       earlyReturningUserRef.current = Boolean(earlySettings?.meta?.firstRunWelcomeCompletedAt)
       dispatch({ settings: earlySettings })
@@ -242,15 +262,15 @@ function App() {
     async function boot() {
       try {
         const [nextSettings, nextTaste, nextQueue, nextPlayback, nextYinyi, nextScenes, nextScene, nextImportTask, nextBoundaries] = await Promise.all([
-          bootRequired(echo.settings.get(), 10_000, '设置读取超时，请重试。'),
-          bootTimeout(echo.taste.getProfile(), 10_000, { profile: null, questions: [] }),
-          bootTimeout(echo.queue.get(), 10_000, []),
-          bootTimeout(echo.playback.getState(), 10_000, { current: null, position: 0, duration: 0, status: 'idle', volume: 100, queue: [], history: [] }),
-          bootTimeout(echo.yinyi.getRange(1), 10_000, []),
-          bootTimeout(echo.scene.definitions(), 10_000, []),
-          bootTimeout(echo.scene.getCurrent(), 10_000, null),
-          bootTimeout(echo.import.getSnapshot(), 10_000, null),
-          bootTimeout(echo.boundary.get(), 10_000, []),
+          bootRequired(settingsPromise, 10_000, '设置读取超时，请重试。'),
+          bootTimeout('taste', echo.taste.getProfile(), 10_000, { profile: null, questions: [] }),
+          bootTimeout('queue', echo.queue.get(), 10_000, []),
+          bootTimeout('playback', echo.playback.getState(), 10_000, { current: null, position: 0, duration: 0, status: 'idle', volume: 100, queue: [], history: [] }),
+          bootTimeout('yinyi', echo.yinyi.getRange(1), 10_000, []),
+          bootTimeout('scenes', echo.scene.definitions(), 10_000, []),
+          bootTimeout('current-scene', echo.scene.getCurrent(), 10_000, null),
+          bootTimeout('import', echo.import.getSnapshot(), 10_000, null),
+          bootTimeout('boundaries', echo.boundary.get(), 10_000, []),
         ])
 
         if (!alive) return
@@ -263,7 +283,9 @@ function App() {
           sceneDefinitions: nextScenes,
           currentScene: nextScene,
           importTask: nextImportTask,
-          boundaries: nextBoundaries,
+          boundaries: bootResourceFailuresRef.current.size > 0
+            ? [createUiBoundary('startup_degraded', { sourceId: [...bootResourceFailuresRef.current].join(',') }), ...nextBoundaries]
+            : nextBoundaries,
         })
         if (!nextSettings) {
           dispatch({ page: 'settings' })
@@ -730,6 +752,7 @@ function App() {
   const onboardingLeavingRef = useRef(false)
   const offlineBoundary = boundaries.find((item) => item.code === 'offline')
   const modelInvalidBoundary = boundaries.find((item) => item.code === 'model_invalid')
+  const startupDegradedBoundary = boundaries.find((item) => item.code === 'startup_degraded')
   // 一起听覆盖层永远以絮语页为底：从回声页点封面进入时也切换到 chat 底座，
   // 输入框与对话上下文保持在场；「回到此刻」再回回声页，连续不停。
   const listeningOverlay = listeningViewOpen && Boolean(playbackState.current)
@@ -778,6 +801,7 @@ function App() {
       onClose={closeWindow}
     >
         {offlineBoundary && <BoundaryState compact snapshot={offlineBoundary} onAction={() => { void refreshBoundaries() }} />}
+        {startupDegradedBoundary && <BoundaryState compact snapshot={startupDegradedBoundary} onAction={() => window.location.reload()} />}
         {playbackNotice && <div className="playback-notice">{playbackNotice}</div>}
         {careMuteToast && (
           <div className="care-mute-toast">

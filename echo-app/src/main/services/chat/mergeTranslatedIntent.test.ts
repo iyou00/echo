@@ -3,6 +3,8 @@ import type { Track } from '../../../types/ipc'
 import { classifyFallbackChatIntent, type ChatIntent } from './intent'
 import { chatSendPipelineTestHelpers } from './sendPipeline'
 import type { TranslatedInput } from './inputTranslator'
+import { enforceAssistantTrackBinding } from './pipelineContract'
+import { classifyPlaybackOutcome } from '../../domain/agentAction/outcomePolicy'
 
 const { mergeTranslatedIntent } = chatSendPipelineTestHelpers
 
@@ -210,6 +212,28 @@ describe('mergeTranslatedIntent', () => {
 
       const merged = mergeTranslatedIntent(base, translate({ intent: '用户想听轻快的歌' }))
       expect(merged?.intentDescription).toBe('用户想听轻快的歌')
+    })
+  })
+})
+
+describe('agent loop cross-layer contract', () => {
+  it('keeps one grounded identity from understanding through recall, reply, and outcome', async () => {
+    const { mergeIntent, parseIntent } = await import('../recommendation/intent')
+    const base = classifyFallbackChatIntent('心里堵得慌，来点能让我松口气的')
+    const routed = mergeTranslatedIntent(base, translate({ searchQuery: '舒缓 松弛' }))
+    const recall = mergeIntent(parseIntent('心里堵得慌，来点能让我松口气的'), routed?.llmIntentOverride)
+    expect(recall.searchQuery).toBe('舒缓 松弛')
+
+    const candidate: Track = { id: 'candidate-1', title: '真正候选', artist: '候选歌手', source: 'netease' }
+    const boundReply = enforceAssistantTrackBinding('先听候选歌手的《真正候选》。', [candidate], true)
+    expect(boundReply).toContain('《真正候选》')
+
+    const outcome = classifyPlaybackOutcome({
+      playbackInstanceId: 'play-1', actionId: 'recommendation-1', actionItemId: 'track-1',
+      positionMs: 180_000, durationMs: 200_000, reason: 'ended',
+    })
+    expect(outcome).toMatchObject({
+      actionId: 'recommendation-1', actionItemId: 'track-1', outcomeType: 'completed', polarity: 'positive',
     })
   })
 })

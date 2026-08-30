@@ -68,7 +68,7 @@ main/
 │
 ├─ llm/                 # LLM 调用层
 │   ├─ client.ts        # LLM HTTP 客户端封装(原生 fetch + OpenAI 兼容)
-│   ├─ prompt.ts        # prompt 组装(读 prompts/*.md + 拼上下文)
+│   ├─ prompt.ts        # prompt 组装（从构建时嵌入的 prompt store 读取并拼接上下文）
 │   └─ stream.ts        # 流式响应(给前端实时打字)
 │
 ├─ services/            # 业务层
@@ -172,3 +172,7 @@ app.on('window-all-closed', () => {
 - **LLM 调用成本**:每次聊天大约 0.05 RMB 上下(以 DeepSeek 等中转为例;具体取决于所选模型和上下文长度)
 - **上下文控制**:对话历史只拼最近 N 条到 prompt,太长的让 LLM 自己做中期摘要存 `events` 表
 - **提前做压缩**:超过 30 条对话后,自动把更早的压缩成"事件摘要",原文归档
+
+## Prompt 打包边界
+
+`prompts/*.md` 只作为源码维护，构建时由 `src/main/prompts/store.ts` 以字符串形式嵌入主进程产物；安装包不会附带可直接浏览的 Prompt Markdown 文件。由于 Echo 是在用户设备上运行的桌面程序，嵌入后的字符串仍可能被逆向提取，因此这里提供的是发布整洁度和基础提取成本，不构成机密保护。真正的安全边界应放在密钥、本地凭据和用户数据上。

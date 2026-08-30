@@ -176,7 +176,9 @@ export function initializeDatabase(database = getDb()): void {
       corroborations INTEGER NOT NULL DEFAULT 0,
       source_date TEXT NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_evidence_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_matched_at DATETIME
     );
     CREATE INDEX IF NOT EXISTS idx_learned_cases_status ON learned_cases(user_id, status);
 

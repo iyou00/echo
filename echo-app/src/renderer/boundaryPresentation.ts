@@ -8,6 +8,7 @@ export interface BoundaryPresentation {
 
 const PRESENTATIONS: Record<UiBoundaryCode, BoundaryPresentation> = {
   startup_failed: { title: 'Echo 这次没能完整醒来。', body: '你的本地数据还在，可以重新载入；如果仍然失败，再打开诊断目录。', actionLabel: '重新载入' },
+  startup_degraded: { title: '有些内容这次没有读出来。', body: '这不是空内容，你的本地数据仍然保留着。重新载入后我会再接一次。', actionLabel: '重新载入' },
   model_missing: { title: '还差一条模型连接。', body: '填好服务地址、API key 和模型名后，我们就能开始说话。', actionLabel: '去设置' },
   model_invalid: { title: '模型连接没有通过。', body: '正在播放的音乐不会停。检查模型名、API key 或余额后再试。', actionLabel: '检查连接' },
   music_empty: { title: '我还没听过你的歌。', body: '导入一份歌单，或者先告诉我现在想听什么。', actionLabel: '导入歌单' },

@@ -1798,22 +1798,34 @@
 .d2-settings-form .provider-info { margin: 12px 0 0; padding: 12px 0 0; border-top: 1px solid var(--d2-line); border-radius: 0; background: transparent; color: var(--d2-muted); font-size: 11px; line-height: 1.6; }
 .d2-settings-form .settings-row { padding: 12px 0; border-bottom: 1px solid var(--d2-line); }
 
-/* ---- 可读性：表单最小字号 ---- */
-.d2-settings-row small { font-size: 11px; }
-.d2-settings-value { font-size: 11px; }
-.d2-settings-row select { font-size: 11px; }
-.d2-settings-status { font-size: 11px; }
-.d2-connection-field header span { font-size: 10px; }
-.d2-connection-field p { font-size: 11px; }
-.d2-connection-actions button { font-size: 10px; }
-.d2-settings-empty-line { font-size: 11px; }
-.d2-service-line strong { font-size: 11px; }
-.d2-service-line small { font-size: 10.5px; }
-.d2-service-line em { font-size: 10.5px; }
-.d2-settings-detail-note { font-size: 11px; }
-.d2-settings-form .toggle-text .t2 { font-size: 10.5px; }
-.d2-settings-form .btn { font-size: 10px; }
-.d2-settings-form .first-run p { font-size: 10.5px; }
+/* ---- 可读性：反复阅读和操作的表单不使用装饰性微型字号 ---- */
+.d2-settings-form .field-label,
+.d2-settings-form .toggle-text .t1,
+.d2-settings-form .input,
+.d2-settings-form .time-input,
+.d2-settings-row select { font-size: 13px; }
+.d2-settings-row small,
+.d2-settings-value,
+.d2-settings-status,
+.d2-connection-field header span,
+.d2-connection-field p,
+.d2-settings-empty-line,
+.d2-service-line strong,
+.d2-service-line small,
+.d2-service-line em,
+.d2-settings-detail-note,
+.d2-settings-form .field-hint,
+.d2-settings-form .toggle-text .t2,
+.d2-settings-form .first-run p,
+.d2-settings-form .import-method-desc,
+.d2-settings-form .provider-info,
+.d2-settings-form .semantic-summary { font-size: 12px; }
+.d2-connection-actions button,
+.d2-settings-form .btn,
+.d2-settings-form .netease-code-btn { font-size: 12px; }
+.d2-learned-trigger { font-size: 14px; }
+.d2-learned-summary,
+.d2-learned-item small { font-size: 12px; }
 .d2-empty p { font-size: 13px; }
 .d2-empty .empty-cta { font-size: 11px; }
 .d2-next-up { font-size: 11px; }

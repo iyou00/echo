@@ -9,7 +9,7 @@ const projectRoot = path.resolve(scriptDirectory, '..')
 const rendererEntry = path.join(projectRoot, 'dist', 'index.html')
 const runStamp = new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-')
 const runDirectory = path.join(projectRoot, 'artifacts', 'electron-e2e', runStamp)
-const scenarios = ['first-run', 'first-run-sound', 'offline', 'boundary-model-invalid', 'startup-failure']
+const scenarios = ['first-run', 'first-run-sound', 'offline', 'startup-degraded', 'boundary-model-invalid', 'startup-failure']
 
 if (!fs.existsSync(rendererEntry)) {
   console.error('[e2e] dist/index.html is missing. Run npm run build first.')

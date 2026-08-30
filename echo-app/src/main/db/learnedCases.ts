@@ -39,6 +39,8 @@ interface LearnedCaseRow {
   source_date: string
   created_at: string
   updated_at: string
+  last_evidence_at: string | null
+  last_matched_at: string | null
 }
 
 const KINDS = new Set<LearnedCaseKind>(['entity_correction', 'phrasing_precedent', 'artist_alias'])
@@ -65,7 +67,7 @@ function toRecord(row: LearnedCaseRow): LearnedCaseRecord {
 }
 
 export function incrementLearnedCaseHit(id: string): void {
-  getDb().prepare('UPDATE learned_cases SET hit_count = COALESCE(hit_count, 0) + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(id)
+  getDb().prepare('UPDATE learned_cases SET hit_count = COALESCE(hit_count, 0) + 1, last_matched_at = CURRENT_TIMESTAMP WHERE id = ?').run(id)
 }
 
 export function insertLearnedCase(input: {
@@ -79,8 +81,8 @@ export function insertLearnedCase(input: {
   const id = randomUUID()
   getDb()
     .prepare(
-      `INSERT INTO learned_cases (id, user_id, kind, trigger_text, learned_json, evidence_json, confidence, status, corroborations, source_date)
-       VALUES (?, current_user_id(), ?, ?, ?, ?, ?, ?, 0, ?)`,
+      `INSERT INTO learned_cases (id, user_id, kind, trigger_text, learned_json, evidence_json, confidence, status, corroborations, source_date, last_evidence_at)
+       VALUES (?, current_user_id(), ?, ?, ?, ?, ?, ?, 0, ?, CURRENT_TIMESTAMP)`,
     )
     .run(id, input.kind, input.triggerText.slice(0, 120), JSON.stringify(input.learned), JSON.stringify(input.evidence), input.confidence, input.status, input.evidence.sourceDate)
   return getLearnedCaseById(id) as LearnedCaseRecord
@@ -118,7 +120,8 @@ export function corroborateLearnedCase(id: string): LearnedCaseRecord | null {
       `UPDATE learned_cases
        SET corroborations = corroborations + 1,
            status = CASE WHEN status = 'pending' AND corroborations + 1 >= 2 THEN 'active' ELSE status END,
-           updated_at = CURRENT_TIMESTAMP
+           updated_at = CURRENT_TIMESTAMP,
+           last_evidence_at = CURRENT_TIMESTAMP
        WHERE user_id = current_user_id() AND id = ?`,
     )
     .run(id)
@@ -132,11 +135,11 @@ export function setLearnedCaseStatus(id: string, status: LearnedCaseStatus): Lea
   return getLearnedCaseById(id)
 }
 
-/** 夜跑顺带的衰减：active 且超过 decayDays 无更新（佐证/命中都会刷新 updated_at）→ retired。返回退役数。 */
+/** 夜跑顺带的衰减：active 且超过 decayDays 没有新证据 → retired。普通路由命中不会延长寿命。 */
 export function pruneDecayedLearnedCases(now = new Date(), decayDays = LEARNED_CASES_DECAY_DAYS): number {
   const cutoff = new Date(now.getTime() - decayDays * 24 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19)
   const result = getDb()
-    .prepare("UPDATE learned_cases SET status = 'retired' WHERE user_id = current_user_id() AND status = 'active' AND updated_at < ?")
+    .prepare("UPDATE learned_cases SET status = 'retired' WHERE user_id = current_user_id() AND status = 'active' AND COALESCE(last_evidence_at, created_at) < ?")
     .run(cutoff)
   return result.changes
 }

@@ -298,6 +298,19 @@ const migrations: DbMigration[] = [
       db.exec('ALTER TABLE learned_cases ADD COLUMN hit_count INTEGER NOT NULL DEFAULT 0')
     },
   },
+  {
+    version: 15,
+    name: 'learned_cases_evidence_timestamps',
+    up(database) {
+      if (!hasColumn(database, 'learned_cases', 'last_evidence_at')) {
+        database.exec('ALTER TABLE learned_cases ADD COLUMN last_evidence_at DATETIME')
+      }
+      if (!hasColumn(database, 'learned_cases', 'last_matched_at')) {
+        database.exec('ALTER TABLE learned_cases ADD COLUMN last_matched_at DATETIME')
+      }
+      database.exec('UPDATE learned_cases SET last_evidence_at = COALESCE(last_evidence_at, updated_at, created_at, CURRENT_TIMESTAMP)')
+    },
+  },
 ]
 
 function backfillSettingsFirstUsedAt(database: Database.Database): void {
@@ -342,6 +355,11 @@ function uniqueIndexColumns(database: Database.Database, table: string): string[
 
 function hasSingleColumnUnique(database: Database.Database, table: string, column: string): boolean {
   return uniqueIndexColumns(database, table).some((columns) => columns.length === 1 && columns[0] === column)
+}
+
+function hasColumn(database: Database.Database, table: string, column: string): boolean {
+  const columns = database.pragma(`table_info(${table})`) as Array<{ name: string }>
+  return columns.some((item) => item.name === column)
 }
 
 function hasUserIdDefaultOne(database: Database.Database, table: string): boolean {

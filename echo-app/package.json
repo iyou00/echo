@@ -17,7 +17,7 @@
     "test:watch": "node scripts/run-vitest.mjs --config vitest.config.ts",
     "test:e2e:electron": "node scripts/run-electron-e2e.mjs",
     "test:installer": "node scripts/run-installer-smoke.mjs",
-    "verify": "npm run lint && npm test && npm run build && npm run test:e2e:electron",
+    "verify": "node scripts/run-verify.mjs",
     "release:verify": "npm run dist && npm run test:installer",
     "preview": "vite preview"
   },

@@ -2,6 +2,7 @@ import type { UiBoundaryCode, UiBoundarySnapshot } from '../types/ipc'
 
 const DEFAULT_BOUNDARY: Record<UiBoundaryCode, Pick<UiBoundarySnapshot, 'scope' | 'retryable' | 'preserved'>> = {
   startup_failed: { scope: 'system', retryable: true, preserved: ['userData'] },
+  startup_degraded: { scope: 'system', retryable: true, preserved: ['userData', 'currentTrack', 'queue'] },
   model_missing: { scope: 'surface', retryable: true, preserved: ['draft', 'currentTrack'] },
   model_invalid: { scope: 'surface', retryable: true, preserved: ['draft', 'currentTrack'] },
   music_empty: { scope: 'surface', retryable: true, preserved: ['draft'] },

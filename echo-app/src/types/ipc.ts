@@ -152,6 +152,7 @@ export const RUNTIME_TASK_RECENT_LIMIT = 50
 
 export type UiBoundaryCode =
   | 'startup_failed'
+  | 'startup_degraded'
   | 'model_missing'
   | 'model_invalid'
   | 'music_empty'

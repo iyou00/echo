@@ -33,7 +33,7 @@ describe('boundary presentation', () => {
 
   it('has copy for every controlled code', () => {
     const codes: UiBoundaryCode[] = [
-      'startup_failed', 'model_missing', 'model_invalid', 'music_empty', 'queue_empty', 'taste_empty',
+      'startup_failed', 'startup_degraded', 'model_missing', 'model_invalid', 'music_empty', 'queue_empty', 'taste_empty',
       'context_empty', 'offline', 'no_playable', 'playback_recovering', 'mic_denied', 'tts_fallback',
       'yinyi_empty', 'yinyi_failed', 'task_failed', 'import_invalid', 'close_busy',
     ]

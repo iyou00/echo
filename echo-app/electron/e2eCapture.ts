@@ -294,6 +294,17 @@ async function captureOffline(target: BrowserWindow): Promise<CaptureMetric[]> {
   return [await capture(target, 'offline.png')]
 }
 
+async function captureStartupDegraded(target: BrowserWindow): Promise<CaptureMetric[]> {
+  await waitForSelector(target, '[data-testid="first-run-skip"]')
+  await click(target, '[data-testid="first-run-skip"]')
+  await waitForSelector(target, '[data-testid="onboarding-skip"]')
+  await click(target, '[data-testid="onboarding-skip"]')
+  await waitForMissing(target, '[data-testid="onboarding-skip"]')
+  await waitForSelector(target, '.boundary-notice')
+  await waitForExpression(target, `document.querySelector('.boundary-notice')?.textContent?.includes('不是空内容') === true`)
+  return [await capture(target, 'startup-degraded.png')]
+}
+
 async function captureBoundaryModelInvalid(target: BrowserWindow): Promise<CaptureMetric[]> {
   await waitForSelector(target, '[data-testid="first-run-skip"]')
   await click(target, '[data-testid="first-run-skip"]')
@@ -348,6 +359,8 @@ export function runElectronE2E(target: BrowserWindow, kind: E2EWindowKind): void
           ? await captureFirstRunSound(target)
           : scenario === 'offline'
             ? await captureOffline(target)
+            : scenario === 'startup-degraded'
+              ? await captureStartupDegraded(target)
             : scenario === 'boundary-model-invalid'
               ? await captureBoundaryModelInvalid(target)
               : await captureRecovery(target)

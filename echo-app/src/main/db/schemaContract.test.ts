@@ -21,6 +21,7 @@ describe('database schema contract', () => {
     expect(migrationsSource).toContain("name: 'backfill_settings_first_used_at'")
     expect(migrationsSource).toContain("name: 'continuous_listening_sessions'")
     expect(migrationsSource).toContain("name: 'continuous_listening_context'")
+    expect(migrationsSource).toContain("name: 'learned_cases_evidence_timestamps'")
     expect(migrationsSource).toContain('CREATE TABLE IF NOT EXISTS listening_sessions')
     expect(migrationsSource).toContain('CREATE TABLE IF NOT EXISTS listening_segments')
     expect(migrationsSource).toContain('consumed_event_keys_json')

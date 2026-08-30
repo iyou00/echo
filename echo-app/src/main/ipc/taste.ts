@@ -9,7 +9,12 @@ import { getLanguageDistribution } from '../db/semantics'
 import { listTasteProfileVersions, restoreTasteProfileVersion } from '../db/taste'
 
 export function registerTasteIpc(): void {
-  ipcMain.handle('taste:getProfile', () => getProfileWithQuestions())
+  ipcMain.handle('taste:getProfile', () => {
+    if (process.env.ECHO_E2E === '1' && process.env.ECHO_E2E_SCENARIO === 'startup-degraded') {
+      throw new Error('forced optional boot failure')
+    }
+    return getProfileWithQuestions()
+  })
   ipcMain.handle('taste:getMemoryAudit', () => getMemoryAudit())
   ipcMain.handle('taste:getProfileVersions', () => listTasteProfileVersions())
   ipcMain.handle('taste:refreshStructuredProfile', () => refreshStructuredProfile('semantic_update'))
